@@ -1,0 +1,10 @@
+.cursor/
+
+node_modules
+.env
+.env.*
+dist
+.next
+coverage
+pnpm-lock.yaml
+Dockerfile*
