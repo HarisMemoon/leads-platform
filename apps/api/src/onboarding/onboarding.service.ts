@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { OnboardingProgress } from '../entities/onboarding-progress.entity';
 import { UpdateOnboardingDto } from './dto/update-onboarding.dto';
 import { WalletService } from '../wallet/wallet.service';
@@ -14,6 +14,7 @@ export class OnboardingService {
     @InjectRepository(OnboardingProgress)
     private repo: Repository<OnboardingProgress>,
     private walletService: WalletService,
+    private dataSource: DataSource,
   ) {}
 
   async get(userId: string) {
@@ -69,6 +70,14 @@ export class OnboardingService {
       await this.applyInitialFundingFromOnboardingData(userId, row);
     }
 
+    const shouldSyncDistributionRule =
+      row.current_step >= 5 ||
+      (row.completed_steps || []).includes(5);
+
+    if (shouldSyncDistributionRule && dto.data) {
+      await this.syncDistributionRuleFromStepFive(userId, row.data || {});
+    }
+
     return this.repo.save(row);
   }
 
@@ -117,5 +126,111 @@ export class OnboardingService {
       initial_funding_applied: true,
       initial_funding_credited_cents: cents,
     };
+  }
+
+  private async syncDistributionRuleFromStepFive(
+    userId: string,
+    formData: Record<string, any>,
+  ) {
+    const autoBuy = Boolean(formData.auto_buy);
+
+    const maxPerDayRaw =
+      typeof formData.max_per_day === 'string'
+        ? Number.parseInt(formData.max_per_day, 10)
+        : typeof formData.max_per_day === 'number'
+          ? Math.floor(formData.max_per_day)
+          : NaN;
+    const maxPerDay = Number.isFinite(maxPerDayRaw) && maxPerDayRaw > 0 ? maxPerDayRaw : 5;
+
+    const minBalanceDollarsRaw =
+      typeof formData.min_balance === 'string'
+        ? Number.parseFloat(formData.min_balance)
+        : typeof formData.min_balance === 'number'
+          ? formData.min_balance
+          : 0;
+    const minBalanceDollars = Number.isFinite(minBalanceDollarsRaw)
+      ? minBalanceDollarsRaw
+      : 0;
+    const minWalletBalanceCents = Math.max(0, Math.floor(minBalanceDollars * 100));
+
+    const monthlyBudgetDollarsRaw =
+      typeof formData.budget === 'string'
+        ? Number.parseFloat(formData.budget)
+        : typeof formData.budget === 'number'
+          ? formData.budget
+          : 0;
+    const monthlyBudgetDollars = Number.isFinite(monthlyBudgetDollarsRaw)
+      ? monthlyBudgetDollarsRaw
+      : 0;
+    const maxSpendPerMonthCents = Math.max(0, Math.floor(monthlyBudgetDollars * 100));
+    const maxSpendPerDayCents = Math.floor(maxSpendPerMonthCents / 30);
+    const maxSpendPerWeekCents = maxSpendPerDayCents * 7;
+
+    const marketFilters = Array.isArray(formData.markets)
+      ? formData.markets.filter((v) => typeof v === 'string')
+      : [];
+    const leadTypeFilters = Array.isArray(formData.lead_types)
+      ? formData.lead_types.filter((v) => typeof v === 'string')
+      : [];
+
+    const market = marketFilters[0] ?? 'default';
+
+    await this.dataSource.query(
+      `
+      INSERT INTO distribution_rules (
+        user_id,
+        participation_enabled,
+        max_per_day,
+        min_wallet_balance_cents,
+        market_filters,
+        lead_type_filters,
+        max_spend_per_day_cents,
+        max_spend_per_week_cents,
+        max_spend_per_month_cents,
+        cooldown_minutes,
+        market,
+        is_active
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5::text[],
+        $6::text[],
+        $7,
+        $8,
+        $9,
+        0,
+        $10,
+        true
+      )
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        participation_enabled = EXCLUDED.participation_enabled,
+        max_per_day = EXCLUDED.max_per_day,
+        min_wallet_balance_cents = EXCLUDED.min_wallet_balance_cents,
+        market_filters = EXCLUDED.market_filters,
+        lead_type_filters = EXCLUDED.lead_type_filters,
+        max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents,
+        max_spend_per_week_cents = EXCLUDED.max_spend_per_week_cents,
+        max_spend_per_month_cents = EXCLUDED.max_spend_per_month_cents,
+        cooldown_minutes = EXCLUDED.cooldown_minutes,
+        market = EXCLUDED.market,
+        is_active = EXCLUDED.is_active
+      `,
+      [
+        userId,
+        autoBuy,
+        maxPerDay,
+        String(minWalletBalanceCents),
+        marketFilters,
+        leadTypeFilters,
+        String(maxSpendPerDayCents),
+        String(maxSpendPerWeekCents),
+        String(maxSpendPerMonthCents),
+        market,
+      ],
+    );
   }
 }

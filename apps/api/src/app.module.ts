@@ -1,12 +1,19 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
+import { ScheduleModule } from '@nestjs/schedule'
 
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
 import { AuthModule } from './auth/auth.module'
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { WalletModule } from './wallet/wallet.module';
+import { LeadsModule } from './leads/leads.module';
+import { AdminModule } from './admin/admin.module';
+import { DistributionModule } from './distribution/distribution.module';
+import { StripeModule } from './stripe/stripe.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { MarketAlertsModule } from './market-alerts/market-alerts.module';
 
 @Module({
   imports: [
@@ -19,6 +26,7 @@ import { WalletModule } from './wallet/wallet.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
 
     /*
     Database connection
@@ -82,6 +90,12 @@ import { WalletModule } from './wallet/wallet.module';
     AuthModule,
     OnboardingModule,
     WalletModule,
+    LeadsModule,
+    AdminModule,
+    DistributionModule,
+    StripeModule,
+    SubscriptionsModule,
+    MarketAlertsModule,
   ],
 
   controllers: [AppController],

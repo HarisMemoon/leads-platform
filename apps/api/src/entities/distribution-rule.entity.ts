@@ -23,9 +23,22 @@ import {
     @ManyToOne(() => User, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'user_id' })
     user!: User
+
+  @Column({ default: false })
+  participation_enabled!: boolean
+
+  @Column({ type: 'int', default: 5 })
+  max_per_day!: number
   
     @Column()
     market!: string
+
+  @Column({
+    type: 'text',
+    array: true,
+    default: () => 'ARRAY[]::text[]'
+  })
+  market_filters!: string[]
   
     @Column({ default: true })
     is_active!: boolean
@@ -73,6 +86,9 @@ import {
       default: () => 'ARRAY[]::text[]'
     })
     lead_type_filters!: string[]
+
+  @Column({ type: 'int', default: 0 })
+  cooldown_minutes!: number
   
     /*
     Rotation algorithm support

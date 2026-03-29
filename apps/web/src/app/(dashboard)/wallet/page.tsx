@@ -2,19 +2,134 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Bot,
+  Check,
+  CheckCircle2,
+  ClipboardList,
+  CreditCard,
+  Gift,
+  Landmark,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Star,
+  Wallet,
+} from "lucide-react";
+import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
 import {
   type WalletTransactionDto,
   getWalletMe,
   getWalletTransactions,
-  postWalletTopup,
+  createStripePaymentIntent,
+  saveStripePaymentMethod,
   centsToNumber,
   dollarsInputToCents,
 } from "@/lib/wallet-api";
 import { queryKeys } from "@/lib/query-keys";
-import Navbar from "@/components/Navbar";
 
 const TOP_UP_AMOUNTS = [50, 100, 250, 500, 1000, 2500];
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "");
+
+function WalletTopupForm({
+  finalAmount,
+  saveCardForAutoReload,
+  onSuccess,
+  onError,
+}: {
+  finalAmount: number;
+  saveCardForAutoReload: boolean;
+  onSuccess: (amountCents: number, paymentMethodId?: string) => Promise<void>;
+  onError: (msg: string | null) => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isPaying, setIsPaying] = useState(false);
+
+  async function handleSubmit() {
+    if (!finalAmount || finalAmount < 10) return;
+    if (!stripe || !elements) {
+      onError("Stripe is not initialized.");
+      return;
+    }
+
+    setIsPaying(true);
+    onError(null);
+    try {
+      const amountCents = dollarsInputToCents(finalAmount);
+      const { clientSecret } = await createStripePaymentIntent(amountCents);
+      const card = elements.getElement(CardElement);
+      if (!card) {
+        throw new Error("Card input is not ready.");
+      }
+
+      const result = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: { card },
+      });
+      if (result.error) {
+        throw new Error(result.error.message || "Payment failed");
+      }
+
+      const pi = result.paymentIntent;
+      let paymentMethodId: string | undefined;
+      if (pi?.payment_method) {
+        paymentMethodId =
+          typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method.id;
+      }
+
+      await onSuccess(amountCents, saveCardForAutoReload ? paymentMethodId : undefined);
+    } catch (e: unknown) {
+      onError(e instanceof Error ? e.message : "Top-up failed");
+    } finally {
+      setIsPaying(false);
+    }
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: 14 }}>
+        <div
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 11,
+            padding: "13px 14px",
+          }}
+        >
+          <CardElement
+            options={{
+              style: {
+                base: {
+                  color: "#ffffff",
+                  fontSize: "15px",
+                  "::placeholder": { color: "rgba(255,255,255,0.35)" },
+                },
+                invalid: { color: "#fca5a5" },
+              },
+            }}
+          />
+        </div>
+      </div>
+
+      <button
+        className="topup-btn"
+        disabled={!finalAmount || finalAmount < 10 || isPaying}
+        onClick={handleSubmit}
+      >
+        {isPaying ? (
+          <><div className="spinner" /> Processing…</>
+        ) : (
+          <>
+            <Plus size={16} strokeWidth={2} aria-hidden />
+            {finalAmount > 0 ? `Add $${finalAmount} to wallet` : "Select an amount"}
+          </>
+        )}
+      </button>
+    </>
+  );
+}
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -30,18 +145,27 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function refIcon(type: string) {
-  const icons: Record<string, string> = {
-    lead_purchase: "📋",
-    stripe_topup: "💳",
-    dev_topup: "💳",
-    onboarding_initial: "🎉",
-    subscription: "⭐",
-    auto_buy: "🤖",
-    admin_credit: "🎁",
-    refund: "↩️",
-  };
-  return icons[type] || "💫";
+function RefTypeIcon({ referenceType }: { referenceType: string }) {
+  const p = { size: 18, strokeWidth: 2, "aria-hidden": true as const };
+  switch (referenceType) {
+    case "lead_purchase":
+      return <ClipboardList {...p} />;
+    case "stripe_topup":
+    case "dev_topup":
+      return <CreditCard {...p} />;
+    case "onboarding_initial":
+      return <Sparkles {...p} />;
+    case "subscription":
+      return <Star {...p} />;
+    case "auto_buy":
+      return <Bot {...p} />;
+    case "admin_credit":
+      return <Gift {...p} />;
+    case "refund":
+      return <RotateCcw {...p} />;
+    default:
+      return <Wallet {...p} />;
+  }
 }
 
 function refLabel(type: string) {
@@ -133,17 +257,6 @@ export default function WalletPage() {
         : "Failed to load wallet"
       : null;
 
-  const topupMutation = useMutation({
-    mutationFn: postWalletTopup,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.wallet.transactions(txQueryOpts),
-      });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
-    },
-  });
-
   const [topupError, setTopupError] = useState<string | null>(null);
 
   const [selectedAmount, setSelectedAmount] = useState<number | null>(null);
@@ -153,6 +266,7 @@ export default function WalletPage() {
   const [reloadThreshold, setReloadThreshold] = useState(100);
   const [reloadAmount, setReloadAmount] = useState(500);
   const [filter, setFilter] = useState<"all" | "credit" | "debit">("all");
+  const [saveCardForAutoReload, setSaveCardForAutoReload] = useState(false);
 
   const balanceCents = wallet?.balance_cents ?? "0";
   const balanceNum = centsToNumber(balanceCents);
@@ -188,21 +302,52 @@ export default function WalletPage() {
     }
   }, [wallet]);
 
-  async function handleTopUp() {
-    if (!finalAmount || finalAmount < 10) return;
-    setTopupError(null);
-    try {
-      await topupMutation.mutateAsync({
-        amount_cents: dollarsInputToCents(finalAmount),
-        description: "Wallet top-up (demo)",
+  async function handleTopupSuccess(amountCents: number, paymentMethodId?: string) {
+    const startingBalance = centsToNumber(balanceCents);
+    const expectedBalance = startingBalance + amountCents;
+
+    // Webhook credit is async; poll briefly so UI updates instantly without page reload.
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const latestWallet = await queryClient.fetchQuery({
+        queryKey: queryKeys.wallet.me,
+        queryFn: getWalletMe,
       });
-      setSuccess(true);
-      setSelectedAmount(null);
-      setCustomAmount("");
-      setTimeout(() => setSuccess(false), 3000);
-    } catch (e: unknown) {
-      setTopupError(e instanceof Error ? e.message : "Top-up failed");
+      const latestTxs = await queryClient.fetchQuery({
+        queryKey: queryKeys.wallet.transactions(txQueryOpts),
+        queryFn: () => getWalletTransactions(txQueryOpts),
+      });
+
+      const hasStripeCredit = latestTxs.some(
+        (tx) => tx.type === "credit" && tx.reference_type === "stripe_topup" && Number(tx.amount_cents) === amountCents,
+      );
+      if (centsToNumber(latestWallet.balance_cents) >= expectedBalance || hasStripeCredit) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
+
+    await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.transactions(txQueryOpts) });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+
+    if (paymentMethodId) {
+      try {
+        await saveStripePaymentMethod(paymentMethodId);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
+      } catch (e: unknown) {
+        setTopupError(
+          e instanceof Error
+            ? `${e.message} (wallet was funded; saving the card failed)`
+            : "Saving card for auto-reload failed",
+        );
+      }
+    }
+
+    setSuccess(true);
+    setSelectedAmount(null);
+    setCustomAmount("");
+    setTimeout(() => setSuccess(false), 3000);
   }
 
   return (
@@ -460,8 +605,10 @@ export default function WalletPage() {
           width: 38px; height: 38px;
           border-radius: 10px;
           display: flex; align-items: center; justify-content: center;
-          font-size: 18px; flex-shrink: 0;
+          flex-shrink: 0;
+          color: rgba(255,255,255,0.75);
         }
+        .tx-icon svg { flex-shrink: 0; }
 
         .tx-icon.credit { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.15); }
         .tx-icon.debit  { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); }
@@ -776,9 +923,7 @@ export default function WalletPage() {
                     </div>
                   </div>
                   <div className="hero-badge">
-                    <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
+                    <CheckCircle2 size={12} strokeWidth={2} aria-hidden />
                     {wallet?.auto_reload_enabled ? "Auto-reload on" : "Auto-reload off"}
                   </div>
                 </div>
@@ -830,7 +975,7 @@ export default function WalletPage() {
                   filteredTxs.map((tx) => (
                     <div key={tx.id} className="tx-item">
                       <div className={`tx-icon ${tx.type}`}>
-                        {refIcon(tx.reference_type)}
+                        <RefTypeIcon referenceType={tx.reference_type} />
                       </div>
                       <div className="tx-info">
                         <div className="tx-desc">{tx.description}</div>
@@ -869,15 +1014,9 @@ export default function WalletPage() {
               <div className="card-header">
                 <div>
                   <div className="card-title">Add funds</div>
-                  <div className="card-sub">Dev top-up (demo) · Stripe checkout coming soon</div>
+                  <div className="card-sub">Stripe card payment</div>
                 </div>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M20 12V22H4V12" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M22 7H2V12H22V7Z" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M12 22V7" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M12 7H7.5C6.83696 7 6.20107 6.73661 5.73223 6.26777C5.26339 5.79893 5 5.16304 5 4.5C5 3.83696 5.26339 3.20107 5.73223 2.73223C6.20107 2.26339 6.83696 2 7.5 2C11 2 12 7 12 7Z" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  <path d="M12 7H16.5C17.163 7 17.7989 6.73661 18.2678 6.26777C18.7366 5.79893 19 5.16304 19 4.5C19 3.83696 18.7366 3.20107 18.2678 2.73223C17.7989 2.26339 17.163 2 16.5 2C13 2 12 7 12 7Z" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                <Landmark size={20} strokeWidth={1.5} style={{ color: "rgba(255,255,255,0.22)" }} aria-hidden />
               </div>
 
               {topupError && (
@@ -887,9 +1026,7 @@ export default function WalletPage() {
               )}
               {success && (
                 <div className="success-banner">
-                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
+                  <Check size={16} strokeWidth={2.5} aria-hidden />
                   Wallet funded successfully!
                 </div>
               )}
@@ -918,6 +1055,36 @@ export default function WalletPage() {
                 />
               </div>
 
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  fontSize: 13,
+                  color: "rgba(255,255,255,0.65)",
+                  marginBottom: 12,
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={saveCardForAutoReload}
+                  onChange={(e) => setSaveCardForAutoReload(e.target.checked)}
+                  style={{ width: 16, height: 16, accentColor: "#6366f1" }}
+                />
+                Save this card for auto-reload (uses Stripe customer + wallet payment method)
+              </label>
+
+              <Elements stripe={stripePromise}>
+                <WalletTopupForm
+                  finalAmount={finalAmount}
+                  saveCardForAutoReload={saveCardForAutoReload}
+                  onSuccess={handleTopupSuccess}
+                  onError={setTopupError}
+                />
+              </Elements>
+
               {finalAmount > 0 && (
                 <div className="topup-summary">
                   <div className="summary-row">
@@ -935,25 +1102,8 @@ export default function WalletPage() {
                 </div>
               )}
 
-              <button
-                className="topup-btn"
-                disabled={!finalAmount || finalAmount < 10 || topupMutation.isPending}
-                onClick={handleTopUp}
-              >
-                {topupMutation.isPending ? (
-                  <><div className="spinner" /> Processing…</>
-                ) : (
-                  <>
-                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    {finalAmount > 0 ? `Add $${finalAmount} to wallet` : "Select an amount"}
-                  </>
-                )}
-              </button>
-
               <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", textAlign: "center", marginTop: 12, lineHeight: 1.5 }}>
-                Dev top-up credits your wallet immediately. Stripe payment UI will replace this flow later.
+                Your card is charged via Stripe, then your wallet is credited after webhook confirmation.
               </p>
             </div>
 

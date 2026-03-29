@@ -56,6 +56,20 @@ import {
   
     @Column({ type: 'bigint' })
     price_cents!: string
+
+    /** Display anchor for markdown ("was" price); set on create / first markdown. */
+    @Column({ type: 'bigint', nullable: true })
+    list_price_anchor_cents!: string | null
+
+    /** premium | standard | value — derived from quality, exclusivity, age. */
+    @Column({ type: 'varchar', nullable: true })
+    marketplace_tier!: string | null
+
+    @Column({ type: 'int', default: 0 })
+    distribution_run_count!: number
+
+    @Column({ type: 'timestamp with time zone', nullable: true })
+    last_distribution_at!: Date | null
   
     @Column()
     title!: string

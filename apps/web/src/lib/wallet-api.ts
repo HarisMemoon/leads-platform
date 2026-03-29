@@ -46,6 +46,23 @@ export function postWalletTopup(body: TopupPayload) {
   return apiPost<WalletAccountDto>("/wallet/me/topup", body);
 }
 
+export function createStripePaymentIntent(amountCents: number) {
+  return apiPost<{ clientSecret: string }>('/stripe/create-payment-intent', {
+    amountCents,
+  });
+}
+
+/**
+ * Persists a Stripe PaymentMethod id server-side: attaches it to the user’s Stripe Customer,
+ * sets it as default for invoices, and stores `stripe_payment_method_id` on the wallet for auto-reload.
+ * Obtain `paymentMethodId` from Stripe.js after a successful card payment, or via `stripe.createPaymentMethod`.
+ */
+export function saveStripePaymentMethod(paymentMethodId: string) {
+  return apiPost<{ success: boolean }>("/stripe/save-payment-method", {
+    paymentMethodId,
+  });
+}
+
 /** bigint from API is JSON-serialized as string */
 export function centsToNumber(cents: string | number): number {
   return typeof cents === "string" ? Number(cents) : cents;

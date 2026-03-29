@@ -1,17 +1,20 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import RequireAuth from "@/components/RequireAuth";
-import Link from "next/link";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  const hideNavbar =
+    pathname === "/onboarding" || pathname.startsWith("/onboarding/");
+
   return (
     <RequireAuth>
-        
         {/* Sidebar */}
         {/* <aside style={{ width: 200, borderRight: "1px solid #ccc", padding: 16 }}>
           <h3>Dashboard</h3>
@@ -23,27 +26,17 @@ export default function DashboardLayout({
           </nav>
         </aside> */}
 
-        {/* Single scroll area: navbar fixed height, content scrolls only when needed */}
+        {/* Navbar is sticky + floating (see Navbar.tsx); content scrolls with the document. */}
         <main
           style={{
             display: "flex",
             flexDirection: "column",
-            height: "100vh",
-            minHeight: 0,
-            overflow: "hidden",
+            minHeight: "100vh",
+            background: "#080a0f",
           }}
         >
-          <Navbar />
-          <div
-            style={{
-              flex: 1,
-              minHeight: 0,
-              overflowY: "auto",
-              overflowX: "hidden",
-            }}
-          >
-            {children}
-          </div>
+          {!hideNavbar && <Navbar />}
+          {children}
         </main>
     </RequireAuth>
   );

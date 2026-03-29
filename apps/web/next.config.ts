@@ -2,20 +2,14 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   async rewrites() {
-    const base = process.env.NEXT_PUBLIC_API_URL;
+    // Required for browser calls to /api/* → Nest. If unset, dev breaks with `undefined/subscriptions/...`.
+    const base = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000").replace(/\/$/, "");
 
     return [
+      // Proxy all /api/* calls from Next app to Nest API.
       {
-        source: "/api/auth/:path*",
-        destination: `${base}/auth/:path*`,
-      },
-      {
-        source: "/api/onboarding/:path*",
-        destination: `${base}/onboarding/:path*`,
-      },
-      {
-        source: "/api/wallet/:path*",
-        destination: `${base}/wallet/:path*`,
+        source: "/api/:path*",
+        destination: `${base}/:path*`,
       },
     ];
   },

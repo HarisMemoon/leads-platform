@@ -68,6 +68,9 @@ import {
   
     @Column({ type: 'varchar',nullable: true })
     disposition!: string | null
+
+    @Column({ type: 'varchar', nullable: true })
+    lifecycle_phase!: string | null
   
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at!: Date

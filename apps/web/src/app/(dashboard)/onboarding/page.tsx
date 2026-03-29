@@ -1,14 +1,44 @@
 "use client";
 
+import type { ComponentType } from "react";
 import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  BarChart3,
+  BookOpen,
+  Bot,
+  Check,
+  CircleHelp,
+  CreditCard,
+  Handshake,
+  Home,
+  Link2,
+  Map,
+  MapPin,
+  MessageCircle,
+  Package,
+  PartyPopper,
+  RefreshCw,
+  Settings,
+  ShoppingBag,
+  Star,
+  Target,
+  Video,
+  Wallet,
+  Zap,
+} from "lucide-react";
 import {
   getOnboardingMe,
   patchOnboardingMe,
   type UpdateOnboardingPayload,
 } from "@/lib/onboarding-api";
 import { queryKeys } from "@/lib/query-keys";
+import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
+import { createStripePaymentIntent } from "@/lib/wallet-api";
+
+type ObIcon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
 
 const TOTAL_STEPS = 9;
 
@@ -35,17 +65,201 @@ const BUDGETS = [
   { label: "$5,000+/mo", value: "5000+" },
 ];
 
-const STEP_META = [
-  { icon: "👋", title: "Welcome to Newleey", sub: "Let's get your account set up in under 3 minutes." },
-  { icon: "⚡", title: "How lead buying works", sub: "Understand the platform before you spend a dollar." },
-  { icon: "📦", title: "Choose your model", sub: "Subscribe for steady flow or buy leads individually." },
-  { icon: "💳", title: "Fund your wallet", sub: "Add credits to start buying instantly." },
-  { icon: "🤖", title: "Auto-buy settings", sub: "Let the platform buy leads automatically for you." },
-  { icon: "📍", title: "Markets & filters", sub: "Tell us which markets you want leads from." },
-  { icon: "🔗", title: "Connect your CRM", sub: "Push leads directly into your workflow." },
-  { icon: "📚", title: "Resources & guides", sub: "Everything you need to hit the ground running." },
-  { icon: "🎉", title: "You're all set!", sub: "Your account is configured and ready to go." },
+const WALLET_FUND_AMOUNTS = [250, 500, 1000, 2500];
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "");
+
+const STEP_META: ReadonlyArray<{ Icon: ObIcon; title: string; sub: string }> = [
+  { Icon: Handshake, title: "Welcome to Newleey", sub: "Let's get your account set up in under 3 minutes." },
+  { Icon: Zap, title: "How lead buying works", sub: "Understand the platform before you spend a dollar." },
+  { Icon: Package, title: "Choose your model", sub: "Subscribe for steady flow or buy leads individually." },
+  { Icon: CreditCard, title: "Fund your wallet", sub: "Add credits to start buying instantly." },
+  { Icon: Bot, title: "Auto-buy settings", sub: "Let the platform buy leads automatically for you." },
+  { Icon: MapPin, title: "Markets & filters", sub: "Tell us which markets you want leads from." },
+  { Icon: Link2, title: "Connect your CRM", sub: "Push leads directly into your workflow." },
+  { Icon: BookOpen, title: "Resources & guides", sub: "Everything you need to hit the ground running." },
+  { Icon: PartyPopper, title: "You're all set!", sub: "Your account is configured and ready to go." },
 ];
+
+// ── Stripe wallet-funding form used inside step 4 ────────────────────────────
+// Must be rendered inside <Elements> so it can call useStripe / useElements.
+function WalletFundForm({
+  onSuccess,
+  onSkip,
+  isSaving,
+}: {
+  onSuccess: () => void;
+  onSkip: () => void;
+  isSaving: boolean;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [amount, setAmount] = useState(500);
+  const [isPaying, setIsPaying] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+  const [skipConfirm, setSkipConfirm] = useState(false);
+
+  async function handlePay() {
+    if (!stripe || !elements) {
+      setPayError("Stripe is not ready — please refresh and try again.");
+      return;
+    }
+    setIsPaying(true);
+    setPayError(null);
+    try {
+      const amountCents = amount * 100;
+      const { clientSecret } = await createStripePaymentIntent(amountCents);
+      const card = elements.getElement(CardElement);
+      if (!card) throw new Error("Card element is not mounted.");
+      const result = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: { card },
+      });
+      if (result.error) throw new Error(result.error.message ?? "Payment failed");
+      onSuccess();
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : "Payment failed — please try again.");
+    } finally {
+      setIsPaying(false);
+    }
+  }
+
+  if (skipConfirm) {
+    return (
+      <div
+        style={{
+          background: "rgba(234,179,8,0.07)",
+          border: "1px solid rgba(234,179,8,0.25)",
+          borderRadius: 14,
+          padding: "22px 24px",
+        }}
+      >
+        <p
+          style={{
+            fontSize: 14,
+            color: "rgba(255,255,255,0.75)",
+            lineHeight: 1.65,
+            marginBottom: 22,
+          }}
+        >
+          ⚠️ Without wallet funds, <strong style={{ color: "#fde047" }}>auto-buy won&apos;t work</strong> and
+          you won&apos;t be able to purchase leads until you add funds. You can top up any time from the
+          Wallet page.
+        </p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn-back"
+            style={{ flex: 1 }}
+            onClick={() => setSkipConfirm(false)}
+          >
+            ← Add funds now
+          </button>
+          <button
+            type="button"
+            className="btn-next"
+            style={{ flex: 1, justifyContent: "center", opacity: isSaving ? 0.5 : 1 }}
+            disabled={isSaving}
+            onClick={onSkip}
+          >
+            {isSaving ? <><span className="spinner" /> Saving…</> : "Continue without funds →"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Amount picker */}
+      <div className="amount-grid" style={{ marginBottom: 18 }}>
+        {WALLET_FUND_AMOUNTS.map((a) => (
+          <button
+            key={a}
+            type="button"
+            className={`amount-btn ${amount === a ? "selected" : ""}`}
+            onClick={() => setAmount(a)}
+          >
+            ${a}
+          </button>
+        ))}
+      </div>
+
+      {/* Stripe card element */}
+      <div
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 11,
+          padding: "14px 16px",
+          marginBottom: 14,
+        }}
+      >
+        <CardElement
+          options={{
+            style: {
+              base: {
+                color: "#ffffff",
+                fontSize: "15px",
+                fontFamily: "'DM Sans', sans-serif",
+                "::placeholder": { color: "rgba(255,255,255,0.3)" },
+              },
+              invalid: { color: "#fca5a5" },
+            },
+          }}
+        />
+      </div>
+
+      {payError && (
+        <div
+          style={{
+            background: "rgba(239,68,68,0.1)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            borderRadius: 10,
+            padding: "10px 14px",
+            fontSize: 13,
+            color: "#fca5a5",
+            marginBottom: 14,
+          }}
+        >
+          {payError}
+        </div>
+      )}
+
+      {/* Primary CTA */}
+      <button
+        type="button"
+        className="btn-next"
+        style={{ width: "100%", justifyContent: "center", marginBottom: 14 }}
+        disabled={isPaying || isSaving}
+        onClick={() => void handlePay()}
+      >
+        {isPaying ? (
+          <><span className="spinner" /> Processing…</>
+        ) : (
+          <>Add ${amount} to wallet &amp; continue →</>
+        )}
+      </button>
+
+      {/* Skip link */}
+      <div style={{ textAlign: "center" }}>
+        <button
+          type="button"
+          onClick={() => setSkipConfirm(true)}
+          style={{
+            background: "none",
+            border: "none",
+            color: "rgba(255,255,255,0.3)",
+            fontSize: 13,
+            cursor: "pointer",
+            textDecoration: "underline",
+            fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          I&apos;ll fund my wallet later
+        </button>
+      </div>
+    </>
+  );
+}
 
 function OnboardingPageContent() {
   const router = useRouter();
@@ -517,15 +731,21 @@ function OnboardingPageContent() {
 
 
 
-.step-emoji {
+.step-icon-wrap {
 
-  font-size: 44px;
+  display: flex;
+
+  align-items: center;
+
+  justify-content: center;
 
   margin-bottom: 20px;
 
-  display: block;
+  color: rgba(255,255,255,0.92);
 
 }
+
+.step-icon-wrap svg { width: 44px; height: 44px; }
 
 
 
@@ -637,7 +857,8 @@ function OnboardingPageContent() {
 
 
 
-.how-icon { font-size: 24px; margin-bottom: 10px; }
+.how-icon { display: flex; align-items: center; justify-content: center; margin-bottom: 10px; color: rgba(255,255,255,0.88); }
+.how-icon svg { width: 24px; height: 24px; }
 
 .how-title { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 6px; }
 
@@ -901,7 +1122,8 @@ input[type=range]::-webkit-slider-thumb {
 
 .resource-card:hover { border-color: rgba(99,102,241,0.4); }
 
-.resource-icon { font-size: 22px; margin-bottom: 8px; }
+.resource-icon { display: flex; align-items: center; justify-content: center; margin-bottom: 8px; color: rgba(255,255,255,0.85); }
+.resource-icon svg { width: 22px; height: 22px; }
 
 .resource-title { font-size: 14px; font-weight: 500; color: #fff; margin-bottom: 4px; }
 
@@ -925,15 +1147,37 @@ input[type=range]::-webkit-slider-thumb {
 
   margin: 0 auto 28px;
 
-  font-size: 36px;
+  color: #fff;
 
 }
+.success-icon svg { width: 40px; height: 40px; }
 
 
 
 .checklist { text-align: left; margin: 28px 0 36px; display: flex; flex-direction: column; gap: 10px; }
 
+::-webkit-scrollbar {
+  width: 6px; /* Slim width */
+}
 
+::-webkit-scrollbar-track {
+  background: #080a0f; /* Match your background */
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1a1d26; /* Dark grey/black thumb */
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #252936; /* Slightly lighter on hover */
+}
+
+/* For Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #1a1d26 #080a0f;
+}
 
 .check-item {
 
@@ -1114,9 +1358,7 @@ input[type=range]::-webkit-slider-thumb {
         <div className="modal-overlay" onClick={() => setInfoModal({ ...infoModal, open: false })}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="brand-icon" style={{ marginBottom: 20 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="white" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              <CircleHelp size={18} strokeWidth={2} color="#fff" aria-hidden />
             </div>
             <h3 className="step-title" style={{ fontSize: 24, marginBottom: 12 }}>{infoModal.title}</h3>
             <p className="step-sub" style={{ marginBottom: 32, lineHeight: 1.6 }}>{infoModal.content}</p>
@@ -1172,9 +1414,7 @@ input[type=range]::-webkit-slider-thumb {
         <aside className="sidebar">
           <div className="brand">
             <div className="brand-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="white" />
-              </svg>
+              <Zap size={16} strokeWidth={2} style={{ color: "#fff" }} aria-hidden />
             </div>
             <span className="brand-name">Newleey</span>
           </div>
@@ -1187,9 +1427,7 @@ input[type=range]::-webkit-slider-thumb {
                 <div key={n} className={`step-item ${state}`}>
                   <div className={`step-num ${state}`}>
                     {state === "done" ? (
-                      <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
+                      <Check size={12} strokeWidth={3} aria-hidden />
                     ) : n}
                   </div>
                   <span className="step-label">{s.title}</span>
@@ -1207,41 +1445,55 @@ input[type=range]::-webkit-slider-thumb {
 
           <div className="content-area">
             <div className="step-card" key={step}>
-              <span className="step-emoji">{STEP_META[step - 1].icon}</span>
-              <h2 className="step-title">{STEP_META[step - 1].title}</h2>
-              <p className="step-sub">{STEP_META[step - 1].sub}</p>
+              {(() => {
+                const m = STEP_META[step - 1];
+                const Hi = m.Icon;
+                return (
+                  <>
+                    <span className="step-icon-wrap">
+                      <Hi size={44} strokeWidth={1.5} />
+                    </span>
+                    <h2 className="step-title">{m.title}</h2>
+                    <p className="step-sub">{m.sub}</p>
+                  </>
+                );
+              })()}
 
               {/* Step 1 - Welcome */}
               {step === 1 && (
                 <div className="how-grid">
                   {[
-                    { icon: "💰", t: "Fund your wallet", d: "Add credits via Stripe. Use them to buy leads on demand or let auto-buy do it." },
-                    { icon: "📋", t: "Browse the marketplace", d: "Filter by market, type, price, and freshness. Buy instantly." },
-                    { icon: "🔄", t: "Automated distribution", d: "Opt into round-robin delivery. Leads hit your CRM automatically." },
-                    { icon: "📊", t: "Track everything", d: "Full history of leads, calls, CRM syncs, and spend from one dashboard." },
-                  ].map((c) => (
+                    { Icon: Wallet, t: "Fund your wallet", d: "Add credits via Stripe. Use them to buy leads on demand or let auto-buy do it." },
+                    { Icon: ShoppingBag, t: "Browse the marketplace", d: "Filter by market, type, price, and freshness. Buy instantly." },
+                    { Icon: RefreshCw, t: "Automated distribution", d: "Opt into round-robin delivery. Leads hit your CRM automatically." },
+                    { Icon: BarChart3, t: "Track everything", d: "Full history of leads, calls, CRM syncs, and spend from one dashboard." },
+                  ].map((c) => {
+                    const I = c.Icon;
+                    return (
                     <div key={c.t} className="how-card">
-                      <div className="how-icon">{c.icon}</div>
+                      <div className="how-icon"><I size={24} strokeWidth={2} /></div>
                       <div className="how-title">{c.t}</div>
                       <div className="how-desc">{c.d}</div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
 {step === 2 && (
   <div className="how-grid">
     {[
-      { icon: "🏠", t: "Fresh leads", d: "Newly sourced, high intent.", info: "Fresh leads are delivered within 60 seconds of capture to ensure maximum conversion[cite: 120]." },
-      { icon: "⭐", t: "Premium leads", d: "Recently qualified.", info: "Premium leads undergo secondary verification for phone and interest validity[cite: 138]." },
-      { icon: "📦", t: "Aged leads", d: "Older inventory.", info: "Aged leads (30-90 days) are discounted for volume-based outreach[cite: 122]." },
-      { icon: "🎯", t: "Exclusive leads", d: "Yours alone.", info: "Exclusive leads are removed from the marketplace and never shared[cite: 135]." },
-    ].map((c) => (
+      { Icon: Home, t: "Fresh leads", d: "Newly sourced, high intent.", info: "Fresh leads are delivered within 60 seconds of capture to ensure maximum conversion[cite: 120]." },
+      { Icon: Star, t: "Premium leads", d: "Recently qualified.", info: "Premium leads undergo secondary verification for phone and interest validity[cite: 138]." },
+      { Icon: Package, t: "Aged leads", d: "Older inventory.", info: "Aged leads (30-90 days) are discounted for volume-based outreach[cite: 122]." },
+      { Icon: Target, t: "Exclusive leads", d: "Yours alone.", info: "Exclusive leads are removed from the marketplace and never shared[cite: 135]." },
+    ].map((c) => {
+      const I = c.Icon;
+      return (
       <div key={c.t} className="how-card">
-        <div className="how-icon">{c.icon}</div>
+        <div className="how-icon"><I size={24} strokeWidth={2} /></div>
         <div className="how-title">{c.t}</div>
         <div className="how-desc">{c.d}</div>
-        {/* The Fix: Call setInfoModal here */}
         <button 
           className="btn-info" 
           onClick={() => setInfoModal({ open: true, title: c.t, content: c.info })}
@@ -1249,7 +1501,8 @@ input[type=range]::-webkit-slider-thumb {
           Learn more
         </button>
       </div>
-    ))}
+      );
+    })}
   </div>
 )}
 
@@ -1275,31 +1528,15 @@ input[type=range]::-webkit-slider-thumb {
                 </div>
               )}
 
-              {/* Step 4 - Wallet */}
+              {/* Step 4 - Wallet (real Stripe payment) */}
               {step === 4 && (
-                <>
-                  <div className="wallet-display">
-                    <div className="wallet-label">Wallet Balance</div>
-                    <div className="wallet-balance">
-                      <span className="wallet-currency">$</span>
-                      {data.wallet_amount || "0"}
-                    </div>
-                  </div>
-                  <div className="amount-grid">
-                    {["250", "500", "1000", "2500"].map((a) => (
-                      <button
-                        key={a}
-                        className={`amount-btn ${data.wallet_amount === a ? "selected" : ""}`}
-                        onClick={() => setData((d) => ({ ...d, wallet_amount: a }))}
-                      >
-                        ${a}
-                      </button>
-                    ))}
-                  </div>
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", marginBottom: 28 }}>
-                    This amount is credited to your wallet when you finish onboarding (final step). For additional top-ups, use the Wallet page.
-                  </p>
-                </>
+                <Elements stripe={stripePromise}>
+                  <WalletFundForm
+                    onSuccess={() => void saveStep(5)}
+                    onSkip={() => void saveStep(5)}
+                    isSaving={saveMutation.isPending}
+                  />
+                </Elements>
               )}
 
               {/* Step 5 - Auto-buy */}
@@ -1377,8 +1614,9 @@ input[type=range]::-webkit-slider-thumb {
                   </div>
                   {data.crm === "GoHighLevel" && (
                     <div style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 12, padding: "16px 18px", marginBottom: 20 }}>
-                      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", lineHeight: 1.6 }}>
-                        ✓ GoHighLevel integration is supported. After setup, leads will be pushed to your GHL subaccount automatically with tags and workflows triggered.
+                      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", lineHeight: 1.6, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                        <Check size={16} strokeWidth={2.5} style={{ color: "#10b981", flexShrink: 0, marginTop: 2 }} aria-hidden />
+                        <span>GoHighLevel integration is supported. After setup, leads will be pushed to your GHL subaccount automatically with tags and workflows triggered.</span>
                       </p>
                     </div>
                   )}
@@ -1392,26 +1630,31 @@ input[type=range]::-webkit-slider-thumb {
               {step === 8 && (
                 <div className="resource-grid">
                   {[
-                    { icon: "🎥", t: "Platform walkthrough", d: "5-min video covering every feature" },
-                    { icon: "📖", t: "GHL integration guide", d: "Step-by-step CRM connection" },
-                    { icon: "⚙️", t: "Auto-buy setup guide", d: "Configure caps and rotation rules" },
-                    { icon: "💬", t: "Live support chat", d: "Talk to our team directly" },
-                    { icon: "🗺️", t: "Market coverage map", d: "See all available markets" },
-                    { icon: "❓", t: "FAQ", d: "Most common questions answered" },
-                  ].map((r) => (
+                    { Icon: Video, t: "Platform walkthrough", d: "5-min video covering every feature" },
+                    { Icon: BookOpen, t: "GHL integration guide", d: "Step-by-step CRM connection" },
+                    { Icon: Settings, t: "Auto-buy setup guide", d: "Configure caps and rotation rules" },
+                    { Icon: MessageCircle, t: "Live support chat", d: "Talk to our team directly" },
+                    { Icon: Map, t: "Market coverage map", d: "See all available markets" },
+                    { Icon: CircleHelp, t: "FAQ", d: "Most common questions answered" },
+                  ].map((r) => {
+                    const I = r.Icon;
+                    return (
                     <div key={r.t} className="resource-card">
-                      <div className="resource-icon">{r.icon}</div>
+                      <div className="resource-icon"><I size={22} strokeWidth={2} /></div>
                       <div className="resource-title">{r.t}</div>
                       <div className="resource-desc">{r.d}</div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
               {/* Step 9 - Done */}
               {step === 9 && (
                 <div className="success-wrap">
-                  <div className="success-icon">🎉</div>
+                  <div className="success-icon">
+                    <PartyPopper size={40} strokeWidth={1.5} aria-hidden />
+                  </div>
                   <p style={{ fontSize: 16, color: "rgba(255,255,255,0.55)", marginBottom: 8 }}>
                     Your account is configured. Here's what's ready:
                   </p>
@@ -1423,9 +1666,7 @@ input[type=range]::-webkit-slider-thumb {
                       `CRM: ${data.crm || "Not set — configure later"}`,
                     ].map((item) => (
                       <div key={item} className="check-item">
-                        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#10b981">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                        </svg>
+                        <Check size={16} strokeWidth={2.5} style={{ color: "#10b981", flexShrink: 0 }} aria-hidden />
                         <span>{item}</span>
                       </div>
                     ))}
@@ -1450,9 +1691,12 @@ input[type=range]::-webkit-slider-thumb {
               >
                 Skip for now
               </button>
-              <button type="button" className="btn-next" disabled={saveMutation.isPending} onClick={() => saveStep(step + 1)}>
-                {saveMutation.isPending ? <><span className="spinner" /> Saving…</> : step === TOTAL_STEPS ? "Enter dashboard →" : "Continue →"}
-              </button>
+              {/* Step 4 drives its own navigation via WalletFundForm — no global Continue button */}
+              {step !== 4 && (
+                <button type="button" className="btn-next" disabled={saveMutation.isPending} onClick={() => saveStep(step + 1)}>
+                  {saveMutation.isPending ? <><span className="spinner" /> Saving…</> : step === TOTAL_STEPS ? "Enter dashboard →" : "Continue →"}
+                </button>
+              )}
             </div>
           </div>
         </main>

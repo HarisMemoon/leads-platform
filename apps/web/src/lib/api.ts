@@ -5,6 +5,16 @@ type ApiErrorBody = {
   error?: string;
 };
 
+/** Error subclass that also carries the HTTP status code, enabling callers to branch on 400 vs 409 etc. */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 function toApiPath(path: string): string {
   if (path.startsWith("/api/")) return path;
   if (path === "/api") return path;
@@ -31,7 +41,7 @@ async function parseErrorBody(response: Response): Promise<string> {
 }
 
 async function apiRequest<T>(
-  method: "GET" | "POST" |  "PATCH",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
   token?: string | null,
@@ -50,7 +60,7 @@ async function apiRequest<T>(
 
   if (!response.ok) {
     const message = await parseErrorBody(response);
-    throw new Error(`API ${method} ${path} failed: ${message}`);
+    throw new ApiError(message, response.status);
   }
 
   const contentType = response.headers.get("content-type") ?? "";
@@ -80,4 +90,8 @@ export function apiPatch<T>(
   token?: string | null,
 ): Promise<T> {
   return apiRequest<T>("PATCH", path, body, token);
+}
+
+export function apiDelete<T>(path: string, token?: string | null): Promise<T> {
+  return apiRequest<T>("DELETE", path, undefined, token);
 }

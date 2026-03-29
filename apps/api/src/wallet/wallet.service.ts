@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { WalletAccount } from '../entities/wallet-account.entity';
@@ -72,6 +72,15 @@ export class WalletService {
     });
   }
 
+  async topUp(
+    userId: string,
+    amountCents: number,
+    description?: string,
+    referenceType = 'dev_topup',
+  ) {
+    return this.topup(userId, amountCents, description, referenceType);
+  }
+
   /*
   TRANSACTIONS LIST
   */
@@ -89,5 +98,101 @@ export class WalletService {
       take: limit,
       skip: offset
     });
+  }
+
+  async debitWallet(
+    userId: string,
+    amountCents: number,
+    referenceType: string,
+    referenceId: string,
+    description: string,
+  ): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const wallet = await queryRunner.manager.findOne(WalletAccount, {
+        where: { user: { id: userId } },
+      });
+
+      if (!wallet) throw new NotFoundException('Wallet not found');
+
+      const currentBalance = BigInt(wallet.balance_cents);
+      const debitAmount = BigInt(amountCents);
+
+      if (currentBalance < debitAmount) {
+        throw new BadRequestException('Insufficient wallet balance');
+      }
+
+      const nextBalance = currentBalance - debitAmount;
+      wallet.balance_cents = nextBalance.toString();
+      await queryRunner.manager.save(wallet);
+
+      await queryRunner.manager.save(
+        queryRunner.manager.create(WalletTransaction, {
+          wallet,
+          type: WalletTransactionType.DEBIT,
+          amount_cents: debitAmount.toString(),
+          balance_after_cents: nextBalance.toString(),
+          reference_type: referenceType,
+          reference_id: referenceId,
+          description,
+        }),
+      );
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async adminCreditWallet(
+    userId: string,
+    amountCents: number,
+    description: string,
+  ): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const wallet = await queryRunner.manager.findOne(WalletAccount, {
+        where: { user: { id: userId } },
+      });
+
+      if (!wallet) throw new NotFoundException('Wallet not found');
+
+      const currentBalance = BigInt(wallet.balance_cents);
+      const creditAmount = BigInt(amountCents);
+      const nextBalance = currentBalance + creditAmount;
+
+      wallet.balance_cents = nextBalance.toString();
+      await queryRunner.manager.save(wallet);
+
+      await queryRunner.manager.save(
+        queryRunner.manager.create(WalletTransaction, {
+          wallet,
+          type: WalletTransactionType.CREDIT,
+          amount_cents: creditAmount.toString(),
+          balance_after_cents: nextBalance.toString(),
+          reference_type: 'admin_credit',
+          reference_id: null,
+          description,
+        }),
+      );
+
+      await queryRunner.commitTransaction();
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 }

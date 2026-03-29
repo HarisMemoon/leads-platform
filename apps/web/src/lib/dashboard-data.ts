@@ -7,22 +7,31 @@ import {
   type WalletAccountDto,
   type WalletTransactionDto,
 } from "@/lib/wallet-api";
+import { getMyLeads, type MyLeadsResponse } from "@/lib/leads-api";
+import { getMySubscription, type SubscriptionDto } from "@/lib/subscriptions-api";
 
 export type DashboardSummary = {
   me: Awaited<ReturnType<typeof getAuthMe>>;
   wallet: WalletAccountDto;
   onboarding: OnboardingProgressDto | null;
   txs: WalletTransactionDto[];
+  subscription: SubscriptionDto | null;
+  recentLeads: MyLeadsResponse;
 };
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
-  const [me, wallet, onboarding, txs] = await Promise.all([
+  const [me, wallet, onboarding, txs, subscription, recentLeads] = await Promise.all([
     getAuthMe(),
     getWalletMe(),
     getOnboardingMe().catch(() => null),
     getWalletTransactions({ limit: 100, offset: 0 }),
+    getMySubscription().catch(() => null),
+    getMyLeads({ page: 1, limit: 8 }).catch(() => ({
+      items: [],
+      pagination: { page: 1, limit: 8, total: 0 },
+    })),
   ]);
-  return { me, wallet, onboarding, txs };
+  return { me, wallet, onboarding, txs, subscription, recentLeads };
 }
 
 function startOfMonth(d: Date): Date {
@@ -91,29 +100,39 @@ export function last7DayLabels(): string[] {
   return labels;
 }
 
+/** Lucide icon category for the dashboard activity feed */
+export type ActivityFeedIconKind =
+  | "wallet_credit"
+  | "lead_purchase"
+  | "auto_buy"
+  | "subscription"
+  | "debit_default";
+
 export function activityFromTransactions(txs: WalletTransactionDto[]): Array<{
   id: string;
-  icon: string;
+  activityIcon: ActivityFeedIconKind;
   msg: string;
   time: string;
 }> {
   const sorted = [...txs].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
-  const iconFor = (t: WalletTransactionDto) => {
-    if (t.type === "credit") return "💳";
-    const m: Record<string, string> = {
-      lead_purchase: "📋",
-      auto_buy: "🤖",
-      dev_topup: "💳",
-      stripe_topup: "💳",
-      subscription: "⭐",
+  const iconFor = (t: WalletTransactionDto): ActivityFeedIconKind => {
+    if (t.type === "credit") {
+      return "wallet_credit";
+    }
+    const m: Record<string, ActivityFeedIconKind> = {
+      lead_purchase: "lead_purchase",
+      auto_buy: "auto_buy",
+      dev_topup: "wallet_credit",
+      stripe_topup: "wallet_credit",
+      subscription: "subscription",
     };
-    return m[t.reference_type] || "💫";
+    return m[t.reference_type] ?? "debit_default";
   };
   return sorted.slice(0, 10).map((t) => ({
     id: t.id,
-    icon: iconFor(t),
+    activityIcon: iconFor(t),
     msg: t.description?.trim()
       ? t.description
       : `${t.type === "credit" ? "Credit" : "Debit"} · ${t.reference_type.replace(/_/g, " ")}`,

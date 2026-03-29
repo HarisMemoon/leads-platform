@@ -9,6 +9,9 @@ dist
 coverage
 debug*.log
 *.log
+*.tsbuildinfo
+# Monorepo uses root pnpm-lock.yaml only
+apps/web/pnpm-lock.yaml
 
 # Allow committed env templates (do not commit real secrets)
 !.env.example

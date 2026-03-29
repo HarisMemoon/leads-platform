@@ -1,20 +1,63 @@
 "use client";
 
 import Link from "next/link";
+import type { ComponentType } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowDownLeft,
+  Bot,
+  Check,
+  CircleDollarSign,
+  ClipboardList,
+  CreditCard,
+  LayoutDashboard,
+  Link2,
+  Plug,
+  Plus,
+  Receipt,
+  RefreshCw,
+  Settings,
+  ShoppingBag,
+  Sparkles,
+  Wallet,
+  Zap,
+} from "lucide-react";
 import { centsToNumber } from "@/lib/wallet-api";
 import { patchOnboardingMe } from "@/lib/onboarding-api";
+import type { ActivityFeedIconKind } from "@/lib/dashboard-data";
 import {
   activityFromTransactions,
   debitSpendThisMonthDollars,
   fetchDashboardSummary,
-  greetingName,
   last7DayLabels,
   leadPurchaseCountThisMonth,
   weeklyTxCounts,
 } from "@/lib/dashboard-data";
 import { queryKeys } from "@/lib/query-keys";
-import Navbar from "@/components/Navbar";
+
+/** Lucide stroke icons accept these props */
+type IconComponent = ComponentType<{
+  size?: number;
+  strokeWidth?: number;
+  className?: string;
+  "aria-hidden"?: boolean | "true";
+}>;
+
+function ActivityFeedIcon({ kind }: { kind: ActivityFeedIconKind }) {
+  const p = { size: 14, strokeWidth: 2, "aria-hidden": true as const };
+  switch (kind) {
+    case "wallet_credit":
+      return <CreditCard {...p} />;
+    case "lead_purchase":
+      return <ClipboardList {...p} />;
+    case "auto_buy":
+      return <Bot {...p} />;
+    case "subscription":
+      return <Sparkles {...p} />;
+    default:
+      return <ArrowDownLeft {...p} />;
+  }
+}
 // ─── Mini Bar Chart ───────────────────────────────────────────────────────────
 function MiniBarChart({ data, days }: { data: number[]; days: string[] }) {
   const max = Math.max(...data, 1);
@@ -85,10 +128,13 @@ export default function DashboardPage() {
   const wallet = data?.wallet;
   const onboarding = data?.onboarding;
   const txs = data?.txs ?? [];
+  const subscription = data?.subscription;
+  const recentLeads = data?.recentLeads?.items ?? [];
 
   const walletBalance = wallet ? centsToNumber(wallet.balance_cents) : 0;
-  const leadsThisMonth = leadPurchaseCountThisMonth(txs);
-  const leadsLimit = 50;
+  const leadsThisMonth =
+    subscription?.leads_used_this_period ?? leadPurchaseCountThisMonth(txs);
+  const leadsLimit = subscription?.monthly_lead_limit ?? 50;
   const spendThisMonthDollars = debitSpendThisMonthDollars(txs);
   const spendLimit = 3000;
 
@@ -258,8 +304,8 @@ export default function DashboardPage() {
           flex-direction: column;
           gap: 4px;
           position: sticky;
-          top: 64px;
-          height: calc(100vh - 64px);
+          top: 88px;
+          height: calc(100vh - 88px);
           overflow-y: auto;
         }
 
@@ -389,9 +435,10 @@ export default function DashboardPage() {
           width: 36px; height: 36px;
           border-radius: 9px;
           display: flex; align-items: center; justify-content: center;
-          font-size: 17px;
           margin-bottom: 14px;
+          color: rgba(255,255,255,0.88);
         }
+        .stat-icon svg { flex-shrink: 0; }
 
         .stat-value {
           font-family: 'Syne', sans-serif;
@@ -547,8 +594,10 @@ export default function DashboardPage() {
         .integ-icon {
           width: 32px; height: 32px; border-radius: 8px;
           display: flex; align-items: center; justify-content: center;
-          font-size: 16px; flex-shrink: 0;
+          flex-shrink: 0;
+          color: rgba(255,255,255,0.75);
         }
+        .integ-icon svg { flex-shrink: 0; }
 
         .integ-info { flex: 1; }
         .integ-name { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.8); }
@@ -609,8 +658,8 @@ export default function DashboardPage() {
           flex-direction: column;
           gap: 20px;
           position: sticky;
-          top: 64px;
-          height: calc(100vh - 64px);
+          top: 88px;
+          height: calc(100vh - 88px);
           overflow-y: auto;
         }
 
@@ -668,7 +717,15 @@ export default function DashboardPage() {
         }
         .activity-item:hover { background: rgba(255,255,255,0.03); }
 
-        .activity-icon { font-size: 15px; margin-top: 1px; flex-shrink: 0; }
+        .activity-icon {
+          flex-shrink: 0;
+          width: 28px; height: 28px; border-radius: 8px;
+          background: rgba(255,255,255,0.06);
+          display: flex; align-items: center; justify-content: center;
+          color: rgba(255,255,255,0.55);
+          margin-top: 1px;
+        }
+        .activity-icon svg { flex-shrink: 0; }
 
         .activity-msg { font-size: 12px; color: rgba(255,255,255,0.55); line-height: 1.5; }
         .activity-time { font-size: 11px; color: rgba(255,255,255,0.22); margin-top: 3px; }
@@ -773,36 +830,36 @@ export default function DashboardPage() {
           <aside className="sidebar">
             <div className="sidebar-section-label">Overview</div>
             <Link href="/dashboard"   className="sidebar-item active">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+              <LayoutDashboard size={15} strokeWidth={2} aria-hidden />
               Dashboard
             </Link>
             <Link href="/marketplace" className="sidebar-item">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
+              <ShoppingBag size={15} strokeWidth={2} aria-hidden />
               Marketplace
               <span className="sidebar-badge">9</span>
             </Link>
             <Link href="/leads"       className="sidebar-item">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+              <ClipboardList size={15} strokeWidth={2} aria-hidden />
               My Leads
             </Link>
 
             <div className="sidebar-section-label">Billing</div>
             <Link href="/wallet"       className="sidebar-item">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+              <Wallet size={15} strokeWidth={2} aria-hidden />
               Wallet
             </Link>
             <Link href="/subscriptions" className="sidebar-item">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              <CircleDollarSign size={15} strokeWidth={2} aria-hidden />
               Subscriptions
             </Link>
 
             <div className="sidebar-section-label">Tools</div>
             <Link href="/integrations" className="sidebar-item">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+              <Plug size={15} strokeWidth={2} aria-hidden />
               Integrations
             </Link>
             <Link href="/settings"    className="sidebar-item">
-              <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+              <Settings size={15} strokeWidth={2} aria-hidden />
               Settings
             </Link>
           </aside>
@@ -825,11 +882,11 @@ export default function DashboardPage() {
               </div>
               <div className="header-actions">
                 <Link href="/leads" className="btn-secondary">
-                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                  <ClipboardList size={13} strokeWidth={2} aria-hidden />
                   View all leads
                 </Link>
                 <Link href="/marketplace" className="btn-primary">
-                  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                  <Plus size={13} strokeWidth={2} aria-hidden />
                   Buy leads
                 </Link>
               </div>
@@ -837,52 +894,66 @@ export default function DashboardPage() {
 
             {/* Stats */}
             <div className="stats-grid">
-              {[
-                {
-                  icon: "💰",
-                  iconBg: "rgba(16,185,129,0.12)",
-                  val: isLoading ? "—" : `$${(walletBalance / 100).toFixed(0)}`,
-                  label: "Wallet balance",
-                  delta: "Live from wallet API",
-                  type: "neu",
-                },
-                {
-                  icon: "📋",
-                  iconBg: "rgba(99,102,241,0.12)",
-                  val: isLoading ? "—" : leadsThisMonth,
-                  label: "Lead purchases (month)",
-                  delta: "reference_type lead_purchase",
-                  type: "neu",
-                },
-                {
-                  icon: "💸",
-                  iconBg: "rgba(245,158,11,0.12)",
-                  val: isLoading ? "—" : `$${spendThisMonthDollars.toFixed(0)}`,
-                  label: "Spent this month",
-                  delta:
-                    spendLimit > 0
-                      ? `${Math.min(100, Math.round((spendThisMonthDollars / spendLimit) * 100))}% of demo cap ($${spendLimit})`
-                      : "Wallet debits (month)",
-                  type: "neu",
-                },
-                {
-                  icon: "🤖",
-                  iconBg: "rgba(236,72,153,0.1)",
-                  val: isLoading ? "—" : autoBuy ? "Active" : "Paused",
-                  label: "Auto-buy status",
-                  delta: onboarding ? "From onboarding" : "Not saved yet",
-                  type: autoBuy ? "up" : "down",
-                },
-              ].map((s, i) => (
-                <div className="stat-card" key={i} style={{ animationDelay: `${i * 0.06}s` }}>
-                  <div className="stat-icon" style={{ background: s.iconBg }}>{s.icon}</div>
-                  <div className="stat-value">{s.val}</div>
-                  <div className="stat-label">{s.label}</div>
-                  <div className={`stat-delta ${s.type === "up" ? "delta-up" : s.type === "down" ? "delta-down" : "delta-neu"}`}>
-                    {s.delta}
+              {(
+                [
+                  {
+                    Icon: Wallet,
+                    iconBg: "rgba(16,185,129,0.12)",
+                    val: isLoading ? "—" : `$${(walletBalance / 100).toFixed(0)}`,
+                    label: "Wallet balance",
+                    delta: "Live from wallet API",
+                    type: "neu",
+                  },
+                  {
+                    Icon: ClipboardList,
+                    iconBg: "rgba(99,102,241,0.12)",
+                    val: isLoading ? "—" : leadsThisMonth,
+                    label: "Lead purchases (month)",
+                    delta: "reference_type lead_purchase",
+                    type: "neu",
+                  },
+                  {
+                    Icon: Receipt,
+                    iconBg: "rgba(245,158,11,0.12)",
+                    val: isLoading ? "—" : `$${spendThisMonthDollars.toFixed(0)}`,
+                    label: "Spent this month",
+                    delta:
+                      spendLimit > 0
+                        ? `${Math.min(100, Math.round((spendThisMonthDollars / spendLimit) * 100))}% of demo cap ($${spendLimit})`
+                        : "Wallet debits (month)",
+                    type: "neu",
+                  },
+                  {
+                    Icon: Bot,
+                    iconBg: "rgba(236,72,153,0.1)",
+                    val: isLoading ? "—" : autoBuy ? "Active" : "Paused",
+                    label: "Auto-buy status",
+                    delta: onboarding ? "From onboarding" : "Not saved yet",
+                    type: autoBuy ? "up" : "down",
+                  },
+                ] satisfies ReadonlyArray<{
+                  Icon: IconComponent;
+                  iconBg: string;
+                  val: string | number;
+                  label: string;
+                  delta: string;
+                  type: string;
+                }>
+              ).map((s, i) => {
+                const StatIcon = s.Icon;
+                return (
+                  <div className="stat-card" key={i} style={{ animationDelay: `${i * 0.06}s` }}>
+                    <div className="stat-icon" style={{ background: s.iconBg }}>
+                      <StatIcon size={18} strokeWidth={2} aria-hidden />
+                    </div>
+                    <div className="stat-value">{s.val}</div>
+                    <div className="stat-label">{s.label}</div>
+                    <div className={`stat-delta ${s.type === "up" ? "delta-up" : s.type === "down" ? "delta-down" : "delta-neu"}`}>
+                      {s.delta}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Mid grid */}
@@ -894,10 +965,18 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     className="card-action"
-                    style={{ background: "none", border: "none", font: "inherit" }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      font: "inherit",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
                     onClick={() => void refetch()}
                   >
-                    Refresh →
+                    <RefreshCw size={13} strokeWidth={2} aria-hidden />
+                    Refresh
                   </button>
                 </div>
                 <div className="chart-meta">
@@ -999,7 +1078,7 @@ export default function DashboardPage() {
                     const items = crm
                       ? [
                           {
-                            icon: "⚡",
+                            Icon: Zap,
                             name: crm,
                             status: "Onboarding",
                             color: "#6366f1",
@@ -1008,16 +1087,20 @@ export default function DashboardPage() {
                         ]
                       : [
                           {
-                            icon: "🔗",
+                            Icon: Link2,
                             name: "CRM integrations",
                             status: "Coming soon",
                             color: "rgba(255,255,255,0.35)",
                             bg: "rgba(255,255,255,0.05)",
                           },
                         ];
-                    return items.map((itg) => (
+                    return items.map((itg) => {
+                      const IntegIcon = itg.Icon;
+                      return (
                       <div key={itg.name} className="integ-item">
-                        <div className="integ-icon" style={{ background: itg.bg }}>{itg.icon}</div>
+                        <div className="integ-icon" style={{ background: itg.bg }}>
+                          <IntegIcon size={16} strokeWidth={2} aria-hidden />
+                        </div>
                         <div className="integ-info">
                           <div className="integ-name">{itg.name}</div>
                           <div className="integ-status" style={{ color: itg.color }}>
@@ -1026,7 +1109,8 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       </div>
-                    ));
+                    );
+                    });
                   })()}
                 </div>
               </div>
@@ -1052,15 +1136,39 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td colSpan={7} style={{ padding: "28px 10px", textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
-                        No marketplace leads yet — this table will fill when the leads API is wired. Use{" "}
-                        <Link href="/wallet" style={{ color: "#a5b4fc" }}>
-                          Wallet
-                        </Link>{" "}
-                        for live balance and transactions.
-                      </td>
-                    </tr>
+                    {recentLeads.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} style={{ padding: "28px 10px", textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
+                          No purchased leads yet. Browse the{" "}
+                          <Link href="/marketplace" style={{ color: "#a5b4fc" }}>
+                            marketplace
+                          </Link>{" "}
+                          or top up your{" "}
+                          <Link href="/wallet" style={{ color: "#a5b4fc" }}>
+                            wallet
+                          </Link>
+                          .
+                        </td>
+                      </tr>
+                    ) : (
+                      recentLeads.map((row) => (
+                        <tr key={row.assignment_id} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                          <td style={{ padding: "12px 10px", fontSize: 13 }}>
+                            <Link href={`/leads?focus=${row.lead_id}`} style={{ color: "#e0e7ff", textDecoration: "none" }}>
+                              {row.market}
+                            </Link>
+                          </td>
+                          <td style={{ padding: "12px 10px", fontSize: 13, color: "rgba(255,255,255,0.65)" }}>{row.type}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{row.exclusivity}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 12 }}>{row.status}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 12 }}>{row.ghl_sync_status}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 13 }}>${(Number(row.charged_amount) / 100).toFixed(0)}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+                            {new Date(row.assigned_at).toLocaleDateString()}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1086,8 +1194,15 @@ export default function DashboardPage() {
                     <div className="wallet-meta-label">Spent this month</div>
                   </div>
                   <div className="wallet-meta-item">
-                    <div className="wallet-meta-val">
-                      {wallet?.auto_reload_enabled ? "Auto ✓" : "Auto off"}
+                    <div className="wallet-meta-val" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {wallet?.auto_reload_enabled ? (
+                        <>
+                          Auto
+                          <Check size={15} strokeWidth={2.5} style={{ color: "#10b981" }} aria-label="On" />
+                        </>
+                      ) : (
+                        "Auto off"
+                      )}
                     </div>
                     <div className="wallet-meta-label">
                       {wallet?.auto_reload_threshold_cents != null
@@ -1105,20 +1220,44 @@ export default function DashboardPage() {
               <div className="panel-title">Subscription</div>
               <div className="sub-card">
                 <div className="sub-row">
-                  <div className="sub-plan-name">Pro Plan</div>
-                  <div className="sub-plan-badge">ACTIVE</div>
+                  <div className="sub-plan-name">
+                    {subscription
+                      ? `${subscription.plan_type.replace(/_/g, " ")} plan`
+                      : "No active plan"}
+                  </div>
+                  <div className="sub-plan-badge">
+                    {subscription?.status ? subscription.status.toUpperCase() : "—"}
+                  </div>
                 </div>
-                <div className="sub-renews">Subscription billing — API coming soon</div>
+                <div className="sub-renews">
+                  {subscription
+                    ? `Current period ends ${new Date(subscription.current_period_end).toLocaleDateString()}`
+                    : "Choose a plan to participate in auto-distribution."}
+                </div>
                 <div className="sub-progress">
                   <div className="sub-progress-row">
-                    <span>Leads used</span>
-                    <span>{leadsThisMonth} / {leadsLimit}</span>
+                    <span>Leads this period</span>
+                    <span>
+                      {leadsThisMonth}
+                      {subscription?.monthly_lead_limit != null
+                        ? ` / ${subscription.monthly_lead_limit}`
+                        : leadsLimit ? ` / ${leadsLimit}` : ""}
+                    </span>
                   </div>
                   <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${(leadsThisMonth / leadsLimit) * 100}%`, background: "#6366f1" }} />
+                    <div
+                      className="progress-fill"
+                      style={{
+                        width: `${Math.min(
+                          (leadsThisMonth / Math.max(subscription?.monthly_lead_limit ?? leadsLimit, 1)) * 100,
+                          100,
+                        )}%`,
+                        background: "#6366f1",
+                      }}
+                    />
                   </div>
                 </div>
-                <Link href="/subscriptions" className="upgrade-btn">Upgrade to Premium →</Link>
+                <Link href="/subscriptions" className="upgrade-btn">Manage subscription →</Link>
               </div>
             </div>
 
@@ -1133,7 +1272,9 @@ export default function DashboardPage() {
                 ) : (
                   activityItems.map((a) => (
                     <div key={a.id} className="activity-item">
-                      <div className="activity-icon">{a.icon}</div>
+                      <div className="activity-icon">
+                        <ActivityFeedIcon kind={a.activityIcon} />
+                      </div>
                       <div>
                         <div className="activity-msg">{a.msg}</div>
                         <div className="activity-time">{a.time}</div>
