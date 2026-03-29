@@ -2,9 +2,17 @@
 
 node_modules
 .env
-.env.*
+.env.local
+.env.*.local
 dist
 .next
 coverage
-pnpm-lock.yaml
-Dockerfile*
+debug*.log
+*.log
+
+# Allow committed env templates (do not commit real secrets)
+!.env.example
+!**/.env.example
+
+# Track lockfile for reproducible installs on other machines
+# (pnpm-lock.yaml was previously ignored; run: git add -f pnpm-lock.yaml)
