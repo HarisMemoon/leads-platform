@@ -1,0 +1,15 @@
+# fly launch --dockerfile Dockerfile
+# Set secrets: fly secrets set DATABASE_URL=... REDIS_URL=... JWT_SECRET=... STRIPE_SECRET_KEY=... STRIPE_WEBHOOK_SECRET=... APP_BASE_URL=... STRIPE_PRICE_ID_*=...
+
+app = 'lead-platform-api'
+primary_region = 'ord'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[http_service]
+  internal_port = 5000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0

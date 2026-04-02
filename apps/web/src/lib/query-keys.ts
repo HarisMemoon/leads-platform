@@ -5,8 +5,15 @@ export const queryKeys = {
   },
   wallet: {
     me: ["wallet", "me"] as const,
-    transactions: (opts?: { limit?: number; offset?: number }) =>
-      ["wallet", "transactions", opts ?? {}] as const,
+    transactions: (opts?: {
+      limit?: number;
+      offset?: number;
+      type?: string;
+    }) => ["wallet", "transactions", opts ?? {}] as const,
+    transactionTotals: ["wallet", "transaction-totals"] as const,
+  },
+  stripe: {
+    paymentMethodPreview: ["stripe", "payment-method-preview"] as const,
   },
   onboarding: {
     me: ["onboarding", "me"] as const,

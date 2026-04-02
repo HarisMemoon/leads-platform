@@ -1,0 +1,36 @@
+# Blueprint: https://render.com/docs/blueprint-spec
+# Create a Web Service from this repo; set env vars in the dashboard (do not commit secrets).
+# Migrations: TypeORM runs them on app boot (see apps/api/src/app.module.ts migrationsRun).
+# Optional one-off: run `npm run migration:run:prod` in a shell with DATABASE_URL (same image).
+
+services:
+  - type: web
+    name: lead-platform-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: STRIPE_PRICE_ID_BASIC
+        sync: false
+      - key: STRIPE_PRICE_ID_PRO
+        sync: false
+      - key: STRIPE_PRICE_ID_MARKET_SPECIFIC
+        sync: false
+      - key: STRIPE_PRICE_ID_PREMIUM
+        sync: false

@@ -1,13 +1,16 @@
 import {
   Body,
   Controller,
+  Get,
   Headers,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt.auth.guard';
+import { ConfirmWalletTopupDto } from './dto/confirm-wallet-topup.dto';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { SavePaymentMethodDto } from './dto/save-payment-method.dto';
 import { StripeService } from './stripe.service';
@@ -17,12 +20,41 @@ export class StripeController {
   constructor(private readonly stripeService: StripeService) {}
 
   @UseGuards(JwtAuthGuard)
+  @Get('payment-method-preview')
+  getPaymentMethodPreview(
+    @Req() req: Request & { user: { userId: string } },
+  ) {
+    return this.stripeService.getPaymentMethodPreview(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post('create-payment-intent')
   createPaymentIntent(
     @Req() req: Request & { user: { userId: string } },
     @Body() dto: CreatePaymentIntentDto,
+    @Query('save_card') saveCard?: string,
   ) {
-    return this.stripeService.createPaymentIntent(req.user.userId, dto.amountCents);
+    const saveForFutureUse =
+      saveCard === '1' || saveCard === 'true' || saveCard === 'yes';
+    return this.stripeService.createPaymentIntent(req.user.userId, dto.amountCents, {
+      saveForFutureUse,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('confirm-wallet-topup')
+  confirmWalletTopUp(
+    @Req() req: Request & { user: { userId: string } },
+    @Body() dto: ConfirmWalletTopupDto,
+  ) {
+    return this.stripeService.confirmWalletTopUp(
+      req.user.userId,
+      dto.paymentIntentId,
+      {
+        savePaymentMethodForAutoReload:
+          dto.savePaymentMethodForAutoReload === true,
+      },
+    );
   }
 
   @Post('webhook')

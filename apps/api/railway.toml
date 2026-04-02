@@ -1,0 +1,6 @@
+# Railway: set Root Directory to apps/api for this service, then deploy.
+# Variables: DATABASE_URL, REDIS_URL, JWT_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, APP_BASE_URL, STRIPE_PRICE_ID_*
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"

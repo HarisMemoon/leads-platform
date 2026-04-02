@@ -307,12 +307,6 @@ export default function MarketplacePage() {
         .skeleton { background: rgba(255,255,255,0.06); border-radius: 8px; animation: pulse 1.4s ease infinite; }
         @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: #080a0f; }
-        ::-webkit-scrollbar-thumb { background: #1a1d26; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #252936; }
-        * { scrollbar-width: thin; scrollbar-color: #1a1d26 #080a0f; }
-
         @media (max-width: 800px) { .page-body { grid-template-columns: 1fr; } .filters-sidebar { display: none; } }
       `}</style>
 

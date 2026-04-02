@@ -1,0 +1,85 @@
+/**
+ * Global scrollbar skin — loaded after globals.css so it wins over Tailwind preflight.
+ * Targets the viewport (html) and any scrollable descendants.
+ */
+
+:root {
+  --sb-track: #0a0a0c;
+  --sb-thumb: #5a5a66;
+  --sb-thumb-hover: #767684;
+  --sb-thumb-active: #8f8f9c;
+  --sb-size: 11px;
+}
+
+/* Firefox — use "auto" so the bar is visible (thin is often nearly invisible) */
+html {
+  scrollbar-width: auto;
+  scrollbar-color: var(--sb-thumb) var(--sb-track);
+}
+
+/* Chromium / Safari / Edge — viewport scrollbar (does not reliably inherit from *) */
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: var(--sb-size);
+  height: var(--sb-size);
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+  background: var(--sb-track);
+  border-radius: 999px;
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #7a7a88 0%, #4a4a54 50%, #3a3a44 100%);
+  border-radius: 999px;
+  border: 2px solid var(--sb-track);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--sb-thumb-hover) 0%, #5a5a66 100%);
+}
+
+html::-webkit-scrollbar-thumb:active,
+body::-webkit-scrollbar-thumb:active {
+  background: var(--sb-thumb-active);
+}
+
+html::-webkit-scrollbar-corner,
+body::-webkit-scrollbar-corner {
+  background: var(--sb-track);
+}
+
+/* Inner scroll areas (modals, lists, etc.) */
+*::-webkit-scrollbar {
+  width: var(--sb-size);
+  height: var(--sb-size);
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--sb-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #6f6f7c 0%, #43434d 100%);
+  border-radius: 999px;
+  border: 2px solid var(--sb-track);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--sb-thumb-hover) 0%, #5a5a66 100%);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--sb-track);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sb-thumb) var(--sb-track);
+}

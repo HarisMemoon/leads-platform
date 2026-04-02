@@ -240,28 +240,6 @@ export default function DashboardPage() {
           transition: background 0.15s;
         }
         .wallet-pill:hover { background: rgba(16,185,129,0.15); }
-::-webkit-scrollbar {
-  width: 6px; /* Slim width */
-}
-
-::-webkit-scrollbar-track {
-  background: #080a0f; /* Match your background */
-}
-
-::-webkit-scrollbar-thumb {
-  background: #1a1d26; /* Dark grey/black thumb */
-  border-radius: 10px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #252936; /* Slightly lighter on hover */
-}
-
-/* For Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #1a1d26 #080a0f;
-}
         .notif-btn {
           width: 34px; height: 34px;
           border-radius: 9px;

@@ -5,6 +5,7 @@ import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   BarChart3,
   BookOpen,
   Bot,
@@ -22,10 +23,12 @@ import {
   RefreshCw,
   Settings,
   ShoppingBag,
+  Sparkles,
   Star,
   Target,
   Video,
   Wallet,
+  X,
   Zap,
 } from "lucide-react";
 import {
@@ -36,7 +39,12 @@ import {
 import { queryKeys } from "@/lib/query-keys";
 import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
-import { createStripePaymentIntent } from "@/lib/wallet-api";
+import { confirmStripeWalletTopUp, createStripePaymentIntent } from "@/lib/wallet-api";
+import {
+  checkoutSubscription,
+  getSubscriptionPlans,
+  type SubscriptionDto,
+} from "@/lib/subscriptions-api";
 
 type ObIcon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
 
@@ -87,7 +95,8 @@ function WalletFundForm({
   onSkip,
   isSaving,
 }: {
-  onSuccess: () => void;
+  /** Dollar amount successfully charged via Stripe (for onboarding metadata). */
+  onSuccess: (fundedDollars: number) => void;
   onSkip: () => void;
   isSaving: boolean;
 }) {
@@ -114,7 +123,10 @@ function WalletFundForm({
         payment_method: { card },
       });
       if (result.error) throw new Error(result.error.message ?? "Payment failed");
-      onSuccess();
+      const pi = result.paymentIntent;
+      if (!pi?.id) throw new Error("Missing payment intent from Stripe.");
+      await confirmStripeWalletTopUp(pi.id);
+      onSuccess(amount);
     } catch (e) {
       setPayError(e instanceof Error ? e.message : "Payment failed — please try again.");
     } finally {
@@ -138,11 +150,17 @@ function WalletFundForm({
             color: "rgba(255,255,255,0.75)",
             lineHeight: 1.65,
             marginBottom: 22,
+            display: "flex",
+            gap: 8,
+            alignItems: "flex-start",
           }}
         >
-          ⚠️ Without wallet funds, <strong style={{ color: "#fde047" }}>auto-buy won&apos;t work</strong> and
-          you won&apos;t be able to purchase leads until you add funds. You can top up any time from the
-          Wallet page.
+          <AlertTriangle size={16} style={{ color: "#fde047", marginTop: 2, flexShrink: 0 }} />
+          <span>
+            Without wallet funds, <strong style={{ color: "#fde047" }}>auto-buy won&apos;t work</strong> and
+            you won&apos;t be able to purchase leads until you add funds. You can top up any time from the
+            Wallet page.
+          </span>
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
@@ -279,12 +297,16 @@ function OnboardingPageContent() {
   const [infoModal, setInfoModal] = useState<{ 
     open: boolean; 
     title: string; 
-    content: string 
+    content: string;
+    icon: ObIcon;
   }>({ 
     open: false, 
     title: "", 
-    content: "" 
+    content: "",
+    icon: CircleHelp,
   });
+  const [selectedSubscriptionPlan, setSelectedSubscriptionPlan] =
+    useState<SubscriptionDto["plan_type"] | null>(null);
 
   const {
     data: row,
@@ -363,6 +385,22 @@ function OnboardingPageContent() {
       });
     },
   });
+
+  const { data: subscriptionPlans = [] } = useQuery({
+    queryKey: queryKeys.subscriptions.plans,
+    queryFn: getSubscriptionPlans,
+  });
+
+  const subscriptionCheckoutMutation = useMutation({
+    mutationFn: checkoutSubscription,
+    onSuccess: (result) => {
+      window.location.href = result.url;
+    },
+  });
+
+  const hasWalletFunding =
+    Number(data.wallet_amount ?? 0) > 0 ||
+    data.stripe_onboarding_funded === true;
 
   const toggle = (key: "markets" | "lead_types", val: string) => {
     setData((d) => {
@@ -1156,29 +1194,6 @@ input[type=range]::-webkit-slider-thumb {
 
 .checklist { text-align: left; margin: 28px 0 36px; display: flex; flex-direction: column; gap: 10px; }
 
-::-webkit-scrollbar {
-  width: 6px; /* Slim width */
-}
-
-::-webkit-scrollbar-track {
-  background: #080a0f; /* Match your background */
-}
-
-::-webkit-scrollbar-thumb {
-  background: #1a1d26; /* Dark grey/black thumb */
-  border-radius: 10px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #252936; /* Slightly lighter on hover */
-}
-
-/* For Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #1a1d26 #080a0f;
-}
-
 .check-item {
 
   display: flex;
@@ -1354,24 +1369,87 @@ input[type=range]::-webkit-slider-thumb {
 `}</style>
 
       {/* Info Modal */}
-     {infoModal.open && (
-        <div className="modal-overlay" onClick={() => setInfoModal({ ...infoModal, open: false })}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="brand-icon" style={{ marginBottom: 20 }}>
-              <CircleHelp size={18} strokeWidth={2} color="#fff" aria-hidden />
-            </div>
-            <h3 className="step-title" style={{ fontSize: 24, marginBottom: 12 }}>{infoModal.title}</h3>
-            <p className="step-sub" style={{ marginBottom: 32, lineHeight: 1.6 }}>{infoModal.content}</p>
-            <button 
-              className="btn-next" 
-              style={{ width: '100%', justifyContent: 'center' }} 
-              onClick={() => setInfoModal({ ...infoModal, open: false })}
+      {infoModal.open && (() => {
+        const Icon = infoModal.icon;
+        return (
+          <div
+            onClick={() => setInfoModal({ ...infoModal, open: false })}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 200,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "20px",
+              background: "rgba(4,6,12,0.82)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 560,
+                borderRadius: 22,
+                border: "1px solid rgba(255,255,255,0.11)",
+                background:
+                  "radial-gradient(120% 140% at 0% 0%, rgba(99,102,241,0.2), transparent 45%), #070a12",
+                boxShadow: "0 28px 80px rgba(0,0,0,0.55)",
+                padding: "28px 28px 24px",
+              }}
             >
-              Got it, thanks!
-            </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                <div
+                  style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "linear-gradient(135deg, rgba(99,102,241,0.28), rgba(16,185,129,0.22))",
+                    border: "1px solid rgba(129,140,248,0.35)",
+                  }}
+                >
+                  <Icon size={22} strokeWidth={1.9} className="text-indigo-100" aria-hidden />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInfoModal({ ...infoModal, open: false })}
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    background: "rgba(255,255,255,0.04)",
+                    color: "rgba(255,255,255,0.68)",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                  }}
+                  aria-label="Close details"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 28, letterSpacing: -0.7, marginBottom: 10 }}>
+                {infoModal.title}
+              </h3>
+              <p style={{ color: "rgba(255,255,255,0.68)", lineHeight: 1.75, fontSize: 14, marginBottom: 22 }}>
+                {infoModal.content}
+              </p>
+              <button
+                className="btn-next"
+                style={{ width: "100%", justifyContent: "center" }}
+                onClick={() => setInfoModal({ ...infoModal, open: false })}
+              >
+                Close
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       <div className="ob-root">
         {onboardingIsError && (
           <div
@@ -1483,10 +1561,10 @@ input[type=range]::-webkit-slider-thumb {
 {step === 2 && (
   <div className="how-grid">
     {[
-      { Icon: Home, t: "Fresh leads", d: "Newly sourced, high intent.", info: "Fresh leads are delivered within 60 seconds of capture to ensure maximum conversion[cite: 120]." },
-      { Icon: Star, t: "Premium leads", d: "Recently qualified.", info: "Premium leads undergo secondary verification for phone and interest validity[cite: 138]." },
-      { Icon: Package, t: "Aged leads", d: "Older inventory.", info: "Aged leads (30-90 days) are discounted for volume-based outreach[cite: 122]." },
-      { Icon: Target, t: "Exclusive leads", d: "Yours alone.", info: "Exclusive leads are removed from the marketplace and never shared[cite: 135]." },
+      { Icon: Home, t: "Fresh leads", d: "Newly sourced, high intent.", info: "Fresh leads are delivered within 60 seconds of capture, giving you the first-touch advantage while seller intent is strongest." },
+      { Icon: Star, t: "Premium leads", d: "Recently qualified.", info: "Premium leads pass additional qualification checks (contactability and motivation signals), improving close-rate consistency." },
+      { Icon: Package, t: "Aged leads", d: "Older inventory.", info: "Aged leads are ideal for volume follow-up campaigns. They are priced lower and often convert with strong multi-touch outreach." },
+      { Icon: Target, t: "Exclusive leads", d: "Yours alone.", info: "Exclusive leads are assigned to only one buyer account on the platform, with no multi-buyer sharing for that record." },
     ].map((c) => {
       const I = c.Icon;
       return (
@@ -1496,7 +1574,7 @@ input[type=range]::-webkit-slider-thumb {
         <div className="how-desc">{c.d}</div>
         <button 
           className="btn-info" 
-          onClick={() => setInfoModal({ open: true, title: c.t, content: c.info })}
+          onClick={() => setInfoModal({ open: true, title: c.t, content: c.info, icon: c.Icon })}
         >
           Learn more
         </button>
@@ -1508,31 +1586,105 @@ input[type=range]::-webkit-slider-thumb {
 
               {/* Step 3 - Subscription vs pay per lead */}
               {step === 3 && (
-                <div className="plan-grid">
-                  {[
-                    { name: "Subscription", price: "From $299/mo", desc: "Steady lead flow. Priority in distribution. Monthly lead credits included.", val: "subscription" },
-                    { name: "Pay-per-lead", price: "From $25/lead", desc: "Buy only what you need. Full marketplace access. No monthly commitment.", val: "ppl" },
-                    { name: "Auto-buy", price: "Wallet-based", desc: "Set rules and caps. Platform buys automatically when leads match your criteria.", val: "autobuy" },
-                    { name: "Hybrid", price: "Best value", desc: "Subscribe for priority + buy extras from the marketplace. Most popular.", val: "hybrid" },
-                  ].map((p) => (
+                <>
+                  <div className="plan-grid">
+                    {[
+                      { name: "Subscription", price: "From $299/mo", desc: "Steady lead flow. Priority in distribution. Monthly lead credits included.", val: "subscription" },
+                      { name: "Pay-per-lead", price: "From $25/lead", desc: "Buy only what you need. Full marketplace access. No monthly commitment.", val: "ppl" },
+                      { name: "Auto-buy", price: "Wallet-based", desc: "Set rules and caps. Platform buys automatically when leads match your criteria.", val: "autobuy" },
+                      { name: "Hybrid", price: "Best value", desc: "Subscribe for priority + buy extras from the marketplace. Most popular.", val: "hybrid" },
+                    ].map((p) => (
+                      <div
+                        key={p.val}
+                        className={`plan-card ${data.model === p.val ? "selected" : ""}`}
+                        onClick={() => setData((d) => ({ ...d, model: p.val }))}
+                      >
+                        <div className="plan-name">{p.name}</div>
+                        <div className="plan-price">{p.price}</div>
+                        <div className="plan-desc">{p.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {(data.model === "subscription" || data.model === "hybrid") && (
                     <div
-                      key={p.val}
-                      className={`plan-card ${data.model === p.val ? "selected" : ""}`}
-                      onClick={() => setData((d) => ({ ...d, model: p.val }))}
+                      style={{
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        borderRadius: 14,
+                        padding: "16px 16px 14px",
+                        marginTop: -12,
+                        marginBottom: 16,
+                      }}
                     >
-                      <div className="plan-name">{p.name}</div>
-                      <div className="plan-price">{p.price}</div>
-                      <div className="plan-desc">{p.desc}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <Sparkles size={14} color="#c4b5fd" />
+                        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.62)" }}>
+                          Subscription checkout uses the same Stripe flow as the Plans page.
+                        </p>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8 }}>
+                        {subscriptionPlans.map((plan) => (
+                          <button
+                            key={plan.planType}
+                            type="button"
+                            onClick={() => setSelectedSubscriptionPlan(plan.planType)}
+                            style={{
+                              borderRadius: 10,
+                              border: selectedSubscriptionPlan === plan.planType
+                                ? "1px solid #818cf8"
+                                : "1px solid rgba(255,255,255,0.12)",
+                              background: selectedSubscriptionPlan === plan.planType
+                                ? "rgba(99,102,241,0.14)"
+                                : "rgba(255,255,255,0.02)",
+                              color: "rgba(255,255,255,0.9)",
+                              padding: "10px 12px",
+                              textAlign: "left",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: 600, textTransform: "capitalize" }}>
+                              {plan.name}
+                            </div>
+                            <div style={{ fontSize: 11, opacity: 0.7 }}>{plan.displayPrice}</div>
+                          </button>
+                        ))}
+                      </div>
+                      {subscriptionCheckoutMutation.isError ? (
+                        <p style={{ color: "#fca5a5", fontSize: 12, marginTop: 10 }}>
+                          {subscriptionCheckoutMutation.error instanceof Error
+                            ? subscriptionCheckoutMutation.error.message
+                            : "Could not start subscription checkout."}
+                        </p>
+                      ) : null}
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
 
               {/* Step 4 - Wallet (real Stripe payment) */}
               {step === 4 && (
                 <Elements stripe={stripePromise}>
                   <WalletFundForm
-                    onSuccess={() => void saveStep(5)}
+                    onSuccess={async (fundedDollars) => {
+                      await saveMutation.mutateAsync({
+                        current_step: 5,
+                        completed_steps: [4],
+                        data: {
+                          ...data,
+                          wallet_amount: String(fundedDollars),
+                          initial_funding_applied: true,
+                          stripe_onboarding_funded: true,
+                        },
+                      });
+                      setData((d) => ({
+                        ...d,
+                        wallet_amount: String(fundedDollars),
+                        initial_funding_applied: true,
+                        stripe_onboarding_funded: true,
+                      }));
+                      setStep(5);
+                    }}
                     onSkip={() => void saveStep(5)}
                     isSaving={saveMutation.isPending}
                   />
@@ -1547,15 +1699,41 @@ input[type=range]::-webkit-slider-thumb {
                       <div className="toggle-title">Enable Auto-Buy</div>
                       <div className="toggle-desc">Platform automatically purchases matching leads from your wallet</div>
                     </div>
-                    <button
-                      className={`toggle ${data.auto_buy ? "on" : ""}`}
-                      onClick={() => setData((d) => ({ ...d, auto_buy: !d.auto_buy }))}
-                    >
-                      <div className="toggle-thumb" />
-                    </button>
+                    {hasWalletFunding ? (
+                      <button
+                        className={`toggle ${data.auto_buy ? "on" : ""}`}
+                        onClick={() => setData((d) => ({ ...d, auto_buy: !d.auto_buy }))}
+                      >
+                        <div className="toggle-thumb" />
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Wallet funding required
+                      </span>
+                    )}
                   </div>
+                  {!hasWalletFunding ? (
+                    <div
+                      style={{
+                        background: "rgba(245,158,11,0.08)",
+                        border: "1px solid rgba(245,158,11,0.24)",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                        marginBottom: 14,
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      <AlertTriangle size={16} style={{ color: "#facc15", marginTop: 1, flexShrink: 0 }} />
+                      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.72)", lineHeight: 1.6 }}>
+                        Auto-buy is locked because wallet funding was skipped. You can continue onboarding now and enable
+                        auto-buy later from Wallet settings after adding funds.
+                      </p>
+                    </div>
+                  ) : null}
 
-                  {data.auto_buy && (
+                  {hasWalletFunding && data.auto_buy && (
                     <>
                       <div className="range-field">
                         <div className="range-label">
@@ -1693,8 +1871,44 @@ input[type=range]::-webkit-slider-thumb {
               </button>
               {/* Step 4 drives its own navigation via WalletFundForm — no global Continue button */}
               {step !== 4 && (
-                <button type="button" className="btn-next" disabled={saveMutation.isPending} onClick={() => saveStep(step + 1)}>
-                  {saveMutation.isPending ? <><span className="spinner" /> Saving…</> : step === TOTAL_STEPS ? "Enter dashboard →" : "Continue →"}
+                <button
+                  type="button"
+                  className="btn-next"
+                  disabled={
+                    saveMutation.isPending ||
+                    subscriptionCheckoutMutation.isPending ||
+                    (step === 3 &&
+                      (data.model === "subscription" || data.model === "hybrid") &&
+                      !selectedSubscriptionPlan)
+                  }
+                  onClick={() => {
+                    if (
+                      step === 3 &&
+                      (data.model === "subscription" || data.model === "hybrid")
+                    ) {
+                      if (!selectedSubscriptionPlan) {
+                        return;
+                      }
+                      void subscriptionCheckoutMutation.mutateAsync(
+                        selectedSubscriptionPlan,
+                      );
+                      return;
+                    }
+                    void saveStep(step + 1);
+                  }}
+                >
+                  {subscriptionCheckoutMutation.isPending ? (
+                    <><span className="spinner" /> Redirecting to Stripe…</>
+                  ) : saveMutation.isPending ? (
+                    <><span className="spinner" /> Saving…</>
+                  ) : step === 3 &&
+                    (data.model === "subscription" || data.model === "hybrid") ? (
+                    "Continue to Stripe checkout →"
+                  ) : step === TOTAL_STEPS ? (
+                    "Enter dashboard →"
+                  ) : (
+                    "Continue →"
+                  )}
                 </button>
               )}
             </div>

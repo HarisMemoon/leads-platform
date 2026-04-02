@@ -1,9 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { WalletTransaction } from '../entities/wallet-transaction.entity';
 import { WalletTransactionType } from '../../common/enums/wallet-transaction-type.enum';
+import { UpdateWalletAutoReloadDto } from './dto/update-wallet-auto-reload.dto';
 
 @Injectable()
 export class WalletService {
@@ -35,14 +40,18 @@ export class WalletService {
   /**
    * Credit wallet (simulated / dev top-up, onboarding credit, etc.).
    * @param amountCents amount in cents (bigint-safe via string math inside transaction)
+   * @param referenceId optional idempotency key (e.g. user id for onboarding_initial)
+   * @param existingManager when provided, runs inside that transaction (no nested transaction)
    */
   async topup(
     userId: string,
     amountCents: number,
     description?: string,
     referenceType = 'dev_topup',
+    referenceId: string | null = null,
+    existingManager?: EntityManager,
   ) {
-    return this.dataSource.transaction(async (manager) => {
+    const run = async (manager: EntityManager) => {
       const wallet = await manager.findOne(WalletAccount, {
         where: { user: { id: userId } },
       });
@@ -62,14 +71,19 @@ export class WalletService {
         amount_cents: creditAmount.toString(),
         balance_after_cents: nextBalance.toString(),
         reference_type: referenceType,
-        reference_id: null,
+        reference_id: referenceId ?? null,
         description: description || 'Wallet credit',
       });
 
       await manager.save(tx);
 
       return wallet;
-    });
+    };
+
+    if (existingManager) {
+      return run(existingManager);
+    }
+    return this.dataSource.transaction(run);
   }
 
   async topUp(
@@ -78,26 +92,172 @@ export class WalletService {
     description?: string,
     referenceType = 'dev_topup',
   ) {
-    return this.topup(userId, amountCents, description, referenceType);
+    return this.topup(userId, amountCents, description, referenceType, null);
+  }
+
+  /**
+   * Credits the wallet for a succeeded Stripe PaymentIntent. Idempotent per
+   * `paymentIntentId` so the client can confirm immediately while webhooks still work.
+   */
+  async applyStripeTopUp(
+    userId: string,
+    amountCents: number,
+    paymentIntentId: string,
+    description = 'Stripe top-up',
+  ): Promise<WalletAccount> {
+    return this.dataSource.transaction(async (manager) => {
+      /*
+      Serialize on PaymentIntent id so webhook + HTTP confirm cannot both pass the
+      idempotency check and double-insert rows while only one balance update sticks.
+      */
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1::text)::bigint)`,
+        [paymentIntentId],
+      );
+
+      const existing = await manager.findOne(WalletTransaction, {
+        where: {
+          reference_type: 'stripe_topup',
+          reference_id: paymentIntentId,
+        },
+        relations: ['wallet'],
+      });
+
+      if (existing?.wallet) {
+        const creditedWallet = await manager.findOne(WalletAccount, {
+          where: { id: existing.wallet.id },
+          relations: ['user'],
+        });
+        if (creditedWallet?.user?.id !== userId) {
+          throw new BadRequestException('Invalid payment intent');
+        }
+        return manager.findOneOrFail(WalletAccount, {
+          where: { user: { id: userId } },
+        });
+      }
+
+      const wallet = await manager.findOne(WalletAccount, {
+        where: { user: { id: userId } },
+      });
+
+      if (!wallet) throw new NotFoundException('Wallet not found');
+
+      const currentBalance = BigInt(wallet.balance_cents);
+      const creditAmount = BigInt(amountCents);
+      const nextBalance = currentBalance + creditAmount;
+
+      wallet.balance_cents = nextBalance.toString();
+      await manager.save(wallet);
+
+      await manager.save(
+        manager.create(WalletTransaction, {
+          wallet,
+          type: WalletTransactionType.CREDIT,
+          amount_cents: creditAmount.toString(),
+          balance_after_cents: nextBalance.toString(),
+          reference_type: 'stripe_topup',
+          reference_id: paymentIntentId,
+          description: description || 'Stripe top-up',
+        }),
+      );
+
+      return wallet;
+    });
   }
 
   /*
-  TRANSACTIONS LIST
+  TRANSACTIONS LIST (paginated; optional credit/debit filter)
   */
-  async getTransactions(userId: string, limit = 50, offset = 0) {
-
+  async getTransactions(
+    userId: string,
+    limit = 10,
+    offset = 0,
+    type?: 'credit' | 'debit',
+  ) {
     const wallet = await this.walletRepo.findOne({
-      where: { user: { id: userId } }
+      where: { user: { id: userId } },
     });
 
     if (!wallet) throw new NotFoundException('Wallet not found');
 
-    return this.txRepo.find({
-      where: { wallet: { id: wallet.id } },
-      order: { created_at: 'DESC' },
-      take: limit,
-      skip: offset
+    const qb = this.txRepo
+      .createQueryBuilder('t')
+      .where('t.walletId = :wid', { wid: wallet.id })
+      .orderBy('t.created_at', 'DESC');
+
+    if (type === 'credit' || type === 'debit') {
+      qb.andWhere('t.type = :txType', { txType: type });
+    }
+
+    const [items, total] = await qb.take(limit).skip(offset).getManyAndCount();
+
+    return { items, total, limit, offset };
+  }
+
+  /** Lifetime totals for wallet hero (not page-limited). */
+  async getTransactionTotals(userId: string) {
+    const wallet = await this.walletRepo.findOne({
+      where: { user: { id: userId } },
     });
+    if (!wallet) throw new NotFoundException('Wallet not found');
+
+    const raw = await this.txRepo
+      .createQueryBuilder('t')
+      .select('COUNT(t.id)::int', 'count')
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN t.type::text = 'credit' THEN CAST(t.amount_cents AS BIGINT) ELSE 0 END), 0)`,
+        'credits',
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN t.type::text = 'debit' THEN CAST(t.amount_cents AS BIGINT) ELSE 0 END), 0)`,
+        'debits',
+      )
+      .where('t.walletId = :wid', { wid: wallet.id })
+      .getRawOne<{ count: string; credits: string; debits: string }>();
+
+    return {
+      transaction_count: Number(raw?.count ?? 0),
+      total_credits_cents: String(raw?.credits ?? '0'),
+      total_debits_cents: String(raw?.debits ?? '0'),
+    };
+  }
+
+  async updateAutoReload(userId: string, dto: UpdateWalletAutoReloadDto) {
+    const wallet = await this.walletRepo.findOne({
+      where: { user: { id: userId } },
+    });
+    if (!wallet) throw new NotFoundException('Wallet not found');
+
+    if (dto.auto_reload_enabled) {
+      if (
+        dto.auto_reload_threshold_cents === undefined ||
+        dto.auto_reload_amount_cents === undefined
+      ) {
+        throw new BadRequestException(
+          'Threshold and reload amount are required when auto-reload is enabled.',
+        );
+      }
+      if (!wallet.auto_reload_opt_in) {
+        throw new BadRequestException(
+          'Enable auto-reload only after you save a card during a wallet top-up: check “Save this card for auto-reload” and complete payment.',
+        );
+      }
+      if (!wallet.stripe_payment_method_id) {
+        throw new BadRequestException(
+          'No saved card on file. Add funds with a card and check “Save this card for auto-reload” first.',
+        );
+      }
+      wallet.auto_reload_enabled = true;
+      wallet.auto_reload_threshold_cents = String(dto.auto_reload_threshold_cents);
+      wallet.auto_reload_amount_cents = String(dto.auto_reload_amount_cents);
+    } else {
+      wallet.auto_reload_enabled = false;
+      wallet.auto_reload_threshold_cents = null;
+      wallet.auto_reload_amount_cents = null;
+    }
+
+    await this.walletRepo.save(wallet);
+    return wallet;
   }
 
   async debitWallet(

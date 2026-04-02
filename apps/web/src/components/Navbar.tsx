@@ -187,6 +187,7 @@ export default function Navbar() {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
+                    flexShrink: 0,
                     boxShadow: "0 4px 14px rgba(99, 102, 241, 0.35)",
                   }}
                 >

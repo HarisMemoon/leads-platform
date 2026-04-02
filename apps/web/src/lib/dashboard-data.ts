@@ -24,7 +24,7 @@ export async function fetchDashboardSummary(): Promise<DashboardSummary> {
     getAuthMe(),
     getWalletMe(),
     getOnboardingMe().catch(() => null),
-    getWalletTransactions({ limit: 100, offset: 0 }),
+    getWalletTransactions({ limit: 100, offset: 0 }).then((r) => r.items),
     getMySubscription().catch(() => null),
     getMyLeads({ page: 1, limit: 8 }).catch(() => ({
       items: [],

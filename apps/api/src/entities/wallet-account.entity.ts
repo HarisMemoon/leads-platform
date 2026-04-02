@@ -51,6 +51,13 @@ export class WalletAccount {
   @Column({type: 'varchar', nullable: true })
   stripe_payment_method_id!: string | null;
 
+  /**
+   * True only after the user checks "Save this card for auto-reload" on a completed
+   * wallet top-up (or grandfathered when a PM was already stored before this flag existed).
+   */
+  @Column({ default: false })
+  auto_reload_opt_in!: boolean;
+
   /*
   Relations
   */

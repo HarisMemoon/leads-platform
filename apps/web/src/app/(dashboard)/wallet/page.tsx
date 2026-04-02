@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import Link from "next/link";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
   Check,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ClipboardList,
   CreditCard,
   Gift,
@@ -23,15 +24,26 @@ import {
   type WalletTransactionDto,
   getWalletMe,
   getWalletTransactions,
+  getWalletTransactionTotals,
+  getPaymentMethodPreview,
+  confirmStripeWalletTopUp,
   createStripePaymentIntent,
-  saveStripePaymentMethod,
+  patchWalletAutoReload,
   centsToNumber,
   dollarsInputToCents,
 } from "@/lib/wallet-api";
 import { queryKeys } from "@/lib/query-keys";
 
 const TOP_UP_AMOUNTS = [50, 100, 250, 500, 1000, 2500];
+const TX_PAGE_SIZE = 10;
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "");
+
+function formatCardBrand(brand: string) {
+  const b = brand.toLowerCase();
+  if (b === "amex") return "American Express";
+  if (b === "diners") return "Diners Club";
+  return brand.charAt(0).toUpperCase() + brand.slice(1);
+}
 
 function WalletTopupForm({
   finalAmount,
@@ -41,7 +53,11 @@ function WalletTopupForm({
 }: {
   finalAmount: number;
   saveCardForAutoReload: boolean;
-  onSuccess: (amountCents: number, paymentMethodId?: string) => Promise<void>;
+  onSuccess: (
+    amountCents: number,
+    paymentIntentId: string,
+    opts?: { saveCardForAutoReload?: boolean },
+  ) => Promise<void>;
   onError: (msg: string | null) => void;
 }) {
   const stripe = useStripe();
@@ -59,7 +75,10 @@ function WalletTopupForm({
     onError(null);
     try {
       const amountCents = dollarsInputToCents(finalAmount);
-      const { clientSecret } = await createStripePaymentIntent(amountCents);
+      const { clientSecret } = await createStripePaymentIntent(
+        amountCents,
+        saveCardForAutoReload,
+      );
       const card = elements.getElement(CardElement);
       if (!card) {
         throw new Error("Card input is not ready.");
@@ -73,13 +92,13 @@ function WalletTopupForm({
       }
 
       const pi = result.paymentIntent;
-      let paymentMethodId: string | undefined;
-      if (pi?.payment_method) {
-        paymentMethodId =
-          typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method.id;
+      if (!pi?.id) {
+        throw new Error("Missing payment intent from Stripe.");
       }
 
-      await onSuccess(amountCents, saveCardForAutoReload ? paymentMethodId : undefined);
+      await onSuccess(amountCents, pi.id, {
+        saveCardForAutoReload,
+      });
     } catch (e: unknown) {
       onError(e instanceof Error ? e.message : "Top-up failed");
     } finally {
@@ -225,7 +244,14 @@ function sparklineFromTransactions(
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function WalletPage() {
   const queryClient = useQueryClient();
-  const txQueryOpts = { limit: 50, offset: 0 } as const;
+  const [filter, setFilter] = useState<"all" | "credit" | "debit">("all");
+  const [txPage, setTxPage] = useState(1);
+
+  const txQueryOpts = {
+    limit: TX_PAGE_SIZE,
+    offset: (txPage - 1) * TX_PAGE_SIZE,
+    type: filter === "all" ? undefined : filter,
+  } as const;
 
   const {
     data: wallet,
@@ -239,7 +265,7 @@ export default function WalletPage() {
   });
 
   const {
-    data: txs = [],
+    data: txPageData,
     isLoading: txsLoading,
     isError: txsIsError,
     error: txsError,
@@ -247,6 +273,17 @@ export default function WalletPage() {
   } = useQuery({
     queryKey: queryKeys.wallet.transactions(txQueryOpts),
     queryFn: () => getWalletTransactions(txQueryOpts),
+  });
+
+  const { data: txTotals } = useQuery({
+    queryKey: queryKeys.wallet.transactionTotals,
+    queryFn: getWalletTransactionTotals,
+  });
+
+  const { data: pmPreview, isLoading: pmPreviewLoading } = useQuery({
+    queryKey: queryKeys.stripe.paymentMethodPreview,
+    queryFn: getPaymentMethodPreview,
+    enabled: !!wallet?.stripe_payment_method_id,
   });
 
   const loading = walletLoading || txsLoading;
@@ -265,31 +302,45 @@ export default function WalletPage() {
   const [autoReload, setAutoReload] = useState(false);
   const [reloadThreshold, setReloadThreshold] = useState(100);
   const [reloadAmount, setReloadAmount] = useState(500);
-  const [filter, setFilter] = useState<"all" | "credit" | "debit">("all");
   const [saveCardForAutoReload, setSaveCardForAutoReload] = useState(false);
+  const [autoReloadSaveError, setAutoReloadSaveError] = useState<string | null>(null);
 
   const balanceCents = wallet?.balance_cents ?? "0";
   const balanceNum = centsToNumber(balanceCents);
 
+  /** Server sets this only after "Save this card for auto-reload" on a completed top-up */
+  const autoReloadOptIn = Boolean(wallet?.auto_reload_opt_in);
+  const hasSavedCard = Boolean(wallet?.stripe_payment_method_id);
+
   const finalAmount = selectedAmount ?? (customAmount ? +customAmount : 0);
 
-  const filteredTxs = txs.filter((t) => filter === "all" || t.type === filter);
+  const txs = txPageData?.items ?? [];
+  const txTotalCount = txPageData?.total ?? 0;
+  const txTotalPages = Math.max(1, Math.ceil(txTotalCount / TX_PAGE_SIZE));
 
-  const totalIn = txs
-    .filter((t) => t.type === "credit")
-    .reduce((s, t) => s + centsToNumber(t.amount_cents), 0);
-  const totalOut = txs
-    .filter((t) => t.type === "debit")
-    .reduce((s, t) => s + centsToNumber(t.amount_cents), 0);
+  const totalIn = txTotals ? centsToNumber(txTotals.total_credits_cents) : 0;
+  const totalOut = txTotals ? centsToNumber(txTotals.total_debits_cents) : 0;
+  const lifetimeTxCount = txTotals?.transaction_count ?? 0;
 
   const sparkValues = useMemo(
     () => sparklineFromTransactions(txs, balanceCents),
     [txs, balanceCents],
   );
 
+  const txRangeLabel = useMemo(() => {
+    if (txTotalCount === 0) return "0";
+    const start = (txPage - 1) * TX_PAGE_SIZE + 1;
+    const end = Math.min(txPage * TX_PAGE_SIZE, txTotalCount);
+    return `${start}–${end}`;
+  }, [txPage, txTotalCount]);
+
   useEffect(() => {
     if (!wallet) return;
-    setAutoReload(wallet.auto_reload_enabled);
+    if (!wallet.auto_reload_opt_in) {
+      setAutoReload(false);
+    } else {
+      setAutoReload(wallet.auto_reload_enabled);
+    }
     if (wallet.auto_reload_threshold_cents != null) {
       setReloadThreshold(
         Math.max(50, Math.round(centsToNumber(wallet.auto_reload_threshold_cents) / 100)),
@@ -302,47 +353,60 @@ export default function WalletPage() {
     }
   }, [wallet]);
 
-  async function handleTopupSuccess(amountCents: number, paymentMethodId?: string) {
-    const startingBalance = centsToNumber(balanceCents);
-    const expectedBalance = startingBalance + amountCents;
+  useEffect(() => {
+    setTxPage(1);
+  }, [filter]);
 
-    // Webhook credit is async; poll briefly so UI updates instantly without page reload.
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      const latestWallet = await queryClient.fetchQuery({
-        queryKey: queryKeys.wallet.me,
-        queryFn: getWalletMe,
-      });
-      const latestTxs = await queryClient.fetchQuery({
-        queryKey: queryKeys.wallet.transactions(txQueryOpts),
-        queryFn: () => getWalletTransactions(txQueryOpts),
-      });
+  useEffect(() => {
+    if (txTotalCount === 0) return;
+    const maxPage = Math.ceil(txTotalCount / TX_PAGE_SIZE);
+    if (txPage > maxPage) setTxPage(Math.max(1, maxPage));
+  }, [txTotalCount, txPage]);
 
-      const hasStripeCredit = latestTxs.some(
-        (tx) => tx.type === "credit" && tx.reference_type === "stripe_topup" && Number(tx.amount_cents) === amountCents,
+  const autoReloadMutation = useMutation({
+    mutationFn: patchWalletAutoReload,
+    onSuccess: async () => {
+      setAutoReloadSaveError(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+      await queryClient.invalidateQueries({ queryKey: ["wallet", "transactions"] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.transactionTotals });
+    },
+    onError: (e: unknown) => {
+      setAutoReloadSaveError(
+        e instanceof Error ? e.message : "Could not save auto-reload settings",
       );
-      if (centsToNumber(latestWallet.balance_cents) >= expectedBalance || hasStripeCredit) {
-        break;
-      }
+    },
+  });
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+  async function handleSaveAutoReload() {
+    setAutoReloadSaveError(null);
+    if (!autoReloadOptIn) return;
+    if (autoReload) {
+      await autoReloadMutation.mutateAsync({
+        auto_reload_enabled: true,
+        auto_reload_threshold_cents: dollarsInputToCents(reloadThreshold),
+        auto_reload_amount_cents: dollarsInputToCents(reloadAmount),
+      });
+    } else {
+      await autoReloadMutation.mutateAsync({ auto_reload_enabled: false });
     }
+  }
+
+  async function handleTopupSuccess(
+    _amountCents: number,
+    paymentIntentId: string,
+    opts?: { saveCardForAutoReload?: boolean },
+  ) {
+    await confirmStripeWalletTopUp(paymentIntentId, {
+      savePaymentMethodForAutoReload: opts?.saveCardForAutoReload === true,
+    });
 
     await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
-    await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.transactions(txQueryOpts) });
+    await queryClient.invalidateQueries({ queryKey: ["wallet", "transactions"] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.transactionTotals });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.stripe.paymentMethodPreview });
     await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
-
-    if (paymentMethodId) {
-      try {
-        await saveStripePaymentMethod(paymentMethodId);
-        await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
-      } catch (e: unknown) {
-        setTopupError(
-          e instanceof Error
-            ? `${e.message} (wallet was funded; saving the card failed)`
-            : "Saving card for auto-reload failed",
-        );
-      }
-    }
 
     setSuccess(true);
     setSelectedAmount(null);
@@ -425,19 +489,179 @@ export default function WalletPage() {
 
         /* ── LAYOUT ── */
         .wl-body {
-          flex: 1;
           display: grid;
           grid-template-columns: 1fr 380px;
+          grid-template-areas: "main side";
           max-width: 1280px;
           width: 100%;
           margin: 0 auto;
-          padding: 32px 24px;
+          padding: 32px 24px 48px;
           gap: 24px;
           align-items: start;
         }
 
-        .wl-left { display: flex; flex-direction: column; gap: 20px; }
-        .wl-right { display: flex; flex-direction: column; gap: 20px; position: sticky; top: 88px; }
+        .wl-left {
+          grid-area: main;
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+        .wl-right {
+          grid-area: side;
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+          position: sticky;
+          top: 88px;
+          align-self: start;
+        }
+
+        .save-card-row {
+          position: relative;
+          display: flex;
+          align-items: flex-start;
+          gap: 14px;
+          padding: 14px 16px;
+          border-radius: 14px;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: linear-gradient(145deg, rgba(99,102,241,0.06), rgba(255,255,255,0.02));
+          cursor: pointer;
+          transition: border-color 0.2s, background 0.2s;
+          margin-bottom: 14px;
+        }
+        .save-card-row:hover {
+          border-color: rgba(99,102,241,0.35);
+          background: rgba(99,102,241,0.08);
+        }
+        .save-card-row input {
+          position: absolute;
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+        .save-card-check {
+          flex-shrink: 0;
+          width: 24px;
+          height: 24px;
+          border-radius: 7px;
+          border: 2px solid rgba(255,255,255,0.28);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-top: 1px;
+          transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+        }
+        .save-card-row:has(:checked) .save-card-check {
+          background: linear-gradient(135deg, #6366f1, #8b5cf6);
+          border-color: rgba(255,255,255,0.15);
+          box-shadow: 0 4px 14px rgba(99,102,241,0.35);
+        }
+        .save-card-copy {
+          flex: 1;
+          min-width: 0;
+        }
+        .save-card-title {
+          font-size: 14px;
+          font-weight: 600;
+          color: rgba(255,255,255,0.92);
+          letter-spacing: -0.2px;
+        }
+        .save-card-desc {
+          font-size: 12px;
+          color: rgba(255,255,255,0.38);
+          margin-top: 4px;
+          line-height: 1.45;
+        }
+
+        .pm-card {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 18px 18px;
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: linear-gradient(135deg, rgba(15,23,42,0.9), rgba(30,27,75,0.35));
+          box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+        }
+        .pm-card-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 12px;
+          background: rgba(99,102,241,0.15);
+          border: 1px solid rgba(99,102,241,0.25);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #a5b4fc;
+        }
+        .pm-card-lines {
+          flex: 1;
+          min-width: 0;
+        }
+        .pm-card-brand {
+          font-family: 'Syne', sans-serif;
+          font-size: 15px;
+          font-weight: 700;
+          color: #fff;
+          letter-spacing: -0.3px;
+        }
+        .pm-card-number {
+          font-family: 'DM Mono', monospace;
+          font-size: 14px;
+          color: rgba(255,255,255,0.75);
+          margin-top: 6px;
+          letter-spacing: 0.08em;
+        }
+        .pm-card-exp {
+          font-size: 11px;
+          color: rgba(255,255,255,0.35);
+          margin-top: 6px;
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+        }
+
+        .tx-pager {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-top: 16px;
+          padding-top: 16px;
+          border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .tx-pager-info {
+          font-size: 12px;
+          color: rgba(255,255,255,0.38);
+        }
+        .tx-pager-btns {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .tx-pager-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 8px 14px;
+          border-radius: 10px;
+          font-size: 12px;
+          font-weight: 600;
+          font-family: 'DM Sans', sans-serif;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: rgba(255,255,255,0.04);
+          color: rgba(255,255,255,0.85);
+          cursor: pointer;
+          transition: all 0.15s;
+        }
+        .tx-pager-btn:hover:not(:disabled) {
+          background: rgba(99,102,241,0.15);
+          border-color: rgba(99,102,241,0.35);
+          color: #fff;
+        }
+        .tx-pager-btn:disabled {
+          opacity: 0.35;
+          cursor: not-allowed;
+        }
 
         /* ── BALANCE HERO ── */
         .balance-hero {
@@ -507,13 +731,16 @@ export default function WalletPage() {
 
         .hero-stats {
           display: flex;
-          gap: 32px;
+          flex-wrap: wrap;
+          gap: 20px 32px;
           margin-top: 24px;
           padding-top: 24px;
           border-top: 1px solid rgba(255,255,255,0.08);
         }
 
-        .hero-stat {}
+        .hero-stat {
+          min-width: 120px;
+        }
         .hero-stat-val { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: #fff; }
         .hero-stat-label { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.4px; }
 
@@ -538,6 +765,8 @@ export default function WalletPage() {
 
         .card-header {
           display: flex; justify-content: space-between; align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
           margin-bottom: 20px;
         }
 
@@ -552,6 +781,7 @@ export default function WalletPage() {
         /* ── FILTERS ── */
         .filter-tabs {
           display: flex; gap: 6px;
+          flex-wrap: wrap;
           background: rgba(255,255,255,0.04);
           border: 1px solid rgba(255,255,255,0.07);
           border-radius: 10px;
@@ -838,28 +1068,6 @@ export default function WalletPage() {
           transition: all 0.15s;
         }
         .save-reload-btn:hover { background: rgba(99,102,241,0.25); color: #fff; }
-::-webkit-scrollbar {
-  width: 6px; /* Slim width */
-}
-
-::-webkit-scrollbar-track {
-  background: #080a0f; /* Match your background */
-}
-
-::-webkit-scrollbar-thumb {
-  background: #1a1d26; /* Dark grey/black thumb */
-  border-radius: 10px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #252936; /* Slightly lighter on hover */
-}
-
-/* For Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #1a1d26 #080a0f;
-}
         /* ── EMPTY STATE ── */
         .empty-tx {
           text-align: center; padding: 40px 20px;
@@ -867,8 +1075,18 @@ export default function WalletPage() {
         }
 
         @media (max-width: 900px) {
-          .wl-body { grid-template-columns: 1fr; padding: 20px 16px; }
-          .wl-right { position: static; }
+          .wl-body {
+            grid-template-columns: 1fr;
+            grid-template-areas: "side" "main";
+            padding: 20px 16px;
+          }
+          .wl-right {
+            position: static;
+            top: auto;
+          }
+          .hero-stats {
+            gap: 16px;
+          }
           .topup-amounts { grid-template-columns: repeat(3, 1fr); }
         }
       `}</style>
@@ -937,7 +1155,7 @@ export default function WalletPage() {
                     <div className="hero-stat-label">Total spent</div>
                   </div>
                   <div className="hero-stat">
-                    <div className="hero-stat-val">{txs.length}</div>
+                    <div className="hero-stat-val">{lifetimeTxCount}</div>
                     <div className="hero-stat-label">Transactions</div>
                   </div>
                   <div className="hero-stat">
@@ -957,11 +1175,21 @@ export default function WalletPage() {
               <div className="card-header">
                 <div>
                   <div className="card-title">Transaction history</div>
-                  <div className="card-sub">{filteredTxs.length} transactions</div>
+                  <div className="card-sub">
+                    {txTotalCount} total
+                    {txTotalCount > 0
+                      ? ` · rows ${txRangeLabel}`
+                      : ""}
+                  </div>
                 </div>
                 <div className="filter-tabs">
                   {(["all", "credit", "debit"] as const).map((f) => (
-                    <button key={f} className={`filter-tab ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>
+                    <button
+                      key={f}
+                      type="button"
+                      className={`filter-tab ${filter === f ? "active" : ""}`}
+                      onClick={() => setFilter(f)}
+                    >
                       {f === "all" ? "All" : f === "credit" ? "Credits" : "Debits"}
                     </button>
                   ))}
@@ -969,10 +1197,10 @@ export default function WalletPage() {
               </div>
 
               <div className="tx-list">
-                {filteredTxs.length === 0 ? (
+                {txs.length === 0 ? (
                   <div className="empty-tx">No transactions found.</div>
                 ) : (
-                  filteredTxs.map((tx) => (
+                  txs.map((tx) => (
                     <div key={tx.id} className="tx-item">
                       <div className={`tx-icon ${tx.type}`}>
                         <RefTypeIcon referenceType={tx.reference_type} />
@@ -1004,6 +1232,33 @@ export default function WalletPage() {
                   ))
                 )}
               </div>
+              {txTotalCount > 0 ? (
+                <div className="tx-pager">
+                  <span className="tx-pager-info">
+                    Page {txPage} of {txTotalPages}
+                  </span>
+                  <div className="tx-pager-btns">
+                    <button
+                      type="button"
+                      className="tx-pager-btn"
+                      disabled={txPage <= 1}
+                      onClick={() => setTxPage((p) => Math.max(1, p - 1))}
+                    >
+                      <ChevronLeft size={16} strokeWidth={2} aria-hidden />
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      className="tx-pager-btn"
+                      disabled={txPage >= txTotalPages}
+                      onClick={() => setTxPage((p) => Math.min(txTotalPages, p + 1))}
+                    >
+                      Next
+                      <ChevronRight size={16} strokeWidth={2} aria-hidden />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1055,25 +1310,24 @@ export default function WalletPage() {
                 />
               </div>
 
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  fontSize: 13,
-                  color: "rgba(255,255,255,0.65)",
-                  marginBottom: 12,
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
-              >
+              <label className="save-card-row">
                 <input
                   type="checkbox"
                   checked={saveCardForAutoReload}
                   onChange={(e) => setSaveCardForAutoReload(e.target.checked)}
-                  style={{ width: 16, height: 16, accentColor: "#6366f1" }}
+                  aria-label="Save this card for auto-reload"
                 />
-                Save this card for auto-reload (uses Stripe customer + wallet payment method)
+                <span className="save-card-check" aria-hidden>
+                  {saveCardForAutoReload ? (
+                    <Check size={14} strokeWidth={3} color="#ffffff" />
+                  ) : null}
+                </span>
+                <div className="save-card-copy">
+                  <div className="save-card-title">Save card for auto-reload</div>
+                  <div className="save-card-desc">
+                    Securely stores this card with Stripe for instant refills and automatic wallet top-ups.
+                  </div>
+                </div>
               </label>
 
               <Elements stripe={stripePromise}>
@@ -1103,23 +1357,74 @@ export default function WalletPage() {
               )}
 
               <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", textAlign: "center", marginTop: 12, lineHeight: 1.5 }}>
-                Your card is charged via Stripe, then your wallet is credited after webhook confirmation.
+                Your card is charged with Stripe; your wallet updates as soon as payment succeeds (webhooks stay in sync).
               </p>
             </div>
 
-            {/* Auto-reload */}
+            {/* Auto-reload — unlocks only after saving a card via the top-up checkbox */}
             <div className="autoreload-card">
               <div className="reload-toggle-row">
                 <div className="reload-title-group">
                   <div className="reload-title">Auto-reload</div>
                   <div className="reload-sub">Automatically refill your wallet</div>
                 </div>
-                <button className={`toggle ${autoReload ? "on" : ""}`} onClick={() => setAutoReload(!autoReload)}>
-                  <div className="toggle-thumb" />
-                </button>
+                {autoReloadOptIn ? (
+                  <button
+                    type="button"
+                    className={`toggle ${autoReload ? "on" : ""}`}
+                    onClick={() => setAutoReload(!autoReload)}
+                    aria-label={autoReload ? "Turn off auto-reload" : "Turn on auto-reload"}
+                  >
+                    <div className="toggle-thumb" />
+                  </button>
+                ) : (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      letterSpacing: "0.04em",
+                      textTransform: "uppercase",
+                      color: "rgba(255,255,255,0.28)",
+                    }}
+                  >
+                    {hasSavedCard
+                      ? "Card saved (unlock with checkbox)"
+                      : "Save card first"}
+                  </span>
+                )}
               </div>
 
-              {autoReload && (
+              {!autoReloadOptIn ? (
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "rgba(255,255,255,0.48)",
+                    lineHeight: 1.6,
+                    marginTop: 4,
+                  }}
+                >
+                  {hasSavedCard ? (
+                    <>
+                      Your card is saved, but auto-reload unlocks only after you
+                      complete a wallet top-up and check{" "}
+                      <strong style={{ color: "rgba(255,255,255,0.78)" }}>
+                        Save this card for auto-reload
+                      </strong>
+                      .
+                    </>
+                  ) : (
+                    <>
+                      To use auto-reload, add funds above and check{" "}
+                      <strong style={{ color: "rgba(255,255,255,0.78)" }}>
+                        Save this card for auto-reload
+                      </strong>{" "}
+                      before completing payment. That stores your card for automatic refills and unlocks these settings.
+                    </>
+                  )}
+                </p>
+              ) : null}
+
+              {autoReloadOptIn && autoReload && (
                 <div className="reload-settings">
                   <div className="range-field">
                     <div className="range-label-row">
@@ -1147,32 +1452,61 @@ export default function WalletPage() {
                     When your balance falls below <strong>${reloadThreshold}</strong>, we'll automatically charge your saved card and add <strong>${reloadAmount}</strong> to your wallet.
                   </div>
                   <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
-                    Preview only — saving auto-reload requires a Stripe-backed API (not wired yet). Values above reflect your account when loaded from the server.
+                    The server checks every few minutes when your balance is low.
                   </p>
-                  <button type="button" className="save-reload-btn" disabled style={{ opacity: 0.45, cursor: "not-allowed" }}>
-                    Save auto-reload settings
+                  {autoReloadSaveError ? (
+                    <p style={{ fontSize: 12, color: "#fca5a5", marginBottom: 8, lineHeight: 1.45 }}>
+                      {autoReloadSaveError}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="save-reload-btn"
+                    disabled={autoReloadMutation.isPending}
+                    onClick={() => void handleSaveAutoReload()}
+                  >
+                    {autoReloadMutation.isPending ? "Saving…" : "Save auto-reload settings"}
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Saved card — Stripe not wired; show server state only */}
             <div className="card" style={{ animationDelay: "0.12s" }}>
               <div className="card-header">
                 <div className="card-title">Payment method</div>
-                <button type="button" disabled style={{ background: "none", border: "none", color: "rgba(255,255,255,0.25)", fontSize: 12, cursor: "not-allowed", fontFamily: "'DM Sans', sans-serif" }}>
-                  Change
-                </button>
               </div>
               {wallet?.stripe_payment_method_id ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 16px" }}>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", fontFamily: "'DM Mono', monospace" }}>
-                    Saved method ID: {wallet.stripe_payment_method_id.slice(0, 12)}…
+                pmPreviewLoading ? (
+                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", padding: "10px 0" }}>
+                    Loading card…
                   </div>
-                </div>
+                ) : pmPreview?.paymentMethod ? (
+                  <div className="pm-card">
+                    <div className="pm-card-icon">
+                      <CreditCard size={22} strokeWidth={1.75} aria-hidden />
+                    </div>
+                    <div className="pm-card-lines">
+                      <div className="pm-card-brand">
+                        {formatCardBrand(pmPreview.paymentMethod.brand)}
+                      </div>
+                      <div className="pm-card-number">
+                        •••• •••• •••• {pmPreview.paymentMethod.last4}
+                      </div>
+                      <div className="pm-card-exp">
+                        Expires{" "}
+                        {String(pmPreview.paymentMethod.exp_month).padStart(2, "0")}/
+                        {String(pmPreview.paymentMethod.exp_year).slice(-2)}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.42)", padding: "8px 0", lineHeight: 1.5 }}>
+                    Card on file — masked details unavailable right now. Saved payments still work.
+                  </div>
+                )
               ) : (
                 <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", padding: "8px 0", lineHeight: 1.5 }}>
-                  No card on file. Add a payment method when Stripe checkout is connected.
+                  No card on file. Add funds and enable “Save card for auto-reload” to store a card.
                 </div>
               )}
             </div>

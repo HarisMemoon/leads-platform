@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { OnboardingProgress } from '../entities/onboarding-progress.entity';
 import { UpdateOnboardingDto } from './dto/update-onboarding.dto';
 import { WalletService } from '../wallet/wallet.service';
@@ -28,57 +28,68 @@ export class OnboardingService {
   }
 
   async update(userId: string, dto: UpdateOnboardingDto) {
-    const row = await this.repo.findOne({
-      where: { user: { id: userId } },
+    return this.dataSource.transaction(async (manager) => {
+      const row = await manager
+        .createQueryBuilder(OnboardingProgress, 'o')
+        .setLock('pessimistic_write')
+        .innerJoinAndSelect('o.user', 'user')
+        .where('user.id = :userId', { userId })
+        .getOne();
+
+      if (!row) throw new NotFoundException('Onboarding not found');
+
+      const wasAlreadyCompleted = !!row.completed_at;
+
+      if (dto.current_step) {
+        row.current_step = Math.min(9, Math.max(1, dto.current_step));
+      }
+
+      if (dto.completed_steps) {
+        const existing = row.completed_steps || [];
+        row.completed_steps = Array.from(new Set([
+          ...existing,
+          ...dto.completed_steps,
+        ]));
+      }
+
+      if (dto.data) {
+        row.data = {
+          ...(row.data || {}),
+          ...dto.data,
+        };
+      }
+
+      if (dto.completed_at !== undefined) {
+        row.completed_at = dto.completed_at;
+      }
+
+      /*
+      When onboarding is completed for the first time, credit the wallet from
+      step-4 selection (wallet_amount in dollars). Idempotent via initial_funding_applied.
+      Serialized with the row lock above so concurrent "finish" requests cannot double-credit.
+      */
+      if (dto.completed_at != null && !wasAlreadyCompleted) {
+        await this.applyInitialFundingFromOnboardingData(
+          userId,
+          row,
+          manager,
+        );
+      }
+
+      const shouldSyncDistributionRule =
+        row.current_step >= 5 ||
+        (row.completed_steps || []).includes(5);
+
+      if (shouldSyncDistributionRule && dto.data) {
+        await this.syncDistributionRuleFromStepFive(
+          userId,
+          row.data || {},
+          manager,
+        );
+      }
+
+      return manager.save(row);
     });
-
-    if (!row) throw new NotFoundException('Onboarding not found');
-
-    const wasAlreadyCompleted = !!row.completed_at;
-
-    if (dto.current_step) {
-      row.current_step = Math.min(9, Math.max(1, dto.current_step));
-    }
-
-    if (dto.completed_steps) {
-      const existing = row.completed_steps || [];
-      row.completed_steps = Array.from(new Set([
-        ...existing,
-        ...dto.completed_steps,
-      ]));
-    }
-
-    if (dto.data) {
-      row.data = {
-        ...(row.data || {}),
-        ...dto.data,
-      };
-    }
-
-    if (dto.completed_at !== undefined) {
-      row.completed_at = dto.completed_at;
-    }
-
-    /*
-    When onboarding is completed for the first time, credit the wallet from
-    step-4 selection (wallet_amount in dollars). Idempotent via initial_funding_applied.
-    */
-    if (
-      dto.completed_at != null &&
-      !wasAlreadyCompleted
-    ) {
-      await this.applyInitialFundingFromOnboardingData(userId, row);
-    }
-
-    const shouldSyncDistributionRule =
-      row.current_step >= 5 ||
-      (row.completed_steps || []).includes(5);
-
-    if (shouldSyncDistributionRule && dto.data) {
-      await this.syncDistributionRuleFromStepFive(userId, row.data || {});
-    }
-
-    return this.repo.save(row);
   }
 
   /**
@@ -87,12 +98,19 @@ export class OnboardingService {
   private async applyInitialFundingFromOnboardingData(
     userId: string,
     row: OnboardingProgress,
+    manager: EntityManager,
   ) {
     const data = row.data || {};
     if (data.skipped === true) {
       return;
     }
     if (data.initial_funding_applied === true) {
+      return;
+    }
+    /*
+    Step 4 already credited via Stripe + confirm; do not grant a second synthetic credit.
+    */
+    if (data.stripe_onboarding_funded === true) {
       return;
     }
 
@@ -119,6 +137,8 @@ export class OnboardingService {
       cents,
       'Onboarding initial funding',
       'onboarding_initial',
+      userId,
+      manager,
     );
 
     row.data = {
@@ -131,6 +151,7 @@ export class OnboardingService {
   private async syncDistributionRuleFromStepFive(
     userId: string,
     formData: Record<string, any>,
+    manager: EntityManager,
   ) {
     const autoBuy = Boolean(formData.auto_buy);
 
@@ -175,7 +196,7 @@ export class OnboardingService {
 
     const market = marketFilters[0] ?? 'default';
 
-    await this.dataSource.query(
+    await manager.query(
       `
       INSERT INTO distribution_rules (
         user_id,

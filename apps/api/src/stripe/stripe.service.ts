@@ -33,27 +33,39 @@ export class StripeService {
     private readonly walletService: WalletService,
   ) {
     const secretKey = configService.get<string>('STRIPE_SECRET_KEY');
-    const webhookSecret = configService.get<string>('STRIPE_WEBHOOK_SECRET');
+    const webhookSecret = (configService.get<string>('STRIPE_WEBHOOK_SECRET') ?? '').trim();
 
     if (!secretKey) {
       throw new Error('STRIPE_SECRET_KEY is not defined');
     }
-    if (!webhookSecret) {
-      throw new Error('STRIPE_WEBHOOK_SECRET is not defined');
-    }
 
     this.stripe = new Stripe(secretKey);
     this.webhookSecret = webhookSecret;
+    if (!webhookSecret) {
+      this.logger.warn(
+        'STRIPE_WEBHOOK_SECRET is empty — API starts, but /stripe/webhook will reject until you set it. Wallet top-ups still need Stripe to deliver payment_intent.succeeded (use Stripe CLI forward locally).',
+      );
+    }
     this.appBaseUrl =
       configService.get<string>('APP_BASE_URL')?.replace(/\/$/, '') ??
       'http://localhost:3000';
   }
 
-  async createPaymentIntent(userId: string, amountCents: number) {
+  async createPaymentIntent(
+    userId: string,
+    amountCents: number,
+    options?: { saveForFutureUse?: boolean },
+  ) {
+    const stripeCustomerId = await this.ensureStripeCustomerId(userId);
+    const saveForFutureUse = options?.saveForFutureUse === true;
+
     const paymentIntent = await this.stripe.paymentIntents.create({
       amount: amountCents,
       currency: 'usd',
-      automatic_payment_methods: { enabled: true },
+      customer: stripeCustomerId,
+      /** Card only — avoids Stripe Link / other APMs bundled with `automatic_payment_methods`. */
+      payment_method_types: ['card'],
+      ...(saveForFutureUse ? { setup_future_usage: 'off_session' as const } : {}),
       metadata: {
         userId,
         amountCents: String(amountCents),
@@ -67,27 +79,72 @@ export class StripeService {
     return { clientSecret: paymentIntent.client_secret };
   }
 
-  async createOffSessionPaymentIntent(
+  /**
+   * Off-session charge for wallet auto-reload (cron). Credits the wallet as soon as Stripe
+   * returns `succeeded`, same as the normal top-up path — webhooks alone are not enough when
+   * `payment_intent.succeeded` is delayed or not configured locally.
+   */
+  async chargeWalletAutoReload(
     userId: string,
     amountCents: number,
     paymentMethodId: string,
     stripeCustomerId?: string | null,
-  ) {
-    return this.stripe.paymentIntents.create({
+  ): Promise<Stripe.PaymentIntent> {
+    const customerId =
+      stripeCustomerId ?? (await this.ensureStripeCustomerId(userId));
+
+    const intent = await this.stripe.paymentIntents.create({
       amount: amountCents,
       currency: 'usd',
       confirm: true,
       off_session: true,
       payment_method: paymentMethodId,
-      customer: stripeCustomerId ?? undefined,
+      customer: customerId,
+      /** Match wallet top-up intents — card-only avoids Link / other APMs breaking off-session. */
+      payment_method_types: ['card'],
       metadata: {
         userId,
         amountCents: String(amountCents),
+        purpose: 'wallet_auto_reload',
       },
     });
+
+    if (intent.status === 'succeeded') {
+      await this.walletService.applyStripeTopUp(
+        userId,
+        amountCents,
+        intent.id,
+        'Wallet auto-reload',
+      );
+      return intent;
+    }
+
+    if (intent.status === 'processing') {
+      this.logger.log(
+        `Auto-reload PaymentIntent ${intent.id} processing; wallet will credit via webhook when confirmed.`,
+      );
+      return intent;
+    }
+
+    const detail =
+      intent.last_payment_error?.message ??
+      intent.last_payment_error?.code ??
+      `status=${intent.status}`;
+    this.logger.error(
+      `Auto-reload PaymentIntent ${intent.id} did not succeed: ${detail}`,
+    );
+    throw new Error(
+      `Auto-reload payment did not succeed (${intent.status}): ${detail}`,
+    );
   }
 
+  /** Event types must stay in sync with `STRIPE_WEBHOOK_EVENT_TYPES` in stripe-webhook-events.ts. */
   async handleWebhook(rawBody: Buffer, signature: string | undefined) {
+    if (!this.webhookSecret) {
+      throw new BadRequestException(
+        'Stripe webhooks are not configured. Set STRIPE_WEBHOOK_SECRET in apps/api/.env',
+      );
+    }
     if (!signature) {
       throw new BadRequestException('Missing Stripe signature');
     }
@@ -153,9 +210,19 @@ export class StripeService {
   async savePaymentMethod(userId: string, paymentMethodId: string) {
     const stripeCustomerId = await this.ensureStripeCustomerId(userId);
 
-    await this.stripe.paymentMethods.attach(paymentMethodId, {
-      customer: stripeCustomerId,
-    });
+    try {
+      await this.stripe.paymentMethods.attach(paymentMethodId, {
+        customer: stripeCustomerId,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '';
+      if (
+        !msg.includes('already been attached') &&
+        !msg.includes('already attached')
+      ) {
+        throw err;
+      }
+    }
 
     await this.stripe.customers.update(stripeCustomerId, {
       invoice_settings: {
@@ -174,6 +241,100 @@ export class StripeService {
     await this.walletRepo.save(wallet);
 
     return { success: true };
+  }
+
+  /**
+   * Masked card details for wallet UI (brand + last4 + expiry). Never exposes full PAN.
+   */
+  async getPaymentMethodPreview(userId: string): Promise<{
+    paymentMethod: {
+      brand: string;
+      last4: string;
+      exp_month: number;
+      exp_year: number;
+    } | null;
+  }> {
+    const wallet = await this.walletRepo.findOne({
+      where: { user: { id: userId } },
+    });
+    if (!wallet?.stripe_payment_method_id) {
+      return { paymentMethod: null };
+    }
+    try {
+      const pm = await this.stripe.paymentMethods.retrieve(
+        wallet.stripe_payment_method_id,
+      );
+      if (pm.type === 'card' && pm.card) {
+        return {
+          paymentMethod: {
+            brand: pm.card.brand,
+            last4: pm.card.last4,
+            exp_month: pm.card.exp_month,
+            exp_year: pm.card.exp_year,
+          },
+        };
+      }
+    } catch (e: unknown) {
+      this.logger.warn(
+        `Payment method preview failed: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+    return { paymentMethod: null };
+  }
+
+  /**
+   * After a succeeded wallet top-up, store the PaymentMethod used on the intent for off-session charges.
+   * Expects the PaymentIntent to have been created with a Stripe Customer (see createPaymentIntent).
+   */
+  private async persistPaymentMethodFromSucceededIntent(
+    userId: string,
+    intent: Stripe.PaymentIntent,
+  ): Promise<void> {
+    const rawPm = intent.payment_method;
+    if (!rawPm) {
+      throw new BadRequestException(
+        'No payment method on this payment. Try again with a card payment.',
+      );
+    }
+    const paymentMethodId =
+      typeof rawPm === 'string' ? rawPm : rawPm.id;
+
+    const stripeCustomerId = await this.ensureStripeCustomerId(userId);
+    const pm = await this.stripe.paymentMethods.retrieve(paymentMethodId);
+
+    if (!pm.customer) {
+      try {
+        await this.stripe.paymentMethods.attach(paymentMethodId, {
+          customer: stripeCustomerId,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (
+          !msg.includes('already been attached') &&
+          !msg.includes('already attached')
+        ) {
+          throw err;
+        }
+      }
+    } else if (pm.customer !== stripeCustomerId) {
+      throw new BadRequestException(
+        'Payment method is associated with a different account.',
+      );
+    }
+
+    await this.stripe.customers.update(stripeCustomerId, {
+      invoice_settings: { default_payment_method: paymentMethodId },
+    });
+
+    const wallet = await this.walletRepo.findOne({
+      where: { user: { id: userId } },
+    });
+    if (!wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+    wallet.stripe_payment_method_id = paymentMethodId;
+    wallet.auto_reload_opt_in = true;
+    await this.walletRepo.save(wallet);
   }
 
   async createCustomerPortal(userId: string) {
@@ -201,12 +362,53 @@ export class StripeService {
       return;
     }
 
-    await this.walletService.topUp(
+    await this.walletService.applyStripeTopUp(
       userId,
       Math.floor(amountCents),
+      intent.id,
       'Stripe top-up',
-      'stripe_topup',
     );
+  }
+
+  /**
+   * Called right after Stripe.js confirms payment so the wallet updates without waiting for webhooks.
+   * Optionally persists the card from the PaymentIntent for auto-reload (no client-side PM id needed).
+   */
+  async confirmWalletTopUp(
+    userId: string,
+    paymentIntentId: string,
+    options?: { savePaymentMethodForAutoReload?: boolean },
+  ) {
+    const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ['payment_method'],
+    });
+
+    if (intent.status !== 'succeeded') {
+      throw new BadRequestException('Payment is not completed');
+    }
+
+    const metaUserId = intent.metadata?.userId;
+    if (!metaUserId || metaUserId !== userId) {
+      throw new BadRequestException('Payment does not belong to this account');
+    }
+
+    const amountCents = Number(intent.metadata?.amountCents ?? intent.amount_received);
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
+      throw new BadRequestException('Invalid payment amount');
+    }
+
+    await this.walletService.applyStripeTopUp(
+      userId,
+      Math.floor(amountCents),
+      intent.id,
+      'Stripe top-up',
+    );
+
+    if (options?.savePaymentMethodForAutoReload) {
+      await this.persistPaymentMethodFromSucceededIntent(userId, intent);
+    }
+
+    return this.walletService.getWallet(userId);
   }
 
   private async handleSubscriptionCreated(stripeSub: Stripe.Subscription) {

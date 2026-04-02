@@ -166,7 +166,7 @@ function MultiSelect({
   const remove = (value: string) => onChange(selected.filter((s) => s !== value));
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, position: "relative" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, position: "relative", zIndex: open ? 50 : undefined }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         {icon && <span style={{ color: "rgba(255,255,255,0.3)" }}>{icon}</span>}
         <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontWeight: 500 }}>{label}</span>
@@ -210,13 +210,23 @@ function MultiSelect({
       </button>
 
       {open && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50, marginTop: 4,
-          borderRadius: 12, border: "1px solid rgba(99,102,241,0.2)",
-          background: "#13141f",
-          boxShadow: "0 12px 40px rgba(0,0,0,0.6)",
-          maxHeight: 240, overflowY: "auto",
-        }}>
+        <div
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            zIndex: 200,
+            marginTop: 4,
+            borderRadius: 12,
+            border: "1px solid rgba(99,102,241,0.28)",
+            background: "#13141f",
+            boxShadow: "0 16px 48px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.04)",
+            maxHeight: 240,
+            overflowY: "auto",
+          }}
+        >
           {options.map((opt) => {
             const isSelected = selected.includes(opt.value);
             return (
@@ -250,13 +260,15 @@ function MultiSelect({
 /* ─── SectionCard ────────────────────────────────────────────────────────── */
 
 function SectionCard({
-  children, accentColor, icon, title, subtitle,
+  children, accentColor, icon, title, subtitle, stackAboveNeighbors,
 }: {
   children: React.ReactNode;
   accentColor?: string;
   icon?: React.ReactNode;
   title?: string;
   subtitle?: string;
+  /** Raise stacking so portaled-style dropdowns (MultiSelect) paint above the next card */
+  stackAboveNeighbors?: boolean;
 }) {
   return (
     <div style={{
@@ -264,7 +276,9 @@ function SectionCard({
       border: "1px solid rgba(255,255,255,0.07)",
       borderRadius: 16, padding: "22px 22px 20px",
       marginBottom: 14,
-      position: "relative", overflow: "hidden",
+      position: "relative",
+      overflow: "visible",
+      zIndex: stackAboveNeighbors ? 20 : undefined,
       transition: "border-color 0.2s",
     }}>
       {accentColor && (
@@ -561,6 +575,7 @@ function DistributionForm({ initial, walletBalanceCents }: { initial: Distributi
 
       {/* ── Market & lead filters ── */}
       <SectionCard
+        stackAboveNeighbors
         accentColor="#06b6d4"
         icon={<Sliders size={15} color="#67e8f9" aria-hidden />}
         title="Market &amp; lead filters"
@@ -711,10 +726,6 @@ export default function DistributionSettingsPage() {
         @keyframes pulse { 0%,100% { opacity: 1; box-shadow: 0 0 6px currentColor; } 50% { opacity: 0.6; box-shadow: 0 0 12px currentColor; } }
         input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button { opacity: 0.35; }
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #080a0f; }
-        ::-webkit-scrollbar-thumb { background: #1a1d26; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #252936; }
       `}</style>
 
       <div style={{
