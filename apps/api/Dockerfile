@@ -4,8 +4,10 @@
 
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
+# Many hosts set NODE_ENV=production during `docker build`, which makes `npm install`
+# skip devDependencies — but we need @nestjs/cli to run `nest build`.
 COPY package.json ./
-RUN npm install
+RUN npm install --include=dev
 COPY . .
 RUN npm run build
 
