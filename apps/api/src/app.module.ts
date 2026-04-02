@@ -37,17 +37,12 @@ import { MarketAlertsModule } from './market-alerts/market-alerts.module';
       inject: [ConfigService],
 
       useFactory: async (config: ConfigService) => {
-        const { url, ssl } = await resolvePostgresUrlForIpv4Egress(
+        const resolved = await resolvePostgresUrlForIpv4Egress(
           config.get<string>('DATABASE_URL'),
         )
 
-        return {
-
-          type: 'postgres',
-
-          url,
-
-          ...(ssl !== undefined ? { ssl } : {}),
+        const shared = {
+          type: 'postgres' as const,
 
           /*
           Auto load entities from modules
@@ -65,7 +60,7 @@ import { MarketAlertsModule } from './market-alerts/market-alerts.module';
           Logging useful during development
           */
 
-          logging: ['error', 'warn'],
+          logging: ['error', 'warn'] as ('error' | 'warn')[],
 
           /*
           Migration settings
@@ -83,6 +78,23 @@ import { MarketAlertsModule } from './market-alerts/market-alerts.module';
 
           retryAttempts: 5,
           retryDelay: 3000,
+        }
+
+        if (resolved.kind === 'url') {
+          return {
+            ...shared,
+            url: resolved.url,
+          }
+        }
+
+        return {
+          ...shared,
+          host: resolved.host,
+          port: resolved.port,
+          username: resolved.username,
+          password: resolved.password,
+          database: resolved.database,
+          ssl: resolved.ssl,
         }
       },
     }),
