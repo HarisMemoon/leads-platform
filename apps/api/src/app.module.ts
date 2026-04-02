@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { ScheduleModule } from '@nestjs/schedule'
+import { resolvePostgresUrlForIpv4Egress } from './database/resolve-postgres-url-ipv4'
 
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
@@ -35,19 +36,18 @@ import { MarketAlertsModule } from './market-alerts/market-alerts.module';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
 
-      useFactory: (config: ConfigService) => {
-
-        const databaseUrl = config.get<string>('DATABASE_URL')
-
-        if (!databaseUrl) {
-          throw new Error('DATABASE_URL is not defined')
-        }
+      useFactory: async (config: ConfigService) => {
+        const { url, ssl } = await resolvePostgresUrlForIpv4Egress(
+          config.get<string>('DATABASE_URL'),
+        )
 
         return {
 
           type: 'postgres',
 
-          url: databaseUrl,
+          url,
+
+          ...(ssl !== undefined ? { ssl } : {}),
 
           /*
           Auto load entities from modules

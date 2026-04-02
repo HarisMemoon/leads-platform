@@ -1,6 +1,9 @@
 import 'reflect-metadata';
+import * as dns from 'node:dns';
 import { DataSource } from 'typeorm';
 import * as dotenv from 'dotenv';
+
+dns.setDefaultResultOrder('ipv4first');
 
 dotenv.config({ path: '.env' });
 

@@ -1,8 +1,12 @@
 import 'reflect-metadata';
+import * as dns from 'node:dns';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import * as express from 'express';
+
+// Extra safety for any code path that still uses default DNS ordering (e.g. some drivers).
+dns.setDefaultResultOrder('ipv4first');
 
 async function bootstrap() {
   // bodyParser: false so we can register raw-body for the webhook route before JSON parsing

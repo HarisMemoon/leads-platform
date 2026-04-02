@@ -13,7 +13,7 @@ function main(): void {
   const redisUrl = process.env.REDIS_URL?.trim();
 
   if (!databaseUrl) {
-    console.error('DATABASE_URL is not set. Copy from Neon or Supabase into apps/api/.env');
+    console.error('DATABASE_URL is not set. Copy from Supabase (Project Settings → Database) into apps/api/.env');
     process.exit(1);
   }
 
