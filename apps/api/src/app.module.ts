@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { ScheduleModule } from '@nestjs/schedule'
 import { resolvePostgresUrlForIpv4Egress } from './database/resolve-postgres-url-ipv4'
+import { isPostgresUrlUsingTls, typeormTlsForPostgres } from './database/postgres-ssl'
 
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
@@ -81,9 +82,13 @@ import { MarketAlertsModule } from './market-alerts/market-alerts.module';
         }
 
         if (resolved.kind === 'url') {
+          const tlsAssist = isPostgresUrlUsingTls(resolved.url)
+            ? { ssl: typeormTlsForPostgres() }
+            : {}
           return {
             ...shared,
             url: resolved.url,
+            ...tlsAssist,
           }
         }
 

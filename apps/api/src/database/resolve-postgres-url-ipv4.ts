@@ -1,6 +1,7 @@
 import * as dns from 'node:dns';
 import type { TlsOptions } from 'tls';
 import { normalizeEnvConnectionString } from '../utils/normalize-env-connection-string';
+import { typeormTlsForPostgres } from './postgres-ssl';
 
 /**
  * Render and similar hosts often lack IPv6 egress. Supabase DNS can return only AAAA;
@@ -101,9 +102,6 @@ export async function resolvePostgresUrlForIpv4Egress(
     username,
     password,
     database,
-    ssl: {
-      rejectUnauthorized: true,
-      servername: hostForTls,
-    } as TlsOptions,
+    ssl: typeormTlsForPostgres(hostForTls),
   };
 }
