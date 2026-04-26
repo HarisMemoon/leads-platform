@@ -85,7 +85,7 @@ export default function MarketplacePage() {
     page,
     limit: PAGE_SIZE,
     type: type.trim() || undefined,
-    lead_mode: leadMode || undefined,
+    exclusivity: leadMode === "exclusive" ? "exclusive" : "shared",
     city: city.trim() || undefined,
     state: state.trim() || undefined,
     property_type: propertyType.trim() || undefined,

@@ -13,9 +13,9 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
   useEffect(() => {
     let cancelled = false;
     const token = getAccessToken();
-    setReady(false);
 
     if (!token) {
+      setReady(false);
       router.replace("/login");
       return;
     }
@@ -30,7 +30,10 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
         if (!cancelled) setReady(true);
       } catch {
         clearAccessToken();
-        if (!cancelled) router.replace("/login");
+        if (!cancelled) {
+          setReady(false);
+          router.replace("/login");
+        }
       }
     })();
 

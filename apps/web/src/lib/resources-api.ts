@@ -1,4 +1,4 @@
-import { apiGet } from "@/lib/api";
+import { ApiError, apiGet } from "@/lib/api";
 
 export type ResourcesContentItem = {
   id: string;
@@ -12,6 +12,18 @@ export type ResourcesContentItem = {
   updated_at: string;
 };
 
-export function getPublishedResourceItems() {
-  return apiGet<ResourcesContentItem[]>("/resources/items");
+export async function getPublishedResourceItems() {
+  try {
+    return await apiGet<ResourcesContentItem[]>("/resources/items");
+  } catch (error) {
+    if (error instanceof ApiError) {
+      console.warn("Resources endpoint unavailable; showing empty resources list.", {
+        status: error.status,
+        message: error.message,
+      });
+      return [];
+    }
+
+    throw error;
+  }
 }
