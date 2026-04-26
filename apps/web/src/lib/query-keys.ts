@@ -43,11 +43,28 @@ export const queryKeys = {
   },
   admin: {
     metrics: ["admin", "metrics"] as const,
+    metricsBreakdown: ["admin", "metrics", "breakdown"] as const,
     audit: ["admin", "audit"] as const,
     engine: ["admin", "distribution-engine"] as const,
+    refundRequests: ["admin", "refund-requests"] as const,
+    resourceItems: ["admin", "resources", "items"] as const,
+    leads: (opts?: { page?: number; limit?: number }) =>
+      ["admin", "leads", opts ?? {}] as const,
+    duplicateGroups: ["admin", "lead-duplicate-groups"] as const,
+    ingestionBatches: ["admin", "ingestion", "batches"] as const,
+    ingestionStats: ["admin", "ingestion", "stats"] as const,
+    gradingQueue: (opts: { bucket?: string; page?: number; limit?: number }) =>
+      ["admin", "grading", "queue", opts] as const,
+    gradingStats: ["admin", "grading", "stats"] as const,
+    gradingOverrides: ["admin", "grading", "overrides"] as const,
+    integrationsHealth: ["admin", "integrations", "health"] as const,
+    plans: ["admin", "subscription-plans"] as const,
   },
   subscriptions: {
     me: ["subscriptions", "me"] as const,
     plans: ["subscriptions", "plans"] as const,
+  },
+  resources: {
+    items: ["resources", "items"] as const,
   },
 };

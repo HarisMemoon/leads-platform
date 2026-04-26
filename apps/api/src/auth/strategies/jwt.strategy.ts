@@ -31,6 +31,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         role: payload.role,
         full_name: null as string | null,
         company_name: null as string | null,
+        distribution_locked: false,
       };
     }
     return {
@@ -39,6 +40,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: user.role,
       full_name: user.full_name,
       company_name: user.company_name,
+      distribution_locked: Boolean(user.distribution_locked),
     };
   }
 }

@@ -1,8 +1,219 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { LeadDetailResponse, MarketplaceLeadRow } from "@/lib/leads-api";
 import { ApiError } from "@/lib/api";
+import { createRefundRequest, patchAssignmentLifecycle } from "@/lib/leads-api";
+import { queryKeys } from "@/lib/query-keys";
+
+const PIPELINE_PHASES = [
+  "open",
+  "contacted",
+  "under_contract",
+  "closed_won",
+] as const;
+
+const PIPELINE_LABELS: Record<(typeof PIPELINE_PHASES)[number], string> = {
+  open: "Open",
+  contacted: "Contacted",
+  under_contract: "Under contract",
+  closed_won: "Closed",
+};
+
+function MyLeadPipelineBlock({
+  leadId,
+  assignment,
+}: {
+  leadId: string;
+  assignment: NonNullable<LeadDetailResponse["lead_assignments"]>[number];
+}) {
+  const qc = useQueryClient();
+  const aid = assignment.assignment_id;
+  const [phase, setPhase] = useState(assignment.lifecycle_phase ?? "open");
+  const [contract, setContract] = useState(
+    assignment.contract_price_cents != null
+      ? String(Number(assignment.contract_price_cents) / 100)
+      : "",
+  );
+  const [sell, setSell] = useState(
+    assignment.sell_price_cents != null ? String(Number(assignment.sell_price_cents) / 100) : "",
+  );
+  const [notes, setNotes] = useState(assignment.buyer_notes ?? "");
+  const [refundReason, setRefundReason] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPhase(assignment.lifecycle_phase ?? "open");
+    setContract(
+      assignment.contract_price_cents != null
+        ? String(Number(assignment.contract_price_cents) / 100)
+        : "",
+    );
+    setSell(
+      assignment.sell_price_cents != null ? String(Number(assignment.sell_price_cents) / 100) : "",
+    );
+    setNotes(assignment.buyer_notes ?? "");
+  }, [assignment]);
+
+  const saveMut = useMutation({
+    mutationFn: () =>
+      patchAssignmentLifecycle(aid, {
+        lifecycle_phase: phase,
+        contract_price_cents: contract.trim() === "" ? null : Math.round(Number(contract) * 100),
+        sell_price_cents: sell.trim() === "" ? null : Math.round(Number(sell) * 100),
+        buyer_notes: notes.trim() === "" ? null : notes.trim(),
+      }),
+    onSuccess: async () => {
+      setMsg("Pipeline saved.");
+      await qc.invalidateQueries({ queryKey: queryKeys.leads.detail(leadId) });
+      await qc.invalidateQueries({ queryKey: ["leads", "my"] });
+    },
+    onError: (e: Error) => setMsg(e.message || "Save failed"),
+  });
+
+  const refundMut = useMutation({
+    mutationFn: () => createRefundRequest(aid, refundReason.trim()),
+    onSuccess: async () => {
+      setMsg("Refund request submitted.");
+      setRefundReason("");
+      await qc.invalidateQueries({ queryKey: ["leads", "my"] });
+    },
+    onError: (e: Error) => setMsg(e.message || "Refund request failed"),
+  });
+
+  return (
+    <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+      <div className="ldm-section-h">Pipeline &amp; deal</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <label style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+          Stage
+          <select
+            value={phase}
+            onChange={(e) => setPhase(e.target.value)}
+            style={{
+              display: "block",
+              width: "100%",
+              marginTop: 6,
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.25)",
+              color: "#fff",
+            }}
+          >
+            {PIPELINE_PHASES.map((p) => (
+              <option key={p} value={p}>
+                {PIPELINE_LABELS[p]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+          Contract price (USD)
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={contract}
+            onChange={(e) => setContract(e.target.value)}
+            style={{
+              display: "block",
+              width: "100%",
+              marginTop: 6,
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.25)",
+              color: "#fff",
+            }}
+          />
+        </label>
+        <label style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+          Sell / exit price (USD)
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            value={sell}
+            onChange={(e) => setSell(e.target.value)}
+            style={{
+              display: "block",
+              width: "100%",
+              marginTop: 6,
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.25)",
+              color: "#fff",
+            }}
+          />
+        </label>
+        <label style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+          Notes
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            style={{
+              display: "block",
+              width: "100%",
+              marginTop: 6,
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(0,0,0,0.25)",
+              color: "#fff",
+              resize: "vertical",
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="ldm-buy"
+          disabled={saveMut.isPending}
+          onClick={() => saveMut.mutate()}
+        >
+          {saveMut.isPending ? "Saving…" : "Save pipeline"}
+        </button>
+      </div>
+      <div className="ldm-section-h" style={{ marginTop: 22 }}>
+        CRM sync
+      </div>
+      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
+        GHL: {assignment.ghl_sync_status} · CRM: {assignment.crm_sync_status}
+      </p>
+      <div className="ldm-section-h" style={{ marginTop: 18 }}>
+        Refund request
+      </div>
+      <textarea
+        placeholder="Reason (required to submit)"
+        value={refundReason}
+        onChange={(e) => setRefundReason(e.target.value)}
+        rows={2}
+        style={{
+          width: "100%",
+          padding: "8px 10px",
+          borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(0,0,0,0.25)",
+          color: "#fff",
+          marginBottom: 8,
+        }}
+      />
+      <button
+        type="button"
+        className="ldm-hold"
+        disabled={refundMut.isPending || !refundReason.trim()}
+        onClick={() => refundMut.mutate()}
+      >
+        {refundMut.isPending ? "Submitting…" : "Submit refund request"}
+      </button>
+      {msg ? <p className="ldm-err" style={{ marginTop: 10, color: "#a5b4fc" }}>{msg}</p> : null}
+    </div>
+  );
+}
 
 export function exclusivityLabel(e: string) {
   return (
@@ -46,6 +257,18 @@ export function fmtDateModal(iso: string) {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function modalMetaValue(
+  meta: Record<string, unknown> | undefined,
+  keys: string[],
+  fallback = "—",
+) {
+  for (const key of keys) {
+    const value = meta?.[key];
+    if (value != null && String(value).trim() !== "") return String(value);
+  }
+  return fallback;
 }
 
 export function QualityBar({ score }: { score: number }) {
@@ -116,6 +339,7 @@ const modalStyles = `
   .ldm-item.full { grid-column: 1 / -1; }
   .ldm-label { font-size: 10px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 5px; }
   .ldm-value { font-size: 13px; color: rgba(255,255,255,0.85); }
+  .ldm-blur { filter: blur(4px); user-select: none; opacity: 0.76; }
   .ldm-price-row { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; padding: 18px; background: rgba(99,102,241,0.08); border-radius: 14px; border: 1px solid rgba(99,102,241,0.2); }
   .ldm-price-big { font-family: 'Syne', sans-serif; font-size: 32px; font-weight: 800; }
   .ldm-section-h { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.8px; margin: 18px 0 10px; }
@@ -138,6 +362,8 @@ export type LeadDetailModalProps = {
   detail: LeadDetailResponse | undefined;
   detailLoading: boolean;
   purchaseActions?: boolean;
+  /** When viewing a purchased lead from My Leads — show pipeline + refund */
+  enableAssignmentPipeline?: boolean;
   walletBalanceCents?: number;
   reserveMutation?: UseMutationResult<
     { reserved_until: string; ttl_seconds: number },
@@ -156,6 +382,7 @@ export function LeadDetailModal({
   detail,
   detailLoading,
   purchaseActions = false,
+  enableAssignmentPipeline = false,
   walletBalanceCents = 0,
   reserveMutation,
   buyMutation,
@@ -176,6 +403,9 @@ export function LeadDetailModal({
     : listPreview?.list_price_anchor_cents
       ? Number(listPreview.list_price_anchor_cents)
       : null;
+  const modalMeta = modalLead?.metadata ?? listPreview?.metadata ?? {};
+  const shouldBlurPrivate = purchaseActions;
+  const privateClass = shouldBlurPrivate ? " ldm-blur" : "";
 
   return (
     <>
@@ -199,55 +429,53 @@ export function LeadDetailModal({
             <>
               <div className="ldm-grid">
                 <div className="ldm-item">
-                  <div className="ldm-label">Market</div>
-                  <div className="ldm-value">{modalLead?.market ?? listPreview?.market}</div>
+                  <div className="ldm-label">Date</div>
+                  <div className="ldm-value">{fmtDateModal(modalLead?.created_at ?? listPreview?.created_at ?? "")}</div>
                 </div>
                 <div className="ldm-item">
                   <div className="ldm-label">Lead type</div>
                   <div className="ldm-value">{modalLead?.type ?? listPreview?.type}</div>
                 </div>
                 <div className="ldm-item">
-                  <div className="ldm-label">Exclusivity</div>
-                  <div className="ldm-value">
-                    {(() => {
-                      const e = modalLead?.exclusivity ?? listPreview?.exclusivity ?? "";
-                      const ec = exclusivityColor(e);
-                      return (
-                        <span className="ldm-excl" style={{ background: ec.bg, color: ec.color, borderColor: ec.border, fontSize: 12 }}>
-                          {exclusivityLabel(e)}
-                        </span>
-                      );
-                    })()}
-                  </div>
+                  <div className="ldm-label">City</div>
+                  <div className="ldm-value">{modalMetaValue(modalMeta, ["city"])}</div>
                 </div>
                 <div className="ldm-item">
-                  <div className="ldm-label">Status</div>
-                  <div className="ldm-value" style={{ textTransform: "capitalize" }}>
-                    {modalLead?.status ?? "—"}
-                  </div>
+                  <div className="ldm-label">State</div>
+                  <div className="ldm-value">{modalMetaValue(modalMeta, ["state"])}</div>
                 </div>
-                {modalLead?.source && (
-                  <div className="ldm-item">
-                    <div className="ldm-label">Source</div>
-                    <div className="ldm-value">{modalLead.source}</div>
-                  </div>
-                )}
                 <div className="ldm-item">
-                  <div className="ldm-label">Listed</div>
-                  <div className="ldm-value">{fmtDateModal(modalLead?.created_at ?? listPreview?.created_at ?? "")}</div>
+                  <div className="ldm-label">Property type</div>
+                  <div className="ldm-value">{modalMetaValue(modalMeta, ["property_type", "propertyType"])}</div>
+                </div>
+                <div className="ldm-item">
+                  <div className="ldm-label">Timeline</div>
+                  <div className="ldm-value">{modalMetaValue(modalMeta, ["timeline"])}</div>
+                </div>
+                <div className="ldm-item">
+                  <div className="ldm-label">Condition</div>
+                  <div className="ldm-value">{modalMetaValue(modalMeta, ["condition"])}</div>
+                </div>
+                <div className="ldm-item">
+                  <div className="ldm-label">ZIP</div>
+                  <div className="ldm-value">{modalMetaValue(modalMeta, ["zip", "postal"])}</div>
                 </div>
                 <div className="ldm-item full">
-                  <div className="ldm-label">Quality score</div>
-                  <QualityBar score={modalLead?.quality_score ?? listPreview?.quality_score ?? 0} />
+                  <div className="ldm-label">Name</div>
+                  <div className={`ldm-value${privateClass}`}>{modalMetaValue(modalMeta, ["name", "full_name", "first_name"])}</div>
                 </div>
-                {modalLead?.marketplace_tier && (
-                  <div className="ldm-item">
-                    <div className="ldm-label">Section</div>
-                    <div className="ldm-value" style={{ textTransform: "capitalize" }}>
-                      {modalLead.marketplace_tier}
-                    </div>
-                  </div>
-                )}
+                <div className="ldm-item">
+                  <div className="ldm-label">Phone</div>
+                  <div className={`ldm-value${privateClass}`}>{modalMetaValue(modalMeta, ["phone", "mobile"])}</div>
+                </div>
+                <div className="ldm-item">
+                  <div className="ldm-label">Email</div>
+                  <div className={`ldm-value${privateClass}`}>{modalMetaValue(modalMeta, ["email"])}</div>
+                </div>
+                <div className="ldm-item full">
+                  <div className="ldm-label">Full address</div>
+                  <div className={`ldm-value${privateClass}`}>{modalMetaValue(modalMeta, ["address", "full_address", "street"], modalLead?.market ?? listPreview?.market ?? "—")}</div>
+                </div>
               </div>
 
               <div className="ldm-price-row">
@@ -275,7 +503,7 @@ export function LeadDetailModal({
                 )}
               </div>
 
-              {(modalPriceHistory.length > 0 || detailLoading) && (
+              {!purchaseActions && (modalPriceHistory.length > 0 || detailLoading) && (
                 <>
                   <div className="ldm-section-h">Price history</div>
                   {detailLoading ? (
@@ -305,6 +533,14 @@ export function LeadDetailModal({
                   </ul>
                 </>
               )}
+
+              {!purchaseActions &&
+                enableAssignmentPipeline &&
+                detail?.lead_assignments &&
+                detail.lead_assignments.length > 0 &&
+                leadId && (
+                  <MyLeadPipelineBlock leadId={leadId} assignment={detail.lead_assignments[0]} />
+                )}
 
               {purchaseActions && reserveMutation?.isError && (
                 <div className="ldm-err">{(reserveMutation.error as Error).message}</div>
@@ -343,7 +579,7 @@ export function LeadDetailModal({
                   disabled={buyMutation.isPending || (!!reserveUntil && secondsLeft <= 0)}
                   onClick={() => leadId && buyMutation.mutate(leadId)}
                 >
-                  {buyMutation.isPending ? "Processing…" : `Confirm purchase — ${fmtDollarsModal(modalPriceCents)}`}
+                  {buyMutation.isPending ? "Processing…" : "Confirm purchase"}
                 </button>
               )}
 

@@ -8,6 +8,7 @@ import { DistributionRule } from '../entities/distribution-rule.entity';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { LeadAssignment } from '../entities/lead-assignment.entity';
 import { DistributionEngineSettings } from '../entities/distribution-engine-settings.entity';
+import { User } from '../entities/user.entity';
 import { DistributionService } from './distribution.service';
 import { LeadDistributionProcessor } from './lead-distribution.processor';
 import { LeadsModule } from '../leads/leads.module';
@@ -17,6 +18,7 @@ import { DistributionRulesController } from './distribution-rules.controller';
 import { DistributionRulesService } from './distribution-rules.service';
 import { CrmGhlSyncWorker } from './crm-ghl-sync.worker';
 import { normalizeEnvConnectionString } from '../utils/normalize-env-connection-string';
+import { IntegrationsModule } from '../integrations/integrations.module';
 
 @Module({
   imports: [
@@ -55,9 +57,11 @@ import { normalizeEnvConnectionString } from '../utils/normalize-env-connection-
       WalletAccount,
       LeadAssignment,
       DistributionEngineSettings,
+      User,
     ]),
     forwardRef(() => LeadsModule),
     StripeModule,
+    IntegrationsModule,
   ],
   controllers: [DistributionRulesController],
   providers: [

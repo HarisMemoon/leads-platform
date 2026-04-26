@@ -5,6 +5,7 @@ import { LeadPriceHistory } from '../entities/lead-price-history.entity';
 import { WalletTransaction } from '../entities/wallet-transaction.entity';
 import { LeadAssignment } from '../entities/lead-assignment.entity';
 import { LeadAssignmentEvent } from '../entities/lead-assignment-event.entity';
+import { LeadRefundRequest } from '../entities/lead-refund-request.entity';
 import { Subscription } from '../entities/subscription.entity';
 import { DistributionEngineSettings } from '../entities/distribution-engine-settings.entity';
 import { LeadsService } from './leads.service';
@@ -16,6 +17,8 @@ import { LeadPricingService } from './lead-pricing.service';
 import { LeadMarkdownWorker } from './lead-markdown.worker';
 import { LeadReservationReleaseWorker } from './lead-reservation-release.worker';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { RefundRequestsService } from './refund-requests.service';
+import { IntegrationsModule } from '../integrations/integrations.module';
 
 @Module({
   imports: [
@@ -25,11 +28,13 @@ import { NotificationsModule } from '../notifications/notifications.module';
       WalletTransaction,
       LeadAssignment,
       LeadAssignmentEvent,
+      LeadRefundRequest,
       Subscription,
       DistributionEngineSettings,
     ]),
     WalletModule,
     NotificationsModule,
+    IntegrationsModule,
     forwardRef(() => DistributionModule),
   ],
   controllers: [LeadsController, MarketplaceController],
@@ -38,6 +43,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     LeadPricingService,
     LeadMarkdownWorker,
     LeadReservationReleaseWorker,
+    RefundRequestsService,
   ],
   exports: [LeadsService, LeadPricingService],
 })

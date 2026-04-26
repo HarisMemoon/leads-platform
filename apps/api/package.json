@@ -13,15 +13,19 @@
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/src/main.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:cov": "jest --coverage",
-    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test": "jest --config ./jest.config.ts",
+    "test:watch": "jest --config ./jest.config.ts --watch --selectProjects unit",
+    "test:unit": "jest --config ./jest.config.ts --selectProjects unit",
+    "test:integration": "jest --config ./jest.config.ts --selectProjects integration",
+    "test:e2e": "jest --config ./jest.config.ts --selectProjects e2e",
+    "test:cov": "jest --config ./jest.config.ts --coverage --selectProjects unit integration",
+    "test:ci": "pnpm test:unit && pnpm test:integration && pnpm test:e2e",
+    "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --config ./jest.config.ts --runInBand",
     "migration:generate": "cross-env TS_NODE_PROJECT=tsconfig.typeorm.json ts-node -r ts-node/register/transpile-only -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:generate src/database/migrations/InitSchema -d src/database/data-source.ts",
     "migration:run": "cross-env TS_NODE_PROJECT=tsconfig.typeorm.json ts-node -r ts-node/register/transpile-only -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d src/database/data-source.ts",
     "migration:run:prod": "node ./node_modules/typeorm/cli.js migration:run -d dist/src/database/data-source.js",
-    "seed:leads": "cross-env TS_NODE_PROJECT=tsconfig.typeorm.json ts-node -r ts-node/register/transpile-only -r tsconfig-paths/register src/database/seeds/seed-leads.ts",
+    "seed:admin": "cross-env TS_NODE_PROJECT=tsconfig.typeorm.json ts-node -r ts-node/register/transpile-only -r tsconfig-paths/register src/database/seeds/seed-admin.ts",
+    "seed:leads": "cross-env TS_NODE_PROJECT=tsconfig.typeorm.json ts-node -r ts-node/register/transpile-only -r tsconfig-paths/register src/database/seeds/seed-lead-demo.ts",
     "verify:hosted-env": "ts-node -r tsconfig-paths/register scripts/verify-hosted-env.ts"
   },
   "dependencies": {
@@ -39,6 +43,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "dotenv": "^17.3.1",
+    "google-auth-library": "^10.6.2",
     "ioredis": "^5.10.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
@@ -75,22 +80,5 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
-  },
-  "jest": {
-    "moduleFileExtensions": [
-      "js",
-      "json",
-      "ts"
-    ],
-    "rootDir": "src",
-    "testRegex": ".*\\.spec\\.ts$",
-    "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
-    },
-    "collectCoverageFrom": [
-      "**/*.(t|j)s"
-    ],
-    "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
   }
 }

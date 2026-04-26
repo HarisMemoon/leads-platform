@@ -19,15 +19,18 @@ export default function Navbar() {
     queryKey: queryKeys.auth.me,
     queryFn: getAuthMe,
   });
+  const isAdmin = user?.role === "admin";
 
   const { data: wallet, isLoading } = useQuery({
     queryKey: queryKeys.wallet.me,
     queryFn: getWalletMe,
+    enabled: Boolean(user) && !isAdmin,
   });
 
   const { data: onboarding, isLoading: onboardingLoading } = useQuery({
     queryKey: queryKeys.onboarding.me,
     queryFn: getOnboardingMe,
+    enabled: Boolean(user) && !isAdmin,
   });
 
   const walletBalance = Number((wallet?.balance_cents as string) || 0);
@@ -57,7 +60,15 @@ export default function Navbar() {
   };
 
   const showOnboardingCta =
-    !onboardingLoading && !onOnboardingRoute && (!onboardingComplete || onboardingSkipped);
+    !isAdmin && !onboardingLoading && !onOnboardingRoute && (!onboardingComplete || onboardingSkipped);
+  const navLinks = [
+    { href: "/marketplace", label: "Marketplace" },
+    { href: "/leads", label: "My Leads" },
+    { href: "/resources", label: "Resources" },
+    { href: "/settings", label: "Settings" },
+  ];
+
+  if (!user || isAdmin) return null;
 
   return (
     <>
@@ -174,7 +185,7 @@ export default function Navbar() {
             {/* LEFT: brand + links */}
             <div style={{ display: "flex", alignItems: "center", gap: 20, minWidth: 0, flex: 1 }}>
               <Link
-                href="/dashboard"
+                href="/marketplace"
                 className="nav-left-brand"
                 style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, textDecoration: "none" }}
               >
@@ -209,16 +220,7 @@ export default function Navbar() {
               </Link>
 
               <div className="nav-links-scroll">
-                {[
-                  { href: "/dashboard", label: "Dashboard" },
-                  { href: "/marketplace", label: "Marketplace" },
-                  { href: "/wallet", label: "Wallet" },
-                  { href: "/leads", label: "My Leads" },
-                  { href: "/subscriptions", label: "Plan" },
-                  { href: "/distribution", label: "Distribution" },
-                  { href: "/market-alerts", label: "Alerts" },
-                  ...(user?.role === "admin" ? [{ href: "/admin/console", label: "Admin" }] : []),
-                ].map((link) => {
+                {navLinks.map((link) => {
                   const active = pathname === link.href;
                   return (
                     <Link
@@ -319,25 +321,27 @@ export default function Navbar() {
                 </>
               )}
 
-              <Link
-                href="/wallet"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  background: "rgba(16,185,129,0.12)",
-                  border: "1px solid rgba(16,185,129,0.28)",
-                  borderRadius: 100,
-                  padding: "7px 15px",
-                  fontSize: 13,
-                  color: "#6ee7b7",
-                  fontWeight: 600,
-                  textDecoration: "none",
-                  boxShadow: "0 0 20px rgba(16,185,129,0.08)",
-                }}
-              >
-                ${isLoading ? "—" : (walletBalance / 100).toFixed(0)}
-              </Link>
+              {!isAdmin && (
+                <Link
+                  href="/wallet"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    background: "rgba(16,185,129,0.12)",
+                    border: "1px solid rgba(16,185,129,0.28)",
+                    borderRadius: 100,
+                    padding: "7px 15px",
+                    fontSize: 13,
+                    color: "#6ee7b7",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    boxShadow: "0 0 20px rgba(16,185,129,0.08)",
+                  }}
+                >
+                  ${isLoading ? "—" : (walletBalance / 100).toFixed(0)}
+                </Link>
+              )}
 
               <div style={{ position: "relative" }}>
                 <div

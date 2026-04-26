@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -18,11 +19,16 @@ import { LeadsService } from './leads.service';
 import { ListMarketplaceLeadsDto } from './dto/list-marketplace-leads.dto';
 import { ListMyLeadsDto } from './dto/list-my-leads.dto';
 import { PatchAssignmentLifecycleDto } from './dto/patch-assignment-lifecycle.dto';
+import { CreateRefundRequestDto } from './dto/create-refund-request.dto';
+import { RefundRequestsService } from './refund-requests.service';
 import { Request } from 'express';
 
 @Controller('leads')
 export class MarketplaceController {
-  constructor(private readonly leadsService: LeadsService) {}
+  constructor(
+    private readonly leadsService: LeadsService,
+    private readonly refundRequestsService: RefundRequestsService,
+  ) {}
 
   @Get('marketplace')
   listMarketplace(@Query() query: ListMarketplaceLeadsDto) {
@@ -47,11 +53,40 @@ export class MarketplaceController {
     @Param('assignmentId', new ParseUUIDPipe()) assignmentId: string,
     @Body() dto: PatchAssignmentLifecycleDto,
   ) {
+    const has =
+      dto.lifecycle_phase != null ||
+      dto.contract_price_cents !== undefined ||
+      dto.sell_price_cents !== undefined ||
+      dto.buyer_notes !== undefined;
+    if (!has) {
+      throw new BadRequestException('No updates provided');
+    }
     return this.leadsService.updateMyAssignmentLifecycle(
       req.user.userId,
       assignmentId,
-      dto.lifecycle_phase,
+      dto,
     );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.BUYER)
+  @Post('me/refund-requests')
+  createRefundRequest(
+    @Req() req: Request & { user: { userId: string } },
+    @Body() dto: CreateRefundRequestDto,
+  ) {
+    return this.refundRequestsService.createForBuyer(
+      req.user.userId,
+      dto.assignment_id,
+      dto.reason,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.BUYER)
+  @Get('me/refund-requests')
+  listMyRefundRequests(@Req() req: Request & { user: { userId: string } }) {
+    return this.refundRequestsService.listMine(req.user.userId);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

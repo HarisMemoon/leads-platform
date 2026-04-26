@@ -19,20 +19,7 @@ import {
   exclusivityLabel,
 } from "@/components/LeadDetailModal";
 
-// ─── constants ────────────────────────────────────────────────────────────────
-const EXCLUSIVITY_OPTS = ["All", "exclusive", "semi_exclusive", "shared"] as const;
-const TIER_TABS = [
-  { id: "" as const, label: "All sections" },
-  { id: "premium" as const, label: "Premium" },
-  { id: "standard" as const, label: "Standard" },
-  { id: "value" as const, label: "Value" },
-];
 const PAGE_SIZE = 24;
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
-function daysSince(iso: string) {
-  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000));
-}
 
 function fmtDollars(cents: string | number) {
   return `$${(Number(cents) / 100).toFixed(0)}`;
@@ -41,6 +28,15 @@ function fmtDollars(cents: string | number) {
 function addressFromLead(lead: MarketplaceLeadRow) {
   const m = lead.metadata as Record<string, unknown> | undefined;
   return (m?.address as string) || lead.market;
+}
+
+function metaValue(lead: MarketplaceLeadRow, keys: string[], fallback = "—") {
+  const meta = lead.metadata ?? {};
+  for (const key of keys) {
+    const value = meta[key];
+    if (value != null && String(value).trim() !== "") return String(value);
+  }
+  return fallback;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -63,14 +59,17 @@ export default function MarketplacePage() {
   const { toasts, show: showToast } = useToasts();
 
   // filter inputs
-  const [market, setMarket] = useState("");
   const [type, setType] = useState("");
-  const [excl, setExcl] = useState<string>("All");
-  const [maxPrice, setMaxPrice] = useState(25000);
-  const [maxAgeDays, setMaxAgeDays] = useState<number | "">("");
-  const [tier, setTier] = useState<"" | "premium" | "standard" | "value">("");
+  const [leadMode, setLeadMode] = useState<"premium" | "exclusive">("premium");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [propertyType, setPropertyType] = useState("");
+  const [timeline, setTimeline] = useState("");
+  const [condition, setCondition] = useState("");
+  const [zip, setZip] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
 
   // modal state
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -85,13 +84,17 @@ export default function MarketplacePage() {
   const rawParams = useMemo(() => ({
     page,
     limit: PAGE_SIZE,
-    market: market.trim() || undefined,
     type: type.trim() || undefined,
-    exclusivity: excl === "All" ? undefined : excl,
-    maxPrice,
-    maxAgeDays: maxAgeDays === "" ? undefined : maxAgeDays,
-    marketplaceTier: tier || undefined,
-  }), [page, market, type, excl, maxPrice, maxAgeDays, tier]);
+    lead_mode: leadMode || undefined,
+    city: city.trim() || undefined,
+    state: state.trim() || undefined,
+    property_type: propertyType.trim() || undefined,
+    timeline: timeline.trim() || undefined,
+    condition: condition.trim() || undefined,
+    zip: zip.trim() || undefined,
+    date_from: dateFrom.trim() || undefined,
+    date_to: dateTo.trim() || undefined,
+  }), [page, type, leadMode, city, state, propertyType, timeline, condition, zip, dateFrom, dateTo]);
 
   const [debouncedParams, setDebouncedParams] = useState(rawParams);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -124,20 +127,19 @@ export default function MarketplacePage() {
   const items = (data?.items ?? []).filter((l) => !hiddenIds.has(l.id));
   const total = data?.pagination.total ?? 0;
 
-  const marketsFromData = useMemo(() => Array.from(new Set(items.map((l) => l.market))).sort(), [items]);
   const typesFromData = useMemo(() => Array.from(new Set(items.map((l) => l.type))).sort(), [items]);
 
-  const filteredItems = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((l) =>
-      l.title.toLowerCase().includes(q) ||
-      l.market.toLowerCase().includes(q) ||
-      l.type.toLowerCase().includes(q),
-    );
-  }, [items, search]);
-
-  const hasActiveFilters = market || type || excl !== "All" || maxPrice !== 25000 || maxAgeDays !== "" || tier;
+  const hasActiveFilters =
+    type ||
+    leadMode !== "premium" ||
+    city ||
+    state ||
+    propertyType ||
+    timeline ||
+    condition ||
+    zip ||
+    dateFrom.trim() ||
+    dateTo.trim();
 
   // ── reserve timer ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -202,8 +204,17 @@ export default function MarketplacePage() {
   }, []);
 
   function clearFilters() {
-    setMarket(""); setType(""); setExcl("All");
-    setMaxPrice(25000); setMaxAgeDays(""); setTier(""); setPage(1);
+    setType("");
+    setLeadMode("premium");
+    setCity("");
+    setState("");
+    setPropertyType("");
+    setTimeline("");
+    setCondition("");
+    setZip("");
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
   }
 
   return (
@@ -213,31 +224,127 @@ export default function MarketplacePage() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         .mp-root { min-height: 100vh; background: #080a0f; color: white; font-family: 'DM Sans', sans-serif; display: flex; flex-direction: column; }
-        .page-body { flex: 1; display: grid; grid-template-columns: 260px 1fr; }
+        .page-body { flex: 1; }
 
-        /* sidebar */
-        .filters-sidebar { border-right: 1px solid rgba(255,255,255,0.05); padding: 28px 20px; position: sticky; top: 88px; height: calc(100vh - 88px); overflow-y: auto; }
-        .filter-section { margin-bottom: 28px; }
+        .leads-main { padding: 28px; max-width: 1280px; width: 100%; margin: 0 auto; }
+        .leads-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 16px; }
+        .leads-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; }
+        .leads-count { font-size: 13px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+
+        .filters-shell {
+          margin-bottom: 22px;
+          padding: 18px;
+          border-radius: 18px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)),
+            rgba(8,10,15,0.9);
+          box-shadow: 0 14px 40px rgba(0,0,0,0.22);
+        }
+        .marketplace-layout {
+          display: grid;
+          grid-template-columns: 220px 1fr;
+          gap: 18px;
+          align-items: start;
+        }
+        .category-sidebar {
+          position: sticky;
+          top: 92px;
+          border-radius: 18px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.028);
+          padding: 16px;
+        }
+        .category-btn {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 12px 13px;
+          border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.025);
+          color: rgba(255,255,255,0.62);
+          cursor: pointer;
+          font-family: 'DM Sans', sans-serif;
+          font-weight: 700;
+          margin-top: 10px;
+          text-align: left;
+        }
+        .category-btn.selected {
+          background: linear-gradient(135deg, rgba(99,102,241,0.24), rgba(139,92,246,0.14));
+          border-color: rgba(99,102,241,0.36);
+          color: #fff;
+        }
+        .filters-topline {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          flex-wrap: wrap;
+          margin-bottom: 16px;
+        }
+        .filters-copy {
+          font-size: 13px;
+          color: rgba(255,255,255,0.45);
+          line-height: 1.55;
+        }
+        .filter-row {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px;
+          align-items: end;
+        }
+        .filter-group {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          min-width: 0;
+        }
+        .filter-group.span-2,
+        .filter-group.span-3,
+        .filter-group.span-4 { grid-column: span 1; }
+        .filter-label { font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.8px; }
         .filter-label { font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
         .filter-opt { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: rgba(255,255,255,0.5); cursor: pointer; border: 1px solid transparent; user-select: none; }
         .filter-opt:hover { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.8); }
         .filter-opt.selected { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.2); color: #a5b4fc; }
-        .filter-input { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #fff; font-size: 13px; margin-bottom: 8px; outline: none; }
+        .filter-input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #fff; font-size: 13px; outline: none; }
         .filter-input:focus { border-color: rgba(99,102,241,0.4); }
         input[type=range] { width: 100%; -webkit-appearance: none; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; outline: none; }
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #6366f1; cursor: pointer; }
 
-        /* tier tabs */
-        .tier-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
-        .tier-tab { padding: 6px 14px; border-radius: 999px; font-size: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.5); background: none; transition: all 0.15s; }
-        .tier-tab:hover { border-color: rgba(99,102,241,0.35); color: rgba(255,255,255,0.8); }
-        .tier-tab.on { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.35); color: #c7d2fe; }
-
-        /* main */
-        .leads-main { padding: 28px; }
-        .leads-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 16px; }
-        .leads-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; }
-        .leads-count { font-size: 13px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+        .pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+        .filter-pill {
+          padding: 8px 14px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          border: 1px solid rgba(255,255,255,0.1);
+          color: rgba(255,255,255,0.55);
+          background: rgba(255,255,255,0.02);
+          transition: all 0.15s;
+        }
+        .filter-pill:hover { border-color: rgba(99,102,241,0.35); color: rgba(255,255,255,0.82); }
+        .filter-pill.selected {
+          background: rgba(99,102,241,0.16);
+          border-color: rgba(99,102,241,0.3);
+          color: #c7d2fe;
+        }
+        .filter-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+        .clear-inline-btn {
+          padding: 10px 14px;
+          border-radius: 10px;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: transparent;
+          color: rgba(255,255,255,0.6);
+          font-size: 13px;
+          cursor: pointer;
+          font-family: 'DM Sans', sans-serif;
+        }
+        .clear-inline-btn:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.04); }
         .search-bar { width: 280px; max-width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 16px; font-size: 13px; color: #fff; outline: none; }
         .search-bar:focus { border-color: rgba(99,102,241,0.4); }
 
@@ -251,6 +358,10 @@ export default function MarketplacePage() {
 
         .lead-title { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; margin: 12px 0 3px; line-height: 1.3; color: rgba(255,255,255,0.92); }
         .lead-address { font-size: 12px; color: rgba(255,255,255,0.35); margin-bottom: 10px; }
+        .blur-field { filter: blur(3.5px); user-select: none; opacity: 0.75; }
+        .private-fields { display: grid; gap: 6px; margin: 12px 0; }
+        .private-row { display: grid; grid-template-columns: 86px 1fr; gap: 8px; font-size: 12px; color: rgba(255,255,255,0.45); }
+        .private-label { color: rgba(255,255,255,0.28); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
         .meta-tag { font-size: 11px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 3px 8px; color: rgba(255,255,255,0.45); margin-right: 5px; margin-bottom: 5px; display: inline-block; }
 
         .card-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
@@ -307,70 +418,28 @@ export default function MarketplacePage() {
         .skeleton { background: rgba(255,255,255,0.06); border-radius: 8px; animation: pulse 1.4s ease infinite; }
         @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
-        @media (max-width: 800px) { .page-body { grid-template-columns: 1fr; } .filters-sidebar { display: none; } }
+        @media (max-width: 960px) {
+          .marketplace-layout { grid-template-columns: 1fr; }
+          .category-sidebar { position: static; }
+          .filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .filter-group.span-2,
+          .filter-group.span-3,
+          .filter-group.span-4 { grid-column: span 1; }
+        }
+        @media (max-width: 720px) {
+          .leads-main { padding: 20px; }
+          .filter-row { grid-template-columns: 1fr; }
+          .filter-group.span-2,
+          .filter-group.span-3,
+          .filter-group.span-4 { grid-column: span 1; }
+          .filters-shell { padding: 16px; }
+          .search-bar { width: 100%; }
+        }
       `}</style>
 
       <div className="mp-root">
         <div className="page-body">
-          {/* ── Filters sidebar ── */}
-          <aside className="filters-sidebar">
-            <div className="filter-section">
-              <div className="filter-label">Market</div>
-              <input className="filter-input" placeholder="Filter by market…" value={market}
-                onChange={(e) => { setMarket(e.target.value); setPage(1); }} list="markets-list" />
-              <datalist id="markets-list">{marketsFromData.map((m) => <option key={m} value={m} />)}</datalist>
-            </div>
-
-            <div className="filter-section">
-              <div className="filter-label">Lead type</div>
-              <input className="filter-input" placeholder="Filter by type…" value={type}
-                onChange={(e) => { setType(e.target.value); setPage(1); }} list="types-list" />
-              <datalist id="types-list">{typesFromData.map((t) => <option key={t} value={t} />)}</datalist>
-            </div>
-
-            <div className="filter-section">
-              <div className="filter-label">Exclusivity</div>
-              {EXCLUSIVITY_OPTS.map((e) => (
-                <div key={e} className={`filter-opt ${excl === e ? "selected" : ""}`}
-                  onClick={() => { setExcl(e); setPage(1); }}>
-                  {e === "All" ? "All" : exclusivityLabel(e)}
-                </div>
-              ))}
-            </div>
-
-            <div className="filter-section">
-              <div className="filter-label">Max lead age (days)</div>
-              <input type="number" min={0} className="filter-input" placeholder="Any age"
-                value={maxAgeDays}
-                onChange={(e) => { setMaxAgeDays(e.target.value === "" ? "" : Math.max(0, Number(e.target.value))); setPage(1); }} />
-            </div>
-
-            <div className="filter-section">
-              <div className="filter-label">Max price</div>
-              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 8 }}>Up to ${(maxPrice / 100).toFixed(0)}</div>
-              <input type="range" min={2500} max={250000} step={500} value={maxPrice}
-                onChange={(e) => { setMaxPrice(+e.target.value); setPage(1); }} />
-            </div>
-
-            {hasActiveFilters && (
-              <button type="button" onClick={clearFilters}
-                style={{ marginTop: 4, width: "100%", padding: "9px 14px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 9, background: "none", color: "rgba(255,255,255,0.4)", fontSize: 12, cursor: "pointer", fontFamily: "'DM Sans', sans-serif" }}>
-                Clear all filters ×
-              </button>
-            )}
-          </aside>
-
-          {/* ── Main content ── */}
           <main className="leads-main">
-            <div className="tier-tabs">
-              {TIER_TABS.map((t) => (
-                <button key={t.id || "all"} type="button" className={`tier-tab ${tier === t.id ? "on" : ""}`}
-                  onClick={() => { setTier(t.id); setPage(1); }}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
             <div className="leads-header">
               <div>
                 <div className="leads-title">Lead Marketplace</div>
@@ -379,8 +448,165 @@ export default function MarketplacePage() {
                   {wallet ? ` · Wallet ${fmtDollars(walletBalance)}` : ""}
                 </div>
               </div>
-              <input className="search-bar" placeholder="Search this page…" value={search}
-                onChange={(e) => setSearch(e.target.value)} />
+            </div>
+
+            <div className="marketplace-layout">
+              <aside className="category-sidebar" aria-label="Marketplace categories">
+                <div className="filter-label">Categories</div>
+                {[
+                  { id: "premium" as const, label: "Premium Leads" },
+                  { id: "exclusive" as const, label: "Exclusive Leads" },
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`category-btn ${leadMode === option.id ? "selected" : ""}`}
+                    onClick={() => {
+                      setLeadMode(option.id);
+                      setPage(1);
+                    }}
+                  >
+                    <span>{option.label}</span>
+                    <span>{option.id === "exclusive" ? "1:1" : "Premium"}</span>
+                  </button>
+                ))}
+              </aside>
+
+              <section className="filters-shell" aria-label="Marketplace filters">
+                <div className="filters-topline">
+                  <div>
+                    <div className="filter-label" style={{ marginBottom: 6 }}>Filters</div>
+                    <div className="filters-copy">
+                      Filter by the exact lead attributes buyers use to shortlist opportunities.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="filter-row">
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="date-from">Date from</label>
+                  <input
+                    id="date-from"
+                    type="date"
+                    className="filter-input"
+                    value={dateFrom}
+                    onChange={(e) => {
+                      setDateFrom(e.target.value);
+                      setPage(1);
+                    }}
+                    aria-label="Listed from"
+                  />
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="type-filter">Lead type</label>
+                  <input
+                    id="type-filter"
+                    className="filter-input"
+                    placeholder="Property type or lead type…"
+                    value={type}
+                    onChange={(e) => {
+                      setType(e.target.value);
+                      setPage(1);
+                    }}
+                    list="types-list"
+                  />
+                  <datalist id="types-list">{typesFromData.map((t) => <option key={t} value={t} />)}</datalist>
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="city-filter">City</label>
+                  <input
+                    id="city-filter"
+                    className="filter-input"
+                    placeholder="Phoenix"
+                    value={city}
+                    onChange={(e) => {
+                      setCity(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="state-filter">State</label>
+                  <input
+                    id="state-filter"
+                    className="filter-input"
+                    placeholder="AZ"
+                    value={state}
+                    onChange={(e) => {
+                      setState(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="property-filter">Property type</label>
+                  <input
+                    id="property-filter"
+                    className="filter-input"
+                    placeholder="Single family"
+                    value={propertyType}
+                    onChange={(e) => {
+                      setPropertyType(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="timeline-filter">Timeline</label>
+                  <input
+                    id="timeline-filter"
+                    className="filter-input"
+                    placeholder="0-30 days"
+                    value={timeline}
+                    onChange={(e) => {
+                      setTimeline(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="condition-filter">Condition</label>
+                  <input
+                    id="condition-filter"
+                    className="filter-input"
+                    placeholder="Needs repairs"
+                    value={condition}
+                    onChange={(e) => {
+                      setCondition(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="zip-filter">ZIP</label>
+                  <input
+                    id="zip-filter"
+                    className="filter-input"
+                    placeholder="85001"
+                    value={zip}
+                    onChange={(e) => {
+                      setZip(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+              </div>
+
+              {hasActiveFilters && (
+                <div className="filter-actions">
+                  <button type="button" className="clear-inline-btn" onClick={clearFilters}>
+                    Clear all filters
+                  </button>
+                </div>
+              )}
+              </section>
             </div>
 
             {isError && (
@@ -391,7 +617,7 @@ export default function MarketplacePage() {
             )}
 
             <div className="lead-grid">
-              {!isLoading && filteredItems.length === 0 && (
+              {!isLoading && items.length === 0 && (
                 <div className="empty-state">
                   <p style={{ fontSize: 16, marginBottom: 8 }}>No leads match your filters.</p>
                   <p style={{ fontSize: 13 }}>Try adjusting the filters or broadening your search.</p>
@@ -403,7 +629,7 @@ export default function MarketplacePage() {
                 </div>
               )}
 
-              {filteredItems.map((lead) => {
+              {items.map((lead) => {
                 const ec = exclusivityColor(lead.exclusivity);
                 const pc = Number(lead.current_price);
                 const ac = lead.list_price_anchor_cents ? Number(lead.list_price_anchor_cents) : null;
@@ -418,15 +644,37 @@ export default function MarketplacePage() {
                       {lead.marketplace_tier && <span className="tier-pill">{lead.marketplace_tier}</span>}
                     </div>
 
-                    {/* Title + address */}
+                    {/* Title + key blurred/private fields */}
                     <div className="lead-title">{lead.title}</div>
-                    <div className="lead-address">{addressFromLead(lead)}</div>
+                    <div className="lead-address">{lead.market}</div>
+                    <div className="private-fields" aria-label="Private lead fields preview">
+                      <div className="private-row">
+                        <span className="private-label">Name</span>
+                        <span className="blur-field">{metaValue(lead, ["name", "full_name", "first_name"], "••••••")}</span>
+                      </div>
+                      <div className="private-row">
+                        <span className="private-label">Phone</span>
+                        <span className="blur-field">{metaValue(lead, ["phone", "mobile"], "••••••")}</span>
+                      </div>
+                      <div className="private-row">
+                        <span className="private-label">Email</span>
+                        <span className="blur-field">{metaValue(lead, ["email"], "••••••")}</span>
+                      </div>
+                      <div className="private-row">
+                        <span className="private-label">Address</span>
+                        <span className="blur-field">{addressFromLead(lead)}</span>
+                      </div>
+                    </div>
 
-                    {/* Meta tags */}
+                    {/* Meta tags — dynamic fields from metadata */}
                     <div>
                       <span className="meta-tag">{lead.type}</span>
-                      <span className="meta-tag">{lead.market}</span>
-                      <span className="meta-tag">{daysSince(lead.created_at)}d old</span>
+                      <span className="meta-tag">City: {metaValue(lead, ["city"])}</span>
+                      <span className="meta-tag">State: {metaValue(lead, ["state"])}</span>
+                      <span className="meta-tag">Property: {metaValue(lead, ["property_type", "propertyType"])}</span>
+                      <span className="meta-tag">Timeline: {metaValue(lead, ["timeline"])}</span>
+                      <span className="meta-tag">Condition: {metaValue(lead, ["condition"])}</span>
+                      <span className="meta-tag">ZIP: {metaValue(lead, ["zip", "postal"])}</span>
                     </div>
 
                     {/* Quality bar */}

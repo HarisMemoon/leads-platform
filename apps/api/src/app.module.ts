@@ -16,6 +16,8 @@ import { DistributionModule } from './distribution/distribution.module';
 import { StripeModule } from './stripe/stripe.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { MarketAlertsModule } from './market-alerts/market-alerts.module';
+import { IntegrationsModule } from './integrations/integrations.module';
+import { ResourcesModule } from './resources/resources.module';
 
 @Module({
   imports: [
@@ -113,6 +115,8 @@ import { MarketAlertsModule } from './market-alerts/market-alerts.module';
     StripeModule,
     SubscriptionsModule,
     MarketAlertsModule,
+    IntegrationsModule,
+    ResourcesModule,
   ],
 
   controllers: [AppController],

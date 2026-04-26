@@ -18,12 +18,18 @@ import { JwtAuthGuard } from '../auth/guards/jwt.auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
+import { RefundRequestsService } from './refund-requests.service';
+import { AdminResolveRefundDto } from './dto/admin-resolve-refund.dto';
+import { MarkDuplicateLeadDto } from './dto/mark-duplicate-lead.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
 @Controller('admin')
 export class LeadsController {
-  constructor(private readonly leadsService: LeadsService) {}
+  constructor(
+    private readonly leadsService: LeadsService,
+    private readonly refundRequestsService: RefundRequestsService,
+  ) {}
 
   @Post('leads')
   createLead(@Body() dto: CreateLeadDto) {
@@ -64,5 +70,36 @@ export class LeadsController {
   @Get('metrics/extended')
   getAdminMetricsExtended() {
     return this.leadsService.getAdminMetricsExtended();
+  }
+
+  @Get('refund-requests')
+  listRefundRequests() {
+    return this.refundRequestsService.listAllAdmin();
+  }
+
+  @Patch('refund-requests/:id')
+  resolveRefundRequest(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: AdminResolveRefundDto,
+  ) {
+    return this.refundRequestsService.resolveAdmin(
+      id,
+      dto.status,
+      dto.admin_notes,
+      dto.resolution,
+    );
+  }
+
+  @Get('lead-duplicate-groups')
+  listDuplicateLeadGroups() {
+    return this.leadsService.listDuplicatePhoneGroups();
+  }
+
+  @Post('leads/:duplicateId/mark-duplicate')
+  markLeadDuplicate(
+    @Param('duplicateId', new ParseUUIDPipe()) duplicateId: string,
+    @Body() body: MarkDuplicateLeadDto,
+  ) {
+    return this.leadsService.markLeadAsDuplicateOf(body.canonical_lead_id, duplicateId);
   }
 }

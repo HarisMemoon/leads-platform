@@ -9,6 +9,8 @@ import { WalletAccount } from '../entities/wallet-account.entity';
 import { WalletTransaction } from '../entities/wallet-transaction.entity';
 import { WalletTransactionType } from '../../common/enums/wallet-transaction-type.enum';
 import { UpdateWalletAutoReloadDto } from './dto/update-wallet-auto-reload.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { IntegrationsService } from '../integrations/integrations.service';
 
 @Injectable()
 export class WalletService {
@@ -20,8 +22,53 @@ export class WalletService {
     @InjectRepository(WalletTransaction)
     private txRepo: Repository<WalletTransaction>,
 
-    private dataSource: DataSource
+    private dataSource: DataSource,
+    private readonly notificationsService: NotificationsService,
+    private readonly integrationsService: IntegrationsService,
   ) {}
+
+  private async emitWalletCreditSideEffects(input: {
+    userId: string;
+    amountCents: number;
+    wallet: WalletAccount;
+    description: string;
+    referenceType: string;
+    referenceId: string | null;
+  }) {
+    try {
+      await this.integrationsService.emitCustomWebhookEvent(input.userId, 'wallet_credit_posted', {
+        amount_cents: input.amountCents,
+        balance_cents: input.wallet.balance_cents,
+        description: input.description,
+        reference_type: input.referenceType,
+        reference_id: input.referenceId,
+      });
+
+      if (input.referenceType === 'stripe_topup') {
+        await this.notificationsService.notifyWalletFunded(
+          input.userId,
+          input.amountCents,
+          input.wallet.balance_cents,
+          input.referenceId,
+        );
+        return;
+      }
+
+      if (input.referenceType === 'refund_approved') {
+        return;
+      }
+
+      await this.notificationsService.notifyWalletCreditPosted(
+        input.userId,
+        input.amountCents,
+        input.wallet.balance_cents,
+        input.description,
+        input.referenceId,
+      );
+    } catch {
+      // Never fail the wallet mutation because a downstream notification provider failed.
+    }
+  }
 
   /*
   GET WALLET
@@ -52,9 +99,12 @@ export class WalletService {
     existingManager?: EntityManager,
   ) {
     const run = async (manager: EntityManager) => {
-      const wallet = await manager.findOne(WalletAccount, {
-        where: { user: { id: userId } },
-      });
+      const wallet = await manager
+        .createQueryBuilder(WalletAccount, 'w')
+        .innerJoin('w.user', 'u')
+        .setLock('pessimistic_write')
+        .where('u.id = :userId', { userId })
+        .getOne();
 
       if (!wallet) throw new NotFoundException('Wallet not found');
 
@@ -83,7 +133,16 @@ export class WalletService {
     if (existingManager) {
       return run(existingManager);
     }
-    return this.dataSource.transaction(run);
+    const wallet = await this.dataSource.transaction(run);
+    await this.emitWalletCreditSideEffects({
+      userId,
+      amountCents,
+      wallet,
+      description: description || 'Wallet credit',
+      referenceType,
+      referenceId,
+    });
+    return wallet;
   }
 
   async topUp(
@@ -105,30 +164,34 @@ export class WalletService {
     paymentIntentId: string,
     description = 'Stripe top-up',
   ): Promise<WalletAccount> {
-    return this.dataSource.transaction(async (manager) => {
+    const pi = paymentIntentId.trim();
+    let created = false;
+    const wallet = await this.dataSource.transaction(async (manager) => {
       /*
       Serialize on PaymentIntent id so webhook + HTTP confirm cannot both pass the
       idempotency check and double-insert rows while only one balance update sticks.
       */
       await manager.query(
         `SELECT pg_advisory_xact_lock(hashtext($1::text)::bigint)`,
-        [paymentIntentId],
+        [pi],
       );
 
-      const existing = await manager.findOne(WalletTransaction, {
-        where: {
-          reference_type: 'stripe_topup',
-          reference_id: paymentIntentId,
-        },
-        relations: ['wallet'],
-      });
+      /*
+      Do not use `if (existing?.wallet)` — TypeORM can return a row without the
+      `wallet` relation populated, which skipped the idempotency branch and inserted
+      a second `stripe_topup` row for the same PaymentIntent (balance still correct
+      only once if the second insert hit a unique index and rolled back, or worse).
+      */
+      const prior = await manager
+        .createQueryBuilder(WalletTransaction, 't')
+        .innerJoinAndSelect('t.wallet', 'w')
+        .innerJoinAndSelect('w.user', 'u')
+        .where('t.reference_type = :rt', { rt: 'stripe_topup' })
+        .andWhere('t.reference_id = :rid', { rid: pi })
+        .getOne();
 
-      if (existing?.wallet) {
-        const creditedWallet = await manager.findOne(WalletAccount, {
-          where: { id: existing.wallet.id },
-          relations: ['user'],
-        });
-        if (creditedWallet?.user?.id !== userId) {
+      if (prior) {
+        if (prior.wallet.user.id !== userId) {
           throw new BadRequestException('Invalid payment intent');
         }
         return manager.findOneOrFail(WalletAccount, {
@@ -156,13 +219,98 @@ export class WalletService {
           amount_cents: creditAmount.toString(),
           balance_after_cents: nextBalance.toString(),
           reference_type: 'stripe_topup',
-          reference_id: paymentIntentId,
+          reference_id: pi,
           description: description || 'Stripe top-up',
         }),
       );
 
+      created = true;
       return wallet;
     });
+    if (created) {
+      await this.emitWalletCreditSideEffects({
+        userId,
+        amountCents,
+        wallet,
+        description,
+        referenceType: 'stripe_topup',
+        referenceId: pi,
+      });
+    }
+    return wallet;
+  }
+
+  /**
+   * Idempotent wallet credit (e.g. subscription invoice wallet allowance).
+   * Same reference_type + reference_id cannot credit twice.
+   */
+  async applyIdempotentCredit(
+    userId: string,
+    amountCents: number,
+    referenceType: string,
+    referenceId: string,
+    description: string,
+  ): Promise<WalletAccount> {
+    const rid = referenceId.trim();
+    const rt = referenceType.trim();
+    let created = false;
+    const wallet = await this.dataSource.transaction(async (manager) => {
+      await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1::text)::bigint)`, [
+        `${rt}:${rid}`,
+      ]);
+
+      const prior = await manager
+        .createQueryBuilder(WalletTransaction, 't')
+        .innerJoinAndSelect('t.wallet', 'w')
+        .innerJoinAndSelect('w.user', 'u')
+        .where('t.reference_type = :rt', { rt })
+        .andWhere('t.reference_id = :rid', { rid })
+        .getOne();
+
+      if (prior) {
+        if (prior.wallet.user.id !== userId) {
+          throw new BadRequestException('Invalid reference for wallet credit');
+        }
+        return manager.findOneOrFail(WalletAccount, {
+          where: { user: { id: userId } },
+        });
+      }
+
+      const wallet = await manager.findOne(WalletAccount, {
+        where: { user: { id: userId } },
+      });
+      if (!wallet) throw new NotFoundException('Wallet not found');
+
+      const currentBalance = BigInt(wallet.balance_cents);
+      const creditAmount = BigInt(amountCents);
+      const nextBalance = currentBalance + creditAmount;
+      wallet.balance_cents = nextBalance.toString();
+      await manager.save(wallet);
+      await manager.save(
+        manager.create(WalletTransaction, {
+          wallet,
+          type: WalletTransactionType.CREDIT,
+          amount_cents: creditAmount.toString(),
+          balance_after_cents: nextBalance.toString(),
+          reference_type: rt,
+          reference_id: rid,
+          description,
+        }),
+      );
+      created = true;
+      return wallet;
+    });
+    if (created) {
+      await this.emitWalletCreditSideEffects({
+        userId,
+        amountCents,
+        wallet,
+        description,
+        referenceType: rt,
+        referenceId: rid,
+      });
+    }
+    return wallet;
   }
 
   /*
@@ -348,6 +496,14 @@ export class WalletService {
       );
 
       await queryRunner.commitTransaction();
+      await this.emitWalletCreditSideEffects({
+        userId,
+        amountCents,
+        wallet,
+        description,
+        referenceType: 'admin_credit',
+        referenceId: null,
+      });
     } catch (err) {
       await queryRunner.rollbackTransaction();
       throw err;

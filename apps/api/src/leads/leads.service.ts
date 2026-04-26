@@ -29,6 +29,9 @@ import { WalletAccount } from '../entities/wallet-account.entity';
 import { DistributionService } from '../distribution/distribution.service';
 import { LeadPricingService } from './lead-pricing.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ExclusivityLevel } from '../../common/enums/exclusivity-level.enum';
+import { redactLeadMetadata } from './lead-redaction.util';
+import { IntegrationsService } from '../integrations/integrations.service';
 
 @Injectable()
 export class LeadsService {
@@ -50,19 +53,73 @@ export class LeadsService {
     private readonly distributionService: DistributionService,
     private readonly leadPricingService: LeadPricingService,
     private readonly notificationsService: NotificationsService,
+    private readonly integrationsService: IntegrationsService,
     private readonly config: ConfigService,
   ) {}
 
+  private normalizeContactValue(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().toLowerCase();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  private async detectCanonicalDuplicate(
+    metadata: Record<string, unknown>,
+    excludeLeadId?: string,
+  ): Promise<Lead | null> {
+    const normalizedPhone = this.normalizeContactValue(metadata.phone);
+    const normalizedEmail = this.normalizeContactValue(metadata.email);
+    if (!normalizedPhone && !normalizedEmail) {
+      return null;
+    }
+
+    const qb = this.leadRepo
+      .createQueryBuilder('lead')
+      .orderBy('lead.created_at', 'ASC')
+      .take(1);
+
+    if (excludeLeadId) {
+      qb.where('lead.id != :excludeLeadId', { excludeLeadId });
+    }
+
+    const clauses: string[] = [];
+    const params: Record<string, string> = {};
+    if (normalizedPhone) {
+      clauses.push(`LOWER(TRIM(COALESCE(lead.metadata->>'phone',''))) = :normalizedPhone`);
+      params.normalizedPhone = normalizedPhone;
+    }
+    if (normalizedEmail) {
+      clauses.push(`LOWER(TRIM(COALESCE(lead.metadata->>'email',''))) = :normalizedEmail`);
+      params.normalizedEmail = normalizedEmail;
+    }
+    if (clauses.length === 0) return null;
+    qb.andWhere(`(${clauses.join(' OR ')})`, params);
+    return qb.getOne();
+  }
+
   async createLead(dto: CreateLeadDto) {
+    const { utm, canonical_lead_source, ...rest } = dto;
+    const duplicateOf = await this.detectCanonicalDuplicate(dto.metadata ?? {});
     const lead = this.leadRepo.create({
-      ...dto,
+      ...rest,
       external_id: dto.external_id ?? null,
       metadata: dto.metadata ?? {},
+      utm: utm ?? {},
+      canonical_lead_source: canonical_lead_source ?? null,
+      duplicate_of_lead: duplicateOf,
       price_cents: dto.price_cents.toString(),
     });
 
     const savedLead = await this.leadRepo.save(lead);
     await this.leadPricingService.applyTierToLead(savedLead);
+    await this.notificationsService.notifyMarketAlertsForLead({
+      id: savedLead.id,
+      title: savedLead.title,
+      market: savedLead.market,
+      lead_type: savedLead.lead_type,
+      exclusivity_level: savedLead.exclusivity_level,
+      price_cents: savedLead.price_cents,
+    });
     await this.distributionService.enqueueLeadDistribution(savedLead.id);
     return (
       (await this.leadRepo.findOne({ where: { id: savedLead.id } })) ?? savedLead
@@ -213,6 +270,22 @@ export class LeadsService {
       qb.andWhere('lead.lead_type = :leadType', { leadType: query.type });
     }
 
+    const metadataFilters: Array<[string, string | undefined]> = [
+      ['city', query.city],
+      ['state', query.state],
+      ['property_type', query.property_type],
+      ['timeline', query.timeline],
+      ['condition', query.condition],
+      ['zip', query.zip],
+    ];
+    metadataFilters.forEach(([key, value], idx) => {
+      const trimmed = value?.trim();
+      if (!trimmed) return;
+      qb.andWhere(`LOWER(COALESCE(lead.metadata->>'${key}', '')) LIKE :mv${idx}`, {
+        [`mv${idx}`]: `%${trimmed.toLowerCase()}%`,
+      });
+    });
+
     if (query.exclusivity) {
       qb.andWhere('lead.exclusivity_level = :exclusivity', {
         exclusivity: query.exclusivity,
@@ -236,6 +309,26 @@ export class LeadsService {
         Date.now() - Number(query.maxAgeDays) * 24 * 60 * 60 * 1000,
       );
       qb.andWhere('lead.created_at >= :cutoff', { cutoff });
+    }
+
+    if (query.lead_mode === 'exclusive') {
+      qb.andWhere('lead.exclusivity_level = :excl', {
+        excl: ExclusivityLevel.EXCLUSIVE,
+      });
+    } else if (query.lead_mode === 'premium') {
+      qb.andWhere('lead.exclusivity_level != :excl', {
+        excl: ExclusivityLevel.EXCLUSIVE,
+      });
+    }
+
+    if (query.date_from) {
+      const df = new Date(query.date_from);
+      qb.andWhere('lead.created_at >= :df', { df });
+    }
+    if (query.date_to) {
+      const dt = new Date(query.date_to);
+      dt.setHours(23, 59, 59, 999);
+      qb.andWhere('lead.created_at <= :dt', { dt });
     }
 
     qb.select([
@@ -265,7 +358,7 @@ export class LeadsService {
         current_price: lead.price_cents,
         list_price_anchor_cents: lead.list_price_anchor_cents,
         marketplace_tier: lead.marketplace_tier,
-        metadata: lead.metadata ?? {},
+        metadata: redactLeadMetadata(lead.metadata ?? {}),
         created_at: lead.created_at,
       })),
       pagination: {
@@ -344,6 +437,11 @@ export class LeadsService {
       if (query.status != null) {
         qb.andWhere('lead.status = :leadStatus', { leadStatus: query.status });
       }
+      if (query.lifecyclePhase != null) {
+        qb.andWhere('assignment.lifecycle_phase = :lifecyclePhase', {
+          lifecyclePhase: query.lifecyclePhase,
+        });
+      }
       if (query.dateFrom) {
         const df = new Date(query.dateFrom);
         df.setHours(0, 0, 0, 0);
@@ -375,6 +473,9 @@ export class LeadsService {
           'assignment.crm_sync_status AS crm_sync_status',
           'assignment.created_at AS assigned_at',
           'assignment.lifecycle_phase AS lifecycle_phase',
+          'assignment.contract_price_cents AS contract_price_cents',
+          'assignment.sell_price_cents AS sell_price_cents',
+          'assignment.buyer_notes AS buyer_notes',
         ])
         .getRawMany(),
       baseQb().getCount(),
@@ -414,6 +515,9 @@ export class LeadsService {
         'assignment.created_at AS assigned_at',
         'assignment.lifecycle_phase AS lifecycle_phase',
         'assignment.disposition AS disposition',
+        'assignment.contract_price_cents AS contract_price_cents',
+        'assignment.sell_price_cents AS sell_price_cents',
+        'assignment.buyer_notes AS buyer_notes',
         'buyer.id AS buyer_id',
         'buyer.email AS buyer_email',
       ]);
@@ -423,6 +527,8 @@ export class LeadsService {
     }
 
     const assignments = await assignmentQb.getRawMany();
+    const revealPii =
+      role === UserRole.ADMIN || (assignments as any[]).length > 0;
     const assignmentIds = assignments.map((a) => a.assignment_id as string);
 
     const timelineByAssignment: Record<string, any[]> = {};
@@ -458,7 +564,9 @@ export class LeadsService {
         marketplace_tier: lead.marketplace_tier,
         title: lead.title,
         status: lead.status,
-        metadata: lead.metadata,
+        metadata: revealPii
+          ? lead.metadata ?? {}
+          : redactLeadMetadata(lead.metadata ?? {}),
         created_at: lead.created_at,
         updated_at: lead.updated_at,
       },
@@ -523,7 +631,12 @@ export class LeadsService {
   async updateMyAssignmentLifecycle(
     userId: string,
     assignmentId: string,
-    lifecycle_phase: string,
+    patch: {
+      lifecycle_phase?: string;
+      contract_price_cents?: number | null;
+      sell_price_cents?: number | null;
+      buyer_notes?: string | null;
+    },
   ) {
     const assignment = await this.leadAssignmentRepo.findOne({
       where: { id: assignmentId },
@@ -533,16 +646,60 @@ export class LeadsService {
     if (assignment.buyer.id !== userId) {
       throw new ForbiddenException('Not your assignment');
     }
-    assignment.lifecycle_phase = lifecycle_phase;
+    if (patch.lifecycle_phase !== undefined) {
+      assignment.lifecycle_phase = patch.lifecycle_phase;
+    }
+    if (patch.contract_price_cents !== undefined) {
+      assignment.contract_price_cents =
+        patch.contract_price_cents === null
+          ? null
+          : String(patch.contract_price_cents);
+    }
+    if (patch.sell_price_cents !== undefined) {
+      assignment.sell_price_cents =
+        patch.sell_price_cents === null ? null : String(patch.sell_price_cents);
+    }
+    if (patch.buyer_notes !== undefined) {
+      assignment.buyer_notes = patch.buyer_notes;
+    }
     await this.leadAssignmentRepo.save(assignment);
     await this.assignmentEventRepo.save(
       this.assignmentEventRepo.create({
         assignment: { id: assignment.id } as LeadAssignment,
         event_type: 'lifecycle_update',
-        body: { lifecycle_phase },
+        body: patch,
       }),
     );
     return assignment;
+  }
+
+  async listDuplicatePhoneGroups() {
+    return this.leadRepo.query<
+      Array<{ phone: string; ids: string[]; count: string }>
+    >(
+      `
+      SELECT LOWER(TRIM(metadata->>'phone')) AS phone,
+             array_agg(id::text ORDER BY created_at) AS ids,
+             COUNT(*)::text AS count
+      FROM leads
+      WHERE COALESCE(metadata->>'phone','') <> ''
+      GROUP BY 1
+      HAVING COUNT(*) > 1
+      ORDER BY COUNT(*) DESC
+      LIMIT 50
+    `,
+    );
+  }
+
+  async markLeadAsDuplicateOf(canonicalLeadId: string, duplicateLeadId: string) {
+    if (canonicalLeadId === duplicateLeadId) {
+      throw new BadRequestException('Cannot mark a lead as duplicate of itself');
+    }
+    const canonical = await this.findLeadOrThrow(canonicalLeadId);
+    const dup = await this.findLeadOrThrow(duplicateLeadId);
+    dup.duplicate_of_lead = canonical;
+    await this.leadRepo.save(dup);
+    return dup;
   }
 
   async buyLead(
@@ -596,6 +753,25 @@ export class LeadsService {
       const currentPriceCents = BigInt(lead.price_cents);
       const buyerBalanceCents = BigInt(buyerWallet.balance_cents);
 
+      const duplicateForBuyer = await this.detectCanonicalDuplicate(
+        lead.metadata ?? {},
+        lead.id,
+      );
+      if (duplicateForBuyer) {
+        const priorAssignmentCount = await queryRunner.manager
+          .getRepository(LeadAssignment)
+          .createQueryBuilder('assignment')
+          .innerJoin('assignment.lead', 'priorLead')
+          .where('assignment.buyer_id = :buyerId', { buyerId })
+          .andWhere('priorLead.id = :priorLeadId', { priorLeadId: duplicateForBuyer.id })
+          .getCount();
+        if (priorAssignmentCount > 0) {
+          throw new BadRequestException(
+            'This lead matches a lead already assigned to your account',
+          );
+        }
+      }
+
       if (buyerBalanceCents < currentPriceCents) {
         throw new BadRequestException('Insufficient wallet balance');
       }
@@ -630,12 +806,29 @@ export class LeadsService {
 
       await queryRunner.commitTransaction();
 
-      await this.notificationsService.logPurchase(
-        buyerId,
-        lead.title,
-        savedAssignment.amount_charged_cents,
-        lead.id,
-      );
+      await Promise.allSettled([
+        this.notificationsService.logPurchase(
+          buyerId,
+          lead.title,
+          savedAssignment.amount_charged_cents,
+          lead.id,
+          purchaseType,
+        ),
+        this.integrationsService.emitCustomWebhookEvent(
+          buyerId,
+          purchaseType === PurchaseType.AUTO_BUY ? 'lead_auto_purchased' : 'lead_purchased',
+          {
+            assignment_id: savedAssignment.id,
+            lead_id: lead.id,
+            lead_title: lead.title,
+            purchase_type: purchaseType,
+            amount_charged_cents: savedAssignment.amount_charged_cents,
+            market: lead.market,
+            lead_type: lead.lead_type,
+            metadata: lead.metadata ?? {},
+          },
+        ),
+      ]);
 
       await this.assignmentEventRepo.save(
         this.assignmentEventRepo.create({

@@ -15,8 +15,30 @@ export class User {
   @Column({ unique: true })
   email!: string;
 
-  @Column()
-  password_hash!: string;
+  /** Null for Google-only accounts */
+  @Column({ type: 'varchar', nullable: true })
+  password_hash!: string | null;
+
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  google_sub!: string | null;
+
+  @Column({ default: false })
+  distribution_locked!: boolean;
+
+  @Column({ type: 'varchar', nullable: true })
+  utm_source!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  utm_medium!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  utm_campaign!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  utm_content!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  utm_term!: string | null;
 
   @Column({type: 'varchar', nullable: true })
   full_name!: string | null;

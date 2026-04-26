@@ -71,6 +71,15 @@ import {
 
     @Column({ type: 'varchar', nullable: true })
     lifecycle_phase!: string | null
+
+    @Column({ type: 'bigint', nullable: true })
+    contract_price_cents!: string | null
+
+    @Column({ type: 'bigint', nullable: true })
+    sell_price_cents!: string | null
+
+    @Column({ type: 'text', nullable: true })
+    buyer_notes!: string | null
   
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at!: Date

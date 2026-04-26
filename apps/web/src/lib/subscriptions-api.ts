@@ -57,6 +57,10 @@ export function checkoutSubscription(planType: SubscriptionDto['plan_type']) {
   return apiPost<SubscriptionCheckoutResponse>('/subscriptions/checkout', { planType });
 }
 
+export function syncSubscriptionCheckout(sessionId: string) {
+  return apiPost<SubscriptionDto | null>('/subscriptions/checkout/sync', { sessionId });
+}
+
 export function cancelSubscription() {
   return apiPost<SubscriptionDto>('/subscriptions/cancel');
 }

@@ -21,6 +21,17 @@ export class SubscriptionsController {
     return this.subscriptionsService.checkout(req.user.userId, dto.planType);
   }
 
+  @Post('checkout/sync')
+  syncCheckout(
+    @Req() req: { user: { userId: string } },
+    @Body() body: { sessionId?: string },
+  ) {
+    return this.subscriptionsService.syncCheckoutSession(
+      req.user.userId,
+      body.sessionId ?? '',
+    );
+  }
+
   @Get('me')
   me(@Req() req: { user: { userId: string } }) {
     return this.subscriptionsService.getMine(req.user.userId);

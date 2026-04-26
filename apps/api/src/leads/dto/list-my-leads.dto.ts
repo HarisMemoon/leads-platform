@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsEnum, IsInt, IsOptional, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, Min } from 'class-validator';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
 import { PurchaseType } from '../../../common/enums/purchase-type.enum';
 
@@ -23,6 +23,10 @@ export class ListMyLeadsDto {
   @IsOptional()
   @IsEnum(LeadStatus)
   status?: LeadStatus;
+
+  @IsOptional()
+  @IsIn(['open', 'contacted', 'under_contract', 'closed_won'])
+  lifecyclePhase?: 'open' | 'contacted' | 'under_contract' | 'closed_won';
 
   @IsOptional()
   @IsDateString()

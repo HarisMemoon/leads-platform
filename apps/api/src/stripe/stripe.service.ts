@@ -89,25 +89,33 @@ export class StripeService {
     amountCents: number,
     paymentMethodId: string,
     stripeCustomerId?: string | null,
+    opts?: { balanceCentsForIdempotency?: string },
   ): Promise<Stripe.PaymentIntent> {
     const customerId =
       stripeCustomerId ?? (await this.ensureStripeCustomerId(userId));
 
-    const intent = await this.stripe.paymentIntents.create({
-      amount: amountCents,
-      currency: 'usd',
-      confirm: true,
-      off_session: true,
-      payment_method: paymentMethodId,
-      customer: customerId,
-      /** Match wallet top-up intents — card-only avoids Link / other APMs breaking off-session. */
-      payment_method_types: ['card'],
-      metadata: {
-        userId,
-        amountCents: String(amountCents),
-        purpose: 'wallet_auto_reload',
+    const balanceHint = opts?.balanceCentsForIdempotency ?? '0';
+    const cronBucket = Math.floor(Date.now() / 120_000);
+    const idempotencyKey = `wallet-ar:${userId}:${balanceHint}:${cronBucket}`;
+
+    const intent = await this.stripe.paymentIntents.create(
+      {
+        amount: amountCents,
+        currency: 'usd',
+        confirm: true,
+        off_session: true,
+        payment_method: paymentMethodId,
+        customer: customerId,
+        /** Match wallet top-up intents — card-only avoids Link / other APMs breaking off-session. */
+        payment_method_types: ['card'],
+        metadata: {
+          userId,
+          amountCents: String(amountCents),
+          purpose: 'wallet_auto_reload',
+        },
       },
-    });
+      { idempotencyKey },
+    );
 
     if (intent.status === 'succeeded') {
       await this.walletService.applyStripeTopUp(
@@ -182,6 +190,10 @@ export class StripeService {
       await this.handleInvoicePaymentFailed(event.data.object as Stripe.Invoice);
     }
 
+    if (event.type === 'invoice.paid') {
+      await this.handleInvoicePaid(event.data.object as Stripe.Invoice);
+    }
+
     return { received: true };
   }
 
@@ -205,6 +217,83 @@ export class StripeService {
     user.stripe_customer_id = customer.id;
     await this.userRepo.save(user);
     return customer.id;
+  }
+
+  async syncSubscriptionFromCheckoutSession(
+    userId: string,
+    sessionId: string,
+  ): Promise<Subscription> {
+    const session = await this.stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ['subscription'],
+    });
+
+    if (session.mode !== 'subscription') {
+      throw new BadRequestException('Checkout session is not for a subscription');
+    }
+
+    const sessionUserId =
+      session.client_reference_id ?? session.metadata?.userId ?? null;
+    if (sessionUserId && sessionUserId !== userId) {
+      throw new BadRequestException('Checkout session does not belong to this user');
+    }
+
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const sessionCustomerId =
+      typeof session.customer === 'string'
+        ? session.customer
+        : session.customer?.id;
+    if (
+      sessionCustomerId &&
+      user.stripe_customer_id &&
+      sessionCustomerId !== user.stripe_customer_id
+    ) {
+      throw new BadRequestException('Checkout session customer mismatch');
+    }
+
+    if (sessionCustomerId && !user.stripe_customer_id) {
+      user.stripe_customer_id = sessionCustomerId;
+      await this.userRepo.save(user);
+    }
+
+    const subscription =
+      typeof session.subscription === 'string'
+        ? await this.stripe.subscriptions.retrieve(session.subscription)
+        : session.subscription;
+    if (!subscription) {
+      throw new BadRequestException('Checkout session has no subscription');
+    }
+
+    return this.upsertSubscriptionFromStripe(subscription);
+  }
+
+  async syncLatestSubscriptionForUser(
+    userId: string,
+  ): Promise<Subscription | null> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user?.stripe_customer_id) {
+      return null;
+    }
+
+    const subscriptions = await this.stripe.subscriptions.list({
+      customer: user.stripe_customer_id,
+      status: 'all',
+      limit: 10,
+    });
+    const activeLike = subscriptions.data
+      .filter((sub) =>
+        ['active', 'trialing', 'past_due', 'unpaid'].includes(sub.status),
+      )
+      .sort((a, b) => b.created - a.created)[0];
+
+    if (!activeLike) {
+      return null;
+    }
+
+    return this.upsertSubscriptionFromStripe(activeLike);
   }
 
   async savePaymentMethod(userId: string, paymentMethodId: string) {
@@ -446,6 +535,44 @@ export class StripeService {
     await this.subscriptionRepo.save(localSub);
   }
 
+  private monthlyWalletCreditCentsForPlan(planType: PlanType): number {
+    if (planType === PlanType.BASIC) return 50_00;
+    if (planType === PlanType.PRO) return 100_00;
+    return 0;
+  }
+
+  private async handleInvoicePaid(invoice: Stripe.Invoice) {
+    const inv = invoice as Stripe.Invoice & { amount_paid?: number };
+    if (inv.status !== 'paid') return;
+    if ((inv.amount_paid ?? 0) <= 0) return;
+
+    const subId = this.extractSubscriptionIdFromInvoice(invoice);
+    if (!subId) return;
+
+    const br = (invoice as Stripe.Invoice & { billing_reason?: string | null })
+      .billing_reason;
+    if (br !== 'subscription_cycle' && br !== 'subscription_create') {
+      return;
+    }
+
+    const localSub = await this.subscriptionRepo.findOne({
+      where: { stripe_subscription_id: subId },
+      relations: { user: true },
+    });
+    if (!localSub?.user?.id) return;
+
+    const creditCents = this.monthlyWalletCreditCentsForPlan(localSub.plan_type);
+    if (creditCents <= 0) return;
+
+    await this.walletService.applyIdempotentCredit(
+      localSub.user.id,
+      creditCents,
+      'subscription_invoice_wallet',
+      invoice.id,
+      `Monthly wallet credit (${localSub.plan_type})`,
+    );
+  }
+
   private async handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
     const subId = this.extractSubscriptionIdFromInvoice(invoice);
     if (!subId) {
@@ -592,8 +719,8 @@ export class StripeService {
 
   private planDefaults(planType: PlanType) {
     const map: Record<PlanType, { priorityWeight: number; monthlyLeadLimit: number | null }> = {
-      [PlanType.BASIC]: { priorityWeight: 1, monthlyLeadLimit: 10 },
-      [PlanType.PRO]: { priorityWeight: 2, monthlyLeadLimit: 30 },
+      [PlanType.BASIC]: { priorityWeight: 1, monthlyLeadLimit: 25 },
+      [PlanType.PRO]: { priorityWeight: 2, monthlyLeadLimit: 40 },
       [PlanType.MARKET_SPECIFIC]: { priorityWeight: 3, monthlyLeadLimit: null },
       [PlanType.PREMIUM]: { priorityWeight: 4, monthlyLeadLimit: null },
     };

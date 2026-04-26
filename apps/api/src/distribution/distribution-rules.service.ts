@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DistributionRule } from '../entities/distribution-rule.entity';
+import { User } from '../entities/user.entity';
 import { UpdateDistributionRuleDto } from './dto/update-distribution-rule.dto';
 
 @Injectable()
@@ -9,7 +10,18 @@ export class DistributionRulesService {
   constructor(
     @InjectRepository(DistributionRule)
     private readonly ruleRepo: Repository<DistributionRule>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
   ) {}
+
+  private async assertDistributionUnlocked(userId: string) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (user?.distribution_locked) {
+      throw new ForbiddenException(
+        'Distribution settings are locked for your account. Contact support.',
+      );
+    }
+  }
 
   listForUser(userId: string) {
     return this.ruleRepo.find({
@@ -28,6 +40,7 @@ export class DistributionRulesService {
   }
 
   async upsertMe(userId: string, dto: UpdateDistributionRuleDto): Promise<DistributionRule> {
+    await this.assertDistributionUnlocked(userId);
     let rule = await this.ruleRepo.findOne({
       where: { user: { id: userId } },
       order: { created_at: 'ASC' },
@@ -73,6 +86,7 @@ export class DistributionRulesService {
   }
 
   async updateOwnRule(userId: string, ruleId: string, dto: UpdateDistributionRuleDto) {
+    await this.assertDistributionUnlocked(userId);
     const rule = await this.ruleRepo.findOne({
       where: { id: ruleId },
       relations: { user: true },

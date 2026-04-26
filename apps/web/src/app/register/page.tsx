@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { setAccessToken } from "@/lib/token";
+import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -23,10 +24,24 @@ export default function RegisterPage() {
     setLoading(true);
     setError("");
     try {
+      const utm: Record<string, string> = {};
+      if (typeof window !== "undefined") {
+        const sp = new URLSearchParams(window.location.search);
+        for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"]) {
+          const v = sp.get(k);
+          if (v) utm[k] = v;
+        }
+      }
       const res = await fetch(`/api/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email, password: form.password, full_name: form.full_name, company_name: form.company_name }),
+        body: JSON.stringify({
+          email: form.email,
+          password: form.password,
+          full_name: form.full_name,
+          company_name: form.company_name,
+          ...utm,
+        }),
       });
       if (!res.ok) {
         const data = await res.json() as { message: string };
@@ -300,6 +315,25 @@ export default function RegisterPage() {
 
         .terms a { color: rgba(255,255,255,0.45); text-decoration: underline; }
 
+        .divider-or {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin: 8px 0 20px;
+        }
+        .divider-or span {
+          flex: 1;
+          height: 1px;
+          background: rgba(255,255,255,0.07);
+        }
+        .divider-or p {
+          font-size: 12px;
+          color: rgba(255,255,255,0.25);
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          margin: 0;
+        }
+
         @keyframes spin { to { transform: rotate(360deg); } }
         .spinner {
           width: 16px; height: 16px;
@@ -349,6 +383,17 @@ export default function RegisterPage() {
           </p>
 
           {error && <div className="error-box">{error}</div>}
+
+          {step === 1 && (
+            <>
+              <GoogleSignInButton variant="signup" onError={setError} />
+              <div className="divider-or" aria-hidden="true">
+                <span />
+                <p>or use email</p>
+                <span />
+              </div>
+            </>
+          )}
 
           <form onSubmit={step === 1 ? (e) => { e.preventDefault(); setError(""); setStep(2); } : handleSubmit}>
             {step === 1 ? (

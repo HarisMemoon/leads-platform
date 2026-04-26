@@ -1,17 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { getAuthMe } from "@/lib/auth-api";
 import { clearAccessToken, getAccessToken } from "@/lib/token";
 
 export default function RequireAuth({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const token = getAccessToken();
+    setReady(false);
 
     if (!token) {
       router.replace("/login");
@@ -20,7 +22,11 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
 
     (async () => {
       try {
-        await getAuthMe();
+        const user = await getAuthMe();
+        if (user.role === "admin" && pathname !== "/admin/console" && !pathname.startsWith("/admin/console/")) {
+          if (!cancelled) router.replace("/admin/console");
+          return;
+        }
         if (!cancelled) setReady(true);
       } catch {
         clearAccessToken();
@@ -31,7 +37,7 @@ export default function RequireAuth({ children }: { children: React.ReactNode })
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [pathname, router]);
 
   if (!ready) return null;
 

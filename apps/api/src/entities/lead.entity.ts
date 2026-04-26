@@ -76,6 +76,16 @@ import {
   
     @Column({ type: 'jsonb', default: () => `'{}'::jsonb` })
     metadata!: Record<string, any>
+
+    @Column({ type: 'varchar', nullable: true })
+    canonical_lead_source!: string | null
+
+    @Column({ type: 'jsonb', default: () => `'{}'::jsonb` })
+    utm!: Record<string, string>
+
+    @ManyToOne(() => Lead, { nullable: true })
+    @JoinColumn({ name: 'duplicate_of_lead_id' })
+    duplicate_of_lead!: Lead | null
   
     /*
     Reservation system

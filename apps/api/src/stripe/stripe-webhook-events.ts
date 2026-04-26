@@ -10,4 +10,5 @@ export const STRIPE_WEBHOOK_EVENT_TYPES = [
   'customer.subscription.created',
   'customer.subscription.deleted',
   'invoice.payment_failed',
+  'invoice.paid',
 ] as const;

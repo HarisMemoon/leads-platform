@@ -7,6 +7,7 @@ import { PlanType } from '../../common/enums/plan-type.enum';
 import { SubscriptionStatus } from '../../common/enums/subscription-status.enum';
 import { SubscriptionPlanCatalogItemDto } from './dto/subscription-plan-catalog.dto';
 import { Subscription } from '../entities/subscription.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { User } from '../entities/user.entity';
 import { StripeService } from '../stripe/stripe.service';
 
@@ -26,6 +27,8 @@ export class SubscriptionsService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(Subscription)
     private readonly subscriptionRepo: Repository<Subscription>,
+    @InjectRepository(SubscriptionPlan)
+    private readonly planRepo: Repository<SubscriptionPlan>,
   ) {
     const secretKey = configService.get<string>('STRIPE_SECRET_KEY');
     if (!secretKey) {
@@ -39,12 +42,49 @@ export class SubscriptionsService {
 
   /**
    * Marketplace catalog for the web app: limits, filters, priority, and whether Stripe checkout is wired.
+   * Reads from the subscription_plans DB table (admin-editable). Falls back to hardcoded
+   * definitions if the table is empty (early bootstrap before migrations seed it).
    */
-  getPlanCatalog(): SubscriptionPlanCatalogItemDto[] {
-    const base = this.planCatalogDefinitions();
-    return base.map((row) => ({
-      ...row,
-      stripeConfigured: !!this.stripePriceIdFor(row.planType),
+  async getPlanCatalog(): Promise<SubscriptionPlanCatalogItemDto[]> {
+    const rows = await this.planRepo.find({
+      where: {
+        is_active: true,
+        plan_type: In([PlanType.BASIC, PlanType.PRO]),
+      },
+      order: { priority_rank: 'ASC' },
+    });
+    if (rows.length === 0) {
+      return this.planCatalogDefinitions()
+        .filter(
+          (row) =>
+            row.planType === PlanType.BASIC || row.planType === PlanType.PRO,
+        )
+        .map((row) => ({
+          ...row,
+          stripeConfigured: !!this.stripePriceIdFor(row.planType),
+        }));
+    }
+    return rows.map((row) => ({
+      planType: row.plan_type,
+      name: row.name,
+      tagline: row.tagline,
+      displayPrice: row.display_price,
+      billingPeriodLabel: row.billing_period_label,
+      monthlyLeadLimit: row.monthly_lead_limit,
+      leadLimitSummary: row.lead_limit_summary,
+      priorityRank: row.priority_rank,
+      priorityLabel: row.priority_label,
+      distributionSummary: row.distribution_summary,
+      includedLeadCreditsSummary: row.included_lead_credits_summary,
+      filterScope: {
+        state: !!row.filter_scope?.state,
+        county: !!row.filter_scope?.county,
+        zip: !!row.filter_scope?.zip,
+        leadType: !!row.filter_scope?.leadType,
+      },
+      cardHighlights: row.card_highlights ?? [],
+      featureBullets: row.feature_bullets ?? [],
+      stripeConfigured: !!this.stripePriceIdFor(row.plan_type),
     }));
   }
 
@@ -52,6 +92,9 @@ export class SubscriptionsService {
     userId: string,
     planType: PlanType,
   ): Promise<SubscriptionCheckoutResult> {
+    if (planType !== PlanType.BASIC && planType !== PlanType.PRO) {
+      throw new BadRequestException('Only Basic and Pro plans are available');
+    }
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User not found');
@@ -89,7 +132,7 @@ export class SubscriptionsService {
       customer: userWithCustomer.stripe_customer_id,
       client_reference_id: userId,
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${this.appBaseUrl}/subscriptions?checkout=success`,
+      success_url: `${this.appBaseUrl}/subscriptions?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${this.appBaseUrl}/subscriptions?checkout=cancelled`,
       allow_promotion_codes: true,
       metadata: {
@@ -126,10 +169,36 @@ export class SubscriptionsService {
     if (activeLike) {
       return activeLike;
     }
+    await this.stripeService.syncLatestSubscriptionForUser(userId);
+    const reconciledActiveLike = await this.subscriptionRepo.findOne({
+      where: {
+        user: { id: userId },
+        status: In([
+          SubscriptionStatus.ACTIVE,
+          SubscriptionStatus.PAST_DUE,
+          SubscriptionStatus.PAUSED,
+        ]),
+      },
+      order: { updated_at: 'DESC' },
+    });
+    if (reconciledActiveLike) {
+      return reconciledActiveLike;
+    }
     return this.subscriptionRepo.findOne({
       where: { user: { id: userId } },
       order: { updated_at: 'DESC' },
     });
+  }
+
+  async syncCheckoutSession(userId: string, sessionId: string) {
+    if (!sessionId?.trim()) {
+      throw new BadRequestException('Missing checkout session id');
+    }
+    await this.stripeService.syncSubscriptionFromCheckoutSession(
+      userId,
+      sessionId.trim(),
+    );
+    return this.getMine(userId);
   }
 
   async cancel(userId: string) {
@@ -180,131 +249,65 @@ export class SubscriptionsService {
       {
         planType: PlanType.BASIC,
         name: 'Basic',
-        tagline: 'Start with steady lead flow and standard rotation priority.',
-        displayPrice: '$49',
+        tagline: 'Premium subscription leads plus a monthly wallet allowance.',
+        displayPrice: '$199',
         billingPeriodLabel: 'per month',
-        monthlyLeadLimit: 10,
-        leadLimitSummary: 'Up to 10 leads / billing period',
+        monthlyLeadLimit: 25,
+        leadLimitSummary: 'Up to 25 premium leads / billing period',
         priorityRank: 1,
         priorityLabel: 'Standard merry-go-round priority',
         distributionSummary:
-          'Included in rotation after higher-tier subscribers in each market.',
-        includedLeadCreditsSummary: '10 lead credits / month toward distribution',
+          'Included in automated distribution when leads match your geography.',
+        includedLeadCreditsSummary:
+          '25 premium lead credits / month + $50 wallet credit / month',
         filterScope: {
           state: true,
-          county: false,
+          county: true,
           zip: false,
-          leadType: true,
+          leadType: false,
         },
         cardHighlights: [
-          '10 leads / month',
-          'State + lead-type filters',
-          'Stripe recurring billing',
+          '25 premium leads / month',
+          '$50 wallet credit / month',
+          'Stripe subscription billing',
         ],
         featureBullets: [
           'Recurring billing through Stripe (cancel anytime from billing portal)',
-          'Up to 10 included lead credits per monthly period',
-          'Merry-go-round priority: standard (tier 1 of 4)',
-          'Filters: US state and lead type (motivated seller, probate, etc.)',
-          'County and ZIP filters unlock on higher plans',
+          '25 included premium lead credits per monthly period',
+          '$50 wallet credit each billing cycle (posted when Stripe invoices are paid)',
+          'Geography-first market selection in onboarding',
         ],
       },
       {
         planType: PlanType.PRO,
         name: 'Pro',
-        tagline: 'More volume, higher rotation priority, and county-level targeting.',
-        displayPrice: '$129',
+        tagline: 'Higher volume premium leads and a larger monthly wallet allowance.',
+        displayPrice: '$349',
         billingPeriodLabel: 'per month',
-        monthlyLeadLimit: 30,
-        leadLimitSummary: 'Up to 30 leads / billing period',
+        monthlyLeadLimit: 40,
+        leadLimitSummary: 'Up to 40 premium leads / billing period',
         priorityRank: 2,
         priorityLabel: 'Elevated merry-go-round priority',
         distributionSummary:
           'Ahead of Basic in the rotation when leads match your filters.',
-        includedLeadCreditsSummary: '30 lead credits / month toward distribution',
+        includedLeadCreditsSummary:
+          '40 premium lead credits / month + $100 wallet credit / month',
         filterScope: {
           state: true,
           county: true,
-          zip: false,
-          leadType: true,
+          zip: true,
+          leadType: false,
         },
         cardHighlights: [
-          '30 leads / month',
-          'State, county + lead-type filters',
+          '40 premium leads / month',
+          '$100 wallet credit / month',
           'Higher rotation priority',
         ],
         featureBullets: [
           'Recurring billing through Stripe',
-          'Up to 30 included lead credits per monthly period',
-          'Merry-go-round priority: elevated (tier 2 of 4)',
-          'Filters: state, county, and lead type',
-          'ZIP-level targeting available on Market-Specific and Premium',
-        ],
-      },
-      {
-        planType: PlanType.MARKET_SPECIFIC,
-        name: 'Market-Specific',
-        tagline: 'Unlimited leads in one chosen market with top-tier local priority.',
-        displayPrice: '$249',
-        billingPeriodLabel: 'per month',
-        monthlyLeadLimit: null,
-        leadLimitSummary: 'Unlimited leads within your selected market',
-        priorityRank: 3,
-        priorityLabel: 'High priority in your market',
-        distributionSummary:
-          'Highest priority for matching leads inside the market you lock in.',
-        includedLeadCreditsSummary:
-          'Unlimited distribution-eligible leads within 1 market',
-        filterScope: {
-          state: true,
-          county: true,
-          zip: true,
-          leadType: true,
-        },
-        cardHighlights: [
-          'Unlimited in 1 market',
-          'Full geo + lead-type filters',
-          'High rotation priority',
-        ],
-        featureBullets: [
-          'Recurring billing through Stripe',
-          'Unlimited lead flow within a single designated market',
-          'Merry-go-round priority: high (tier 3 of 4)',
-          'Filters: state, county, ZIP, and lead type within that market',
-          'Ideal when you dominate one metro or territory',
-        ],
-      },
-      {
-        planType: PlanType.PREMIUM,
-        name: 'Premium / Exclusive',
-        tagline: 'Unlimited everywhere, exclusive inventory access, and maximum priority.',
-        displayPrice: '$499',
-        billingPeriodLabel: 'per month',
-        monthlyLeadLimit: null,
-        leadLimitSummary: 'Unlimited leads across all markets',
-        priorityRank: 4,
-        priorityLabel: 'Maximum merry-go-round priority',
-        distributionSummary:
-          'First in line for matching leads platform-wide, including exclusive listings.',
-        includedLeadCreditsSummary:
-          'Unlimited credits + exclusive / premium lead access where available',
-        filterScope: {
-          state: true,
-          county: true,
-          zip: true,
-          leadType: true,
-        },
-        cardHighlights: [
-          'Unlimited all markets',
-          'Exclusive lead access',
-          'Top rotation priority',
-        ],
-        featureBullets: [
-          'Recurring billing through Stripe',
-          'Unlimited lead allocation across every market we serve',
-          'Merry-go-round priority: maximum (tier 4 of 4)',
-          'Full filters: state, county, ZIP, and lead type everywhere',
-          'Premium / exclusive inventory when offered by the platform',
+          '40 included premium lead credits per monthly period',
+          '$100 wallet credit each billing cycle (posted when Stripe invoices are paid)',
+          'Geography-first market selection in onboarding',
         ],
       },
     ];

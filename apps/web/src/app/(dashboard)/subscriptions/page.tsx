@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState, type CSSProperties } from "react";
+import { Suspense, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -22,6 +22,7 @@ import {
   createCustomerPortal,
   getMySubscription,
   getSubscriptionPlans,
+  syncSubscriptionCheckout,
   type SubscriptionDto,
   type SubscriptionPlanCatalogItem,
 } from "@/lib/subscriptions-api";
@@ -530,6 +531,7 @@ function SubscriptionsPageInner() {
 
   const checkoutSuccess = searchParams.get("checkout") === "success";
   const checkoutCancelled = searchParams.get("checkout") === "cancelled";
+  const checkoutSessionId = searchParams.get("session_id");
 
   const { data, isLoading: subscriptionLoading, error } = useQuery({
     queryKey: queryKeys.subscriptions.me,
@@ -550,6 +552,12 @@ function SubscriptionsPageInner() {
 
   const hasActiveLikeSubscription = !!data && (ACTIVE_LIKE_STATUSES as readonly string[]).includes(data.status);
   const currentPlanMeta = useMemo(() => plans.find((p) => p.planType === data?.plan_type) ?? null, [plans, data]);
+  const availablePlans = useMemo(
+    () => plans.filter((plan) => plan.planType === "basic" || plan.planType === "pro"),
+    [plans],
+  );
+  const basicPlan = availablePlans.find((plan) => plan.planType === "basic");
+  const proPlan = availablePlans.find((plan) => plan.planType === "pro");
 
   const checkout = useMutation({
     mutationFn: checkoutSubscription,
@@ -583,6 +591,37 @@ function SubscriptionsPageInner() {
     },
   });
 
+  const syncCheckout = useMutation({
+    mutationFn: syncSubscriptionCheckout,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions.me });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+    },
+  });
+  const syncCheckoutMutate = syncCheckout.mutate;
+  const checkoutSyncing =
+    checkoutSuccess && checkoutSessionId && !syncCheckout.isError && (syncCheckout.isPending || !data);
+
+  useEffect(() => {
+    if (
+      !checkoutSuccess ||
+      !checkoutSessionId ||
+      syncCheckout.isPending ||
+      syncCheckout.isSuccess ||
+      syncCheckout.isError
+    ) {
+      return;
+    }
+    syncCheckoutMutate(checkoutSessionId);
+  }, [
+    checkoutSessionId,
+    checkoutSuccess,
+    syncCheckout.isError,
+    syncCheckout.isPending,
+    syncCheckout.isSuccess,
+    syncCheckoutMutate,
+  ]);
+
   const progressPercent =
     data?.monthly_lead_limit && data.monthly_lead_limit > 0
       ? Math.min(100, Math.round((data.leads_used_this_period / data.monthly_lead_limit) * 100))
@@ -597,11 +636,106 @@ function SubscriptionsPageInner() {
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        .subs-offer-hero {
+          display: grid;
+          grid-template-columns: minmax(0, 1.15fr) minmax(340px, 0.85fr);
+          gap: 18px;
+          margin-bottom: 24px;
+          animation: fadeUp 0.4s ease both;
+        }
+        .subs-hero-main {
+          position: relative;
+          overflow: hidden;
+          border-radius: 24px;
+          border: 1px solid rgba(99,102,241,0.22);
+          background:
+            radial-gradient(circle at 86% 8%, rgba(139,92,246,0.2), transparent 34%),
+            radial-gradient(circle at 5% 105%, rgba(16,185,129,0.14), transparent 34%),
+            linear-gradient(135deg, rgba(99,102,241,0.13), rgba(255,255,255,0.028));
+          padding: 30px;
+          min-height: 320px;
+        }
+        .subs-hero-side {
+          border-radius: 22px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.03);
+          padding: 22px;
+        }
+        .subs-hero-eyebrow {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 7px 11px;
+          border-radius: 999px;
+          background: rgba(99,102,241,0.15);
+          border: 1px solid rgba(99,102,241,0.24);
+          color: #c4b5fd;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          margin-bottom: 18px;
+        }
+        .subs-hero-title {
+          font-family: "Syne", sans-serif;
+          font-size: clamp(34px, 4vw, 54px);
+          line-height: 0.98;
+          letter-spacing: -2px;
+          margin: 0;
+          max-width: 720px;
+        }
+        .subs-hero-copy {
+          margin: 18px 0 0;
+          max-width: 620px;
+          color: rgba(255,255,255,0.62);
+          font-size: 15px;
+          line-height: 1.7;
+        }
+        .subs-hero-stats {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+          margin-top: 26px;
+        }
+        .subs-hero-stat {
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(8,10,15,0.48);
+          padding: 15px;
+        }
+        .subs-hero-stat-value {
+          font-family: "Syne", sans-serif;
+          font-size: 24px;
+          font-weight: 800;
+          color: #fff;
+          letter-spacing: -0.5px;
+        }
+        .subs-hero-stat-label {
+          margin-top: 5px;
+          color: rgba(255,255,255,0.42);
+          font-size: 11px;
+          line-height: 1.35;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+        }
+        .subs-mini-plan {
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,0.075);
+          background: rgba(255,255,255,0.028);
+          padding: 15px;
+        }
         .subs-plan-card { transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s; }
         .subs-plan-card:hover { transform: translateY(-3px); }
-        .subs-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-        @media (max-width: 1100px) { .subs-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-        @media (max-width: 600px) { .subs-grid { grid-template-columns: 1fr; } }
+        .subs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+        @media (max-width: 980px) {
+          .subs-offer-hero { grid-template-columns: 1fr; }
+          .subs-hero-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+        @media (max-width: 700px) {
+          .subs-grid,
+          .subs-hero-stats { grid-template-columns: 1fr; }
+          .subs-hero-main { padding: 24px; min-height: auto; }
+        }
 
         /* Plan detail modal: single slim vertical scrollbar, dark theme */
         .subs-plan-modal-scroll {
@@ -626,44 +760,88 @@ function SubscriptionsPageInner() {
 
       <div style={{ minHeight: "100vh", background: "#080a0f", color: "#fff", fontFamily: "DM Sans, sans-serif" }}>
         <div style={{ maxWidth: 1220, margin: "0 auto", padding: "36px 24px 80px" }}>
-          {/* Header */}
-          <div style={{ marginBottom: 28, animation: "fadeUp 0.4s ease both" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-              <div
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 12,
-                  background: "linear-gradient(135deg, rgba(99,102,241,0.35), rgba(139,92,246,0.2))",
-                  border: "1px solid rgba(99,102,241,0.28)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Sparkles size={22} color="#c4b5fd" aria-hidden />
+          {!subscriptionLoading && !hasActiveLikeSubscription && (
+            <section className="subs-offer-hero">
+              <div className="subs-hero-main">
+                <div style={{ position: "relative", zIndex: 1 }}>
+                  <div className="subs-hero-eyebrow">
+                    <Sparkles size={13} strokeWidth={2.4} aria-hidden />
+                    Premium Lead Subscription
+                  </div>
+                  <h1 className="subs-hero-title">
+                    Get monthly premium leads plus wallet credits for faster buying.
+                  </h1>
+                  <p className="subs-hero-copy">
+                    Choose Basic or Pro based on your monthly lead volume. Both plans unlock recurring premium lead
+                    credits, automated distribution eligibility, and monthly wallet allowance through Stripe billing.
+                  </p>
+
+                  <div className="subs-hero-stats">
+                    <div className="subs-hero-stat">
+                      <div className="subs-hero-stat-value">
+                        {basicPlan?.monthlyLeadLimit ?? 25}
+                      </div>
+                      <div className="subs-hero-stat-label">Basic premium leads / month</div>
+                    </div>
+                    <div className="subs-hero-stat">
+                      <div className="subs-hero-stat-value">
+                        {proPlan?.monthlyLeadLimit ?? 40}
+                      </div>
+                      <div className="subs-hero-stat-label">Pro premium leads / month</div>
+                    </div>
+                    <div className="subs-hero-stat">
+                      <div className="subs-hero-stat-value">$50+</div>
+                      <div className="subs-hero-stat-label">Monthly wallet allowance</div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div>
-                <h1
-                  style={{
-                    fontFamily: "Syne, sans-serif",
-                    fontSize: 28,
-                    fontWeight: 800,
-                    margin: 0,
-                    letterSpacing: -0.6,
-                    background: "linear-gradient(135deg,#fff 35%,rgba(255,255,255,0.55))",
-                    WebkitBackgroundClip: "text",
-                    WebkitTextFillColor: "transparent",
-                  }}
-                >
-                  Subscription marketplace
-                </h1>
-              </div>
-            </div>
-            <p style={{ color: "rgba(255,255,255,0.38)", margin: 0, fontSize: 14, paddingLeft: 56, maxWidth: 640, lineHeight: 1.55 }}>
-              Recurring billing through Stripe, monthly lead limits, geo and lead-type filters, and merry-go-round priority by plan tier.
-            </p>
-          </div>
+
+              <aside className="subs-hero-side">
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                  <div
+                    style={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 12,
+                      background: "rgba(99,102,241,0.14)",
+                      border: "1px solid rgba(99,102,241,0.24)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Crown size={18} color="#c4b5fd" aria-hidden />
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: "Syne, sans-serif", fontSize: 18, fontWeight: 800 }}>
+                      Which plan fits?
+                    </div>
+                    <div style={{ color: "rgba(255,255,255,0.42)", fontSize: 12, marginTop: 3 }}>
+                      Start with Basic, scale with Pro.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gap: 10 }}>
+                  {[basicPlan, proPlan].filter(Boolean).map((plan) => (
+                    <div key={plan!.planType} className="subs-mini-plan">
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 8 }}>
+                        <div style={{ fontWeight: 800, color: "#fff" }}>{plan!.name}</div>
+                        <div style={{ color: "#c4b5fd", fontWeight: 800 }}>{plan!.displayPrice}</div>
+                      </div>
+                      <div style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, lineHeight: 1.5 }}>
+                        {plan!.leadLimitSummary}
+                      </div>
+                      <div style={{ color: "rgba(255,255,255,0.32)", fontSize: 12, lineHeight: 1.5, marginTop: 6 }}>
+                        {plan!.includedLeadCreditsSummary}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </aside>
+            </section>
+          )}
 
           {checkoutSuccess && (
             <div
@@ -680,9 +858,35 @@ function SubscriptionsPageInner() {
                 animation: "fadeUp 0.35s ease both",
               }}
             >
-              <CheckCircle2 size={18} />
-              <strong>Subscription active!</strong>
-              <span style={{ opacity: 0.85, fontSize: 14 }}>You&apos;re all set — your plan limits and priority apply on the next distribution cycle.</span>
+              {checkoutSyncing ? <Loader2 size={18} style={{ animation: "spin 0.8s linear infinite" }} /> : <CheckCircle2 size={18} />}
+              <strong>{checkoutSyncing ? "Finalizing subscription..." : data ? "Subscription active!" : "Checkout complete"}</strong>
+              <span style={{ opacity: 0.85, fontSize: 14 }}>
+                {checkoutSyncing
+                  ? "Confirming your Stripe checkout with Newleey."
+                  : data
+                    ? "You're all set — your plan limits and priority apply on the next distribution cycle."
+                    : "Refresh in a moment if your plan does not appear yet."}
+              </span>
+            </div>
+          )}
+
+          {syncCheckout.isError && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                marginBottom: 18,
+                padding: "14px 18px",
+                borderRadius: 14,
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.24)",
+                color: "#fca5a5",
+                fontSize: 14,
+              }}
+            >
+              <AlertTriangle size={18} />
+              {(syncCheckout.error as Error).message || "Could not finalize checkout. Please refresh or contact support."}
             </div>
           )}
 
@@ -998,7 +1202,7 @@ function SubscriptionsPageInner() {
             </div>
           ) : (
             <div className="subs-grid" style={{ animation: "fadeUp 0.45s ease 0.05s both" }}>
-              {plans.map((plan) => {
+              {availablePlans.map((plan) => {
                 const accent = planAccent(plan.planType);
                 const isPro = plan.planType === "pro";
                 const isPremium = plan.planType === "premium";

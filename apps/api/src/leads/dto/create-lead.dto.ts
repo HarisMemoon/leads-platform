@@ -40,4 +40,12 @@ export class CreateLeadDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  canonical_lead_source?: string;
+
+  @IsOptional()
+  @IsObject()
+  utm?: Record<string, string>;
 }

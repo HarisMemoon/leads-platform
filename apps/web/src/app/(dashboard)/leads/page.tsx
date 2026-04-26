@@ -14,10 +14,8 @@ import {
   Loader2,
   MapPin,
   Search,
-  ShoppingBag,
   Sparkles,
   Store,
-  Tag,
   TrendingDown,
   TrendingUp,
   X,
@@ -25,7 +23,7 @@ import {
 } from "lucide-react";
 import { getLeadDetail, getMyLeads, type MyLeadRow } from "@/lib/leads-api";
 import { queryKeys } from "@/lib/query-keys";
-import { LeadDetailModal, exclusivityLabel } from "@/components/LeadDetailModal";
+import { LeadDetailModal } from "@/components/LeadDetailModal";
 
 const LIMIT = 20;
 
@@ -58,85 +56,32 @@ function csvEscape(cell: string | number): string {
   return s;
 }
 
-function purchaseTypeLabel(pt: MyLeadRow["purchase_type"]): string {
-  if (pt === "auto_buy") return "Auto-buy";
-  if (pt === "manual") return "Manual";
-  if (pt === "subscription_distribution") return "Subscription";
-  return pt;
-}
+const TRACKED_PHASES = [
+  { value: "open", label: "Open" },
+  { value: "contacted", label: "Contacted" },
+  { value: "under_contract", label: "Under contract" },
+  { value: "closed_won", label: "Closed" },
+] as const;
+type TrackedPhase = (typeof TRACKED_PHASES)[number]["value"];
 
-function PurchaseTypeBadge({ pt }: { pt: MyLeadRow["purchase_type"] }) {
-  const isAuto = pt === "auto_buy";
-  const isSub = pt === "subscription_distribution";
-  if (isAuto) {
-    return (
-      <span style={{
-        display: "inline-flex", alignItems: "center", gap: 5,
-        fontSize: 11, fontWeight: 600, padding: "3px 10px",
-        borderRadius: 999,
-        background: "rgba(20,184,166,0.15)", color: "#5eead4",
-        border: "1px solid rgba(20,184,166,0.3)",
-      }}>
-        <Bot size={10} aria-hidden /> Auto-buy
-      </span>
-    );
-  }
-  if (isSub) {
-    return (
-      <span style={{
-        display: "inline-flex", alignItems: "center", gap: 5,
-        fontSize: 11, fontWeight: 600, padding: "3px 10px",
-        borderRadius: 999,
-        background: "rgba(99,102,241,0.15)", color: "#c4b5fd",
-        border: "1px solid rgba(99,102,241,0.3)",
-      }}>
-        <Sparkles size={10} aria-hidden /> Subscription
-      </span>
-    );
-  }
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 5,
-      fontSize: 11, fontWeight: 600, padding: "3px 10px",
-      borderRadius: 999,
-      background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)",
-      border: "1px solid rgba(255,255,255,0.1)",
-    }}>
-      <ShoppingBag size={10} aria-hidden /> Manual
-    </span>
-  );
+function phaseLabel(phase?: string | null) {
+  return TRACKED_PHASES.find((p) => p.value === phase)?.label ?? "Open";
 }
 
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { bg: string; color: string; border: string }> = {
-    available: { bg: "rgba(34,197,94,0.12)", color: "#86efac", border: "rgba(34,197,94,0.25)" },
-    sold:      { bg: "rgba(99,102,241,0.12)", color: "#a5b4fc", border: "rgba(99,102,241,0.25)" },
-    distributed: { bg: "rgba(20,184,166,0.12)", color: "#5eead4", border: "rgba(20,184,166,0.25)" },
-    archived:  { bg: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.35)", border: "rgba(255,255,255,0.1)" },
+    open: { bg: "rgba(99,102,241,0.12)", color: "#a5b4fc", border: "rgba(99,102,241,0.25)" },
+    contacted: { bg: "rgba(20,184,166,0.12)", color: "#5eead4", border: "rgba(20,184,166,0.25)" },
+    under_contract: { bg: "rgba(245,158,11,0.12)", color: "#fcd34d", border: "rgba(245,158,11,0.25)" },
+    closed_won: { bg: "rgba(34,197,94,0.12)", color: "#86efac", border: "rgba(34,197,94,0.25)" },
   };
-  const c = cfg[status] ?? cfg.archived;
+  const c = cfg[status] ?? cfg.open;
   return (
     <span style={{
       fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999,
       background: c.bg, color: c.color, border: `1px solid ${c.border}`,
-      textTransform: "capitalize",
     }}>
-      {status}
-    </span>
-  );
-}
-
-function ExclusivityBadge({ ex }: { ex: string }) {
-  const label = exclusivityLabel(ex as Parameters<typeof exclusivityLabel>[0]);
-  const isEx = ex === "exclusive";
-  return (
-    <span style={{
-      fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 999,
-      background: isEx ? "rgba(245,158,11,0.12)" : "rgba(255,255,255,0.05)",
-      color: isEx ? "#fcd34d" : "rgba(255,255,255,0.45)",
-      border: isEx ? "1px solid rgba(245,158,11,0.25)" : "1px solid rgba(255,255,255,0.09)",
-    }}>
-      {label}
+      {phaseLabel(status)}
     </span>
   );
 }
@@ -147,11 +92,14 @@ function parsePage(raw: string | null): number {
 }
 
 function downloadLeadsCsv(rows: MyLeadRow[]) {
-  const headers = ["Date purchased", "Market", "Type", "Exclusivity", "Price paid", "Purchase type", "Status"];
+  const headers = ["Date purchased", "Market", "Lead type", "Status", "Contract price", "Sell price", "CRM sync", "GHL sync"];
   const dataRows = rows.map((r) => [
     formatPurchasedAt(r.assigned_at), r.market, r.type,
-    exclusivityLabel(r.exclusivity), centsToDollars(r.charged_amount),
-    purchaseTypeLabel(r.purchase_type), r.status,
+    phaseLabel(r.lifecycle_phase),
+    r.contract_price_cents ? centsToDollars(r.contract_price_cents) : "",
+    r.sell_price_cents ? centsToDollars(r.sell_price_cents) : "",
+    r.crm_sync_status,
+    r.ghl_sync_status,
   ]);
   const csv = [headers, ...dataRows].map((line) => line.map(csvEscape).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -282,27 +230,27 @@ function LeadsHistoryInner() {
   const [filterOpen, setFilterOpen] = useState(false);
 
   const page = parsePage(searchParams.get("page"));
-  const purchaseTypeParam = searchParams.get("purchaseType") ?? "";
-  const statusParam = searchParams.get("status") ?? "";
+  const lifecycleParam = searchParams.get("lifecyclePhase") ?? "";
   const dateFrom = searchParams.get("dateFrom") ?? "";
   const dateTo = searchParams.get("dateTo") ?? "";
 
-  const purchaseType: "auto_buy" | "manual" | undefined =
-    purchaseTypeParam === "auto_buy" ? "auto_buy" : purchaseTypeParam === "manual" ? "manual" : undefined;
-  const status =
-    statusParam === "available" || statusParam === "sold" || statusParam === "distributed" || statusParam === "archived"
-      ? statusParam : undefined;
+  const lifecyclePhase: TrackedPhase | undefined =
+    lifecycleParam === "open" ||
+    lifecycleParam === "contacted" ||
+    lifecycleParam === "under_contract" ||
+    lifecycleParam === "closed_won"
+      ? lifecycleParam
+      : undefined;
 
-  const hasActiveFilters = !!(purchaseType || status || dateFrom || dateTo);
-  const activeFilterCount = [purchaseType, status, dateFrom, dateTo].filter(Boolean).length;
+  const hasActiveFilters = !!(lifecyclePhase || dateFrom || dateTo);
+  const activeFilterCount = [lifecyclePhase, dateFrom, dateTo].filter(Boolean).length;
 
   const queryOpts = useMemo(() => ({
     page, limit: LIMIT,
-    ...(purchaseType ? { purchaseType } : {}),
-    ...(status ? { status } : {}),
+    ...(lifecyclePhase ? { lifecyclePhase } : {}),
     ...(dateFrom ? { dateFrom } : {}),
     ...(dateTo ? { dateTo } : {}),
-  }), [page, purchaseType, status, dateFrom, dateTo]);
+  }), [page, lifecyclePhase, dateFrom, dateTo]);
 
   const setSearch = useCallback((updates: Record<string, string | null>) => {
     const p = new URLSearchParams(searchParams.toString());
@@ -331,10 +279,10 @@ function LeadsHistoryInner() {
 
   const clearFilters = () => router.replace("/leads", { scroll: false });
 
-  // Compute stats from items
-  const totalSpent = items.reduce((s, r) => s + Number(r.charged_amount), 0);
-  const avgPrice = items.length > 0 ? totalSpent / items.length : 0;
-  const exclusiveCount = items.filter((r) => r.exclusivity === "exclusive").length;
+  const openCount = items.filter((r) => (r.lifecycle_phase ?? "open") === "open").length;
+  const contactedCount = items.filter((r) => r.lifecycle_phase === "contacted").length;
+  const underContractCount = items.filter((r) => r.lifecycle_phase === "under_contract").length;
+  const closedCount = items.filter((r) => r.lifecycle_phase === "closed_won").length;
 
   // Sparkline: lead count per recent day (dummy based on items)
   const sparkData = useMemo(() => {
@@ -376,11 +324,11 @@ function LeadsHistoryInner() {
                   <ClipboardList size={18} color="#a5b4fc" aria-hidden />
                 </div>
                 <h1 style={{ fontFamily: "Syne, sans-serif", fontSize: 28, fontWeight: 800, letterSpacing: -0.8, margin: 0, background: "linear-gradient(135deg,#fff 40%,rgba(255,255,255,0.55))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-                  Lead History
+                  My Leads
                 </h1>
               </div>
               <p style={{ color: "rgba(255,255,255,0.38)", margin: 0, fontSize: 14 }}>
-                {total > 0 ? `${total} purchased lead${total !== 1 ? "s" : ""} · click any row for details` : "Your purchased leads will appear here"}
+                {total > 0 ? `${total} purchased lead${total !== 1 ? "s" : ""} · update status and deal numbers from details` : "Your purchased leads will appear here"}
               </p>
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -433,33 +381,31 @@ function LeadsHistoryInner() {
               <StatCard
                 icon={<ClipboardList size={16} color="#a5b4fc" aria-hidden />}
                 iconBg="rgba(99,102,241,0.2)"
-                label="Total leads"
-                value={String(total)}
+                label="Open"
+                value={String(openCount)}
                 sparkValues={sparkData}
                 sparkColor="#6366f1"
               />
               <StatCard
-                icon={<CircleDollarSign size={16} color="#6ee7b7" aria-hidden />}
-                iconBg="rgba(16,185,129,0.2)"
-                label="Total spent (page)"
-                value={`$${(totalSpent / 100).toFixed(0)}`}
-                sub={`avg $${(avgPrice / 100).toFixed(2)}/lead`}
-                sparkValues={items.map((r) => Number(r.charged_amount) / 100)}
-                sparkColor="#10b981"
-              />
-              <StatCard
-                icon={<Zap size={16} color="#fcd34d" aria-hidden />}
-                iconBg="rgba(245,158,11,0.2)"
-                label="Exclusive leads"
-                value={String(exclusiveCount)}
-                sub={`${items.length > 0 ? Math.round((exclusiveCount / items.length) * 100) : 0}% of page`}
-              />
-              <StatCard
                 icon={<Bot size={16} color="#5eead4" aria-hidden />}
                 iconBg="rgba(20,184,166,0.2)"
-                label="Auto-buy leads"
-                value={String(items.filter((r) => r.purchase_type === "auto_buy").length)}
-                sub="on this page"
+                label="Contacted"
+                value={String(contactedCount)}
+                sub="follow-up in motion"
+              />
+              <StatCard
+                icon={<CircleDollarSign size={16} color="#fcd34d" aria-hidden />}
+                iconBg="rgba(245,158,11,0.2)"
+                label="Under contract"
+                value={String(underContractCount)}
+                sub="contract price tracked"
+              />
+              <StatCard
+                icon={<Zap size={16} color="#6ee7b7" aria-hidden />}
+                iconBg="rgba(16,185,129,0.2)"
+                label="Closed"
+                value={String(closedCount)}
+                sub="sell price tracked"
               />
             </div>
           )}
@@ -489,27 +435,13 @@ function LeadsHistoryInner() {
               </div>
 
               <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                Purchase type
-                <div style={{ position: "relative" }}>
-                  <select value={purchaseTypeParam} className="filter-select" style={selectStyle}
-                    onChange={(e) => setSearch({ purchaseType: e.target.value || null, page: "1" })}>
-                    <option value="">All types</option>
-                    <option value="auto_buy">Auto-buy</option>
-                    <option value="manual">Manual</option>
-                  </select>
-                  <Tag size={12} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.3)", pointerEvents: "none" }} />
-                </div>
-              </label>
-
-              <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 11, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 Status
-                <select value={statusParam} className="filter-select" style={selectStyle}
-                  onChange={(e) => setSearch({ status: e.target.value || null, page: "1" })}>
+                <select value={lifecycleParam} className="filter-select" style={selectStyle}
+                  onChange={(e) => setSearch({ lifecyclePhase: e.target.value || null, page: "1" })}>
                   <option value="">All statuses</option>
-                  <option value="available">Available</option>
-                  <option value="sold">Sold</option>
-                  <option value="distributed">Distributed</option>
-                  <option value="archived">Archived</option>
+                  {TRACKED_PHASES.map((phase) => (
+                    <option key={phase.value} value={phase.value}>{phase.label}</option>
+                  ))}
                 </select>
               </label>
 
@@ -613,7 +545,7 @@ function LeadsHistoryInner() {
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                     <thead>
                       <tr style={{ background: "rgba(255,255,255,0.025)" }}>
-                        {["Date purchased", "Market", "Lead type", "Exclusivity", "Price paid", "Purchase type", "Status"].map((h) => (
+                        {["Date purchased", "Market", "Lead type", "Status", "Contract price", "Sell price", "CRM sync"].map((h) => (
                           <th key={h} style={{
                             textAlign: "left", padding: "13px 16px",
                             fontSize: 11, fontWeight: 600,
@@ -651,22 +583,31 @@ function LeadsHistoryInner() {
                             {row.type?.replace(/_/g, " ")}
                           </td>
                           <td style={{ padding: "13px 16px" }}>
-                            <ExclusivityBadge ex={row.exclusivity} />
+                            <StatusBadge status={row.lifecycle_phase ?? "open"} />
                           </td>
                           <td style={{ padding: "13px 16px" }}>
                             <span style={{
                               fontFamily: "DM Mono, monospace",
                               fontSize: 13, fontWeight: 600,
-                              color: "#6ee7b7",
+                              color: "rgba(255,255,255,0.78)",
                             }}>
-                              {centsToDollars(row.charged_amount)}
+                              {row.contract_price_cents ? centsToDollars(row.contract_price_cents) : "—"}
                             </span>
                           </td>
                           <td style={{ padding: "13px 16px" }}>
-                            <PurchaseTypeBadge pt={row.purchase_type} />
+                            <span style={{
+                              fontFamily: "DM Mono, monospace",
+                              fontSize: 13, fontWeight: 600,
+                              color: row.sell_price_cents ? "#6ee7b7" : "rgba(255,255,255,0.38)",
+                            }}>
+                              {row.sell_price_cents ? centsToDollars(row.sell_price_cents) : "—"}
+                            </span>
                           </td>
                           <td style={{ padding: "13px 16px" }}>
-                            <StatusBadge status={row.status} />
+                            <div style={{ display: "grid", gap: 4, fontSize: 11, color: "rgba(255,255,255,0.52)" }}>
+                              <span>CRM: {row.crm_sync_status}</span>
+                              <span>GHL: {row.ghl_sync_status}</span>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -724,6 +665,7 @@ function LeadsHistoryInner() {
         detail={detail}
         detailLoading={detailLoading}
         purchaseActions={false}
+        enableAssignmentPipeline
       />
     </>
   );

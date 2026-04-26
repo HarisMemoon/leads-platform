@@ -1,26 +1,25 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { Suspense, useState, useEffect, useRef } from "react";
+import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  BarChart3,
   BookOpen,
   Bot,
   Check,
+  ChevronDown,
   CircleHelp,
   CreditCard,
   Handshake,
-  Home,
   Link2,
   Map,
   MapPin,
   MessageCircle,
   Package,
   PartyPopper,
-  RefreshCw,
+  Search,
   Settings,
   ShoppingBag,
   Sparkles,
@@ -31,6 +30,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { US_STATES, COUNTIES_BY_STATE, countiesForStateCode } from "@/data/us-markets-geo";
 import {
   getOnboardingMe,
   patchOnboardingMe,
@@ -45,47 +45,37 @@ import {
   getSubscriptionPlans,
   type SubscriptionDto,
 } from "@/lib/subscriptions-api";
+import { patchWebhookIntegration, testWebhookIntegration } from "@/lib/integrations-api";
 
 type ObIcon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
 
 const TOTAL_STEPS = 9;
 
-const MARKETS = [
-  "Dallas, TX", "Phoenix, AZ", "Atlanta, GA", "Houston, TX",
-  "Orlando, FL", "Tampa, FL", "Las Vegas, NV", "Denver, CO",
-  "Charlotte, NC", "Nashville, TN", "Austin, TX", "Miami, FL",
-];
-
-const LEAD_TYPES = [
-  "Motivated Sellers", "Pre-Foreclosure", "Probate", "Tax Delinquent",
-  "Absentee Owner", "Vacant Property", "Divorce", "Expired Listings",
-];
-
-const CRMS = [
-  "GoHighLevel", "Salesforce", "HubSpot", "Podio",
-  "REI BlackBook", "Freedomsoft", "InvestorFuse", "Other",
-];
-
-const BUDGETS = [
-  { label: "$500 – $1,000/mo", value: "500-1000" },
-  { label: "$1,000 – $3,000/mo", value: "1000-3000" },
-  { label: "$3,000 – $5,000/mo", value: "3000-5000" },
-  { label: "$5,000+/mo", value: "5000+" },
-];
+function buildMarketsFromGeo(d: Record<string, unknown>): string[] {
+  if (d.nationwide) {
+    return US_STATES.flatMap((s) =>
+      (COUNTIES_BY_STATE[s.code] ?? []).map((c) => `${s.code}:${c}`),
+    );
+  }
+  const st = String(d.selected_state ?? "");
+  if (!st) return [];
+  const counties = (d.selected_counties as string[]) ?? [];
+  return counties.map((c) => `${st}:${c}`);
+}
 
 const WALLET_FUND_AMOUNTS = [250, 500, 1000, 2500];
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "");
 
 const STEP_META: ReadonlyArray<{ Icon: ObIcon; title: string; sub: string }> = [
-  { Icon: Handshake, title: "Welcome to Newleey", sub: "Let's get your account set up in under 3 minutes." },
-  { Icon: Zap, title: "How lead buying works", sub: "Understand the platform before you spend a dollar." },
-  { Icon: Package, title: "Choose your model", sub: "Subscribe for steady flow or buy leads individually." },
-  { Icon: CreditCard, title: "Fund your wallet", sub: "Add credits to start buying instantly." },
-  { Icon: Bot, title: "Auto-buy settings", sub: "Let the platform buy leads automatically for you." },
-  { Icon: MapPin, title: "Markets & filters", sub: "Tell us which markets you want leads from." },
-  { Icon: Link2, title: "Connect your CRM", sub: "Push leads directly into your workflow." },
-  { Icon: BookOpen, title: "Resources & guides", sub: "Everything you need to hit the ground running." },
-  { Icon: PartyPopper, title: "You're all set!", sub: "Your account is configured and ready to go." },
+  { Icon: Handshake, title: "Welcome to Newleey", sub: "Resume setup any time and keep the platform focused on buying and managing leads." },
+  { Icon: Zap, title: "How lead buying works", sub: "Understand premium vs exclusive inventory before you spend a dollar." },
+  { Icon: Package, title: "Choose your plan", sub: "Basic and Pro go straight to Stripe. Exclusive buyers fund their wallet and start shopping." },
+  { Icon: CreditCard, title: "Fund your wallet", sub: "Add cash with Stripe now or come back later from Settings." },
+  { Icon: Bot, title: "Auto-buy settings", sub: "Optional automation once your wallet is funded." },
+  { Icon: MapPin, title: "Markets", sub: "Choose by state, county, search, or a nationwide toggle." },
+  { Icon: Link2, title: "CRM webhook", sub: "Connect Lead Connector, Zapier, GoHighLevel, or any HTTPS webhook." },
+  { Icon: BookOpen, title: "Resources & guides", sub: "Skool community, tutorials, FAQs, and setup help live here." },
+  { Icon: PartyPopper, title: "You're all set!", sub: "Jump into the marketplace and start buying or tracking leads." },
 ];
 
 // ── Stripe wallet-funding form used inside step 4 ────────────────────────────
@@ -293,7 +283,17 @@ function OnboardingPageContent() {
     auto_buy: false,
     max_per_day: 3,
     min_balance: 500,
+    purchase_path: null as null | "subscription" | "exclusive",
+    selected_state: "",
+    selected_counties: [] as string[],
+    nationwide: false,
+    webhook_url: "",
   });
+  const [countySearch, setCountySearch] = useState("");
+  const [stateMenuOpen, setStateMenuOpen] = useState(false);
+  const [stateQuery, setStateQuery] = useState("");
+  const stateDropdownRef = useRef<HTMLDivElement>(null);
+  const [hookMsg, setHookMsg] = useState<string | null>(null);
   const [infoModal, setInfoModal] = useState<{ 
     open: boolean; 
     title: string; 
@@ -331,7 +331,7 @@ function OnboardingPageContent() {
     if (onboardingLoading) return;
     if (!row?.completed_at) return;
     if (skippedFlag && resumeRequested) return;
-    router.replace("/dashboard");
+    router.replace("/marketplace");
   }, [onboardingLoading, row?.completed_at, skippedFlag, resumeRequested, router]);
 
   const resumeMutation = useMutation({
@@ -402,26 +402,71 @@ function OnboardingPageContent() {
     Number(data.wallet_amount ?? 0) > 0 ||
     data.stripe_onboarding_funded === true;
 
-  const toggle = (key: "markets" | "lead_types", val: string) => {
+  const toggleCounty = useCallback((val: string) => {
     setData((d) => {
-      const arr: string[] = d[key] || [];
+      const arr: string[] = d.selected_counties || [];
       return {
         ...d,
-        [key]: arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val],
+        selected_counties: arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val],
       };
     });
-  };
+  }, []);
+
+  const countiesForState = useMemo(
+    () => countiesForStateCode(String(data.selected_state || "")),
+    [data.selected_state],
+  );
+
+  const filteredCounties = useMemo(() => {
+    const q = countySearch.trim().toLowerCase();
+    if (!q) return countiesForState;
+    return countiesForState.filter((c) => c.toLowerCase().includes(q));
+  }, [countiesForState, countySearch]);
+
+  const filteredStates = useMemo(() => {
+    const q = stateQuery.trim().toLowerCase();
+    if (!q) return [...US_STATES];
+    return US_STATES.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.code.toLowerCase().includes(q),
+    );
+  }, [stateQuery]);
+
+  useEffect(() => {
+    function handleMouseDown(e: MouseEvent) {
+      if (!stateMenuOpen) return;
+      const el = stateDropdownRef.current;
+      if (el && !el.contains(e.target as Node)) setStateMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [stateMenuOpen]);
 
   async function saveStep(nextStep: number) {
     try {
+      const payloadData =
+        step === 6
+          ? {
+              ...data,
+              markets: buildMarketsFromGeo(data),
+            }
+          : data;
+      if (step === 7 && String(data.webhook_url ?? "").trim()) {
+        try {
+          await patchWebhookIntegration(String(data.webhook_url).trim());
+        } catch {
+          /* non-blocking — user can fix in Settings */
+        }
+      }
       await saveMutation.mutateAsync({
         current_step: nextStep <= TOTAL_STEPS ? nextStep : TOTAL_STEPS,
         completed_steps: [step], // backend merges unique ints
-        data,
+        data: payloadData,
       });
       if (nextStep > TOTAL_STEPS) {
         await saveMutation.mutateAsync({ completed_at: new Date().toISOString() });
-        router.push("/dashboard");
+        router.push("/marketplace");
       } else {
         setStep(nextStep);
       }
@@ -437,7 +482,7 @@ function OnboardingPageContent() {
         completed_at: new Date().toISOString(),
         data: { ...data, skipped: true },
       });
-      router.push("/dashboard");
+      router.push("/marketplace");
     } catch {
       // surfaced via mutation state
     }
@@ -873,7 +918,251 @@ function OnboardingPageContent() {
 
 }
 
-
+/* markets step — searchable state + counties (readable on dark UI) */
+.geo-panel {
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.geo-field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.38);
+  margin-bottom: 8px;
+}
+.geo-state-wrap { position: relative; width: 100%; }
+.geo-state-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 500;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.geo-state-trigger:hover {
+  border-color: rgba(99,102,241,0.45);
+  background: rgba(99,102,241,0.08);
+}
+.geo-state-trigger span:first-child {
+  flex: 1;
+  min-width: 0;
+  color: rgba(255,255,255,0.92);
+}
+.geo-state-trigger .muted { color: rgba(255,255,255,0.38); font-weight: 400; }
+.geo-chevron {
+  flex-shrink: 0;
+  color: rgba(255,255,255,0.45);
+  transition: transform 0.2s;
+}
+.geo-state-wrap.open .geo-chevron { transform: rotate(180deg); color: #a5b4fc; }
+.geo-dropdown {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: #10131c;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.55);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: min(340px, 52vh);
+}
+.geo-state-search-wrap {
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0,0,0,0.2);
+}
+.geo-state-search-wrap svg { color: rgba(255,255,255,0.35); flex-shrink: 0; }
+.geo-state-search {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: #f1f5f9;
+  font-size: 14px;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+}
+.geo-state-search::placeholder { color: rgba(255,255,255,0.35); }
+.geo-state-list {
+  overflow-y: auto;
+  padding: 6px;
+  max-height: 260px;
+}
+.geo-state-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 14px;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+.geo-state-option:hover { background: rgba(99,102,241,0.12); color: #fff; }
+.geo-state-option.on {
+  background: rgba(99,102,241,0.18);
+  color: #c7d2fe;
+}
+.geo-state-code {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.35);
+  flex-shrink: 0;
+}
+.geo-switch-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+}
+.geo-switch {
+  position: relative;
+  width: 48px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.08);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+.geo-switch.on {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-color: rgba(129,140,248,0.5);
+}
+.geo-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  transition: transform 0.2s ease;
+}
+.geo-switch.on .geo-switch-thumb { transform: translateX(20px); }
+.geo-switch-label { flex: 1; min-width: 0; }
+.geo-switch-title { font-size: 15px; font-weight: 600; color: #f8fafc; margin-bottom: 4px; }
+.geo-switch-desc { font-size: 12px; color: rgba(255,255,255,0.42); line-height: 1.45; }
+.geo-county-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(0,0,0,0.22);
+  margin-bottom: 10px;
+}
+.geo-county-search-wrap svg { color: rgba(255,255,255,0.38); flex-shrink: 0; }
+.geo-county-search {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: #f8fafc;
+  font-size: 14px;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+}
+.geo-county-search::placeholder { color: rgba(255,255,255,0.35); }
+.geo-county-panel {
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+.geo-county-scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 6px;
+}
+.geo-county-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: 'DM Sans', sans-serif;
+  transition: background 0.12s;
+}
+.geo-county-row:hover { background: rgba(255,255,255,0.05); }
+.geo-county-row.on { background: rgba(99,102,241,0.1); }
+.geo-check {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 2px solid rgba(255,255,255,0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s;
+  color: transparent;
+}
+.geo-county-row.on .geo-check {
+  border-color: #818cf8;
+  background: rgba(99,102,241,0.35);
+  color: #fff;
+}
+.geo-county-name {
+  font-size: 14px;
+  color: #f1f5f9;
+  line-height: 1.35;
+}
+.geo-empty {
+  padding: 20px 14px;
+  font-size: 13px;
+  color: rgba(255,255,255,0.45);
+  text-align: center;
+  line-height: 1.5;
+}
+.geo-hint {
+  font-size: 12px;
+  color: rgba(255,255,255,0.38);
+  line-height: 1.5;
+  margin-top: 4px;
+}
 
 /* how it works cards */
 
@@ -1541,10 +1830,10 @@ input[type=range]::-webkit-slider-thumb {
               {step === 1 && (
                 <div className="how-grid">
                   {[
-                    { Icon: Wallet, t: "Fund your wallet", d: "Add credits via Stripe. Use them to buy leads on demand or let auto-buy do it." },
-                    { Icon: ShoppingBag, t: "Browse the marketplace", d: "Filter by market, type, price, and freshness. Buy instantly." },
-                    { Icon: RefreshCw, t: "Automated distribution", d: "Opt into round-robin delivery. Leads hit your CRM automatically." },
-                    { Icon: BarChart3, t: "Track everything", d: "Full history of leads, calls, CRM syncs, and spend from one dashboard." },
+                    { Icon: Wallet, t: "Fund your wallet", d: "Add cash through Stripe so exclusive leads and auto-buy are ready when you are." },
+                    { Icon: Search, t: "Browse the marketplace", d: "Check premium and exclusive inventory in your preferred markets." },
+                    { Icon: Link2, t: "Set up your CRM", d: "Send leads straight to your webhook, Zap, Lead Connector, or GoHighLevel workflow." },
+                    { Icon: ShoppingBag, t: "Scale your business", d: "Buy your first lead, track contract progress, and keep everything in one place." },
                   ].map((c) => {
                     const I = c.Icon;
                     return (
@@ -1558,107 +1847,156 @@ input[type=range]::-webkit-slider-thumb {
                 </div>
               )}
 
-{step === 2 && (
-  <div className="how-grid">
-    {[
-      { Icon: Home, t: "Fresh leads", d: "Newly sourced, high intent.", info: "Fresh leads are delivered within 60 seconds of capture, giving you the first-touch advantage while seller intent is strongest." },
-      { Icon: Star, t: "Premium leads", d: "Recently qualified.", info: "Premium leads pass additional qualification checks (contactability and motivation signals), improving close-rate consistency." },
-      { Icon: Package, t: "Aged leads", d: "Older inventory.", info: "Aged leads are ideal for volume follow-up campaigns. They are priced lower and often convert with strong multi-touch outreach." },
-      { Icon: Target, t: "Exclusive leads", d: "Yours alone.", info: "Exclusive leads are assigned to only one buyer account on the platform, with no multi-buyer sharing for that record." },
-    ].map((c) => {
-      const I = c.Icon;
-      return (
-      <div key={c.t} className="how-card">
-        <div className="how-icon"><I size={24} strokeWidth={2} /></div>
-        <div className="how-title">{c.t}</div>
-        <div className="how-desc">{c.d}</div>
-        <button 
-          className="btn-info" 
-          onClick={() => setInfoModal({ open: true, title: c.t, content: c.info, icon: c.Icon })}
-        >
-          Learn more
-        </button>
-      </div>
-      );
-    })}
-  </div>
-)}
-
-              {/* Step 3 - Subscription vs pay per lead */}
-              {step === 3 && (
-                <>
-                  <div className="plan-grid">
-                    {[
-                      { name: "Subscription", price: "From $299/mo", desc: "Steady lead flow. Priority in distribution. Monthly lead credits included.", val: "subscription" },
-                      { name: "Pay-per-lead", price: "From $25/lead", desc: "Buy only what you need. Full marketplace access. No monthly commitment.", val: "ppl" },
-                      { name: "Auto-buy", price: "Wallet-based", desc: "Set rules and caps. Platform buys automatically when leads match your criteria.", val: "autobuy" },
-                      { name: "Hybrid", price: "Best value", desc: "Subscribe for priority + buy extras from the marketplace. Most popular.", val: "hybrid" },
-                    ].map((p) => (
-                      <div
-                        key={p.val}
-                        className={`plan-card ${data.model === p.val ? "selected" : ""}`}
-                        onClick={() => setData((d) => ({ ...d, model: p.val }))}
-                      >
-                        <div className="plan-name">{p.name}</div>
-                        <div className="plan-price">{p.price}</div>
-                        <div className="plan-desc">{p.desc}</div>
-                      </div>
-                    ))}
+              {step === 2 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                  <div
+                    style={{
+                      padding: "16px 18px",
+                      borderRadius: 14,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.03)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <Video size={18} color="#a5b4fc" />
+                      <strong style={{ fontSize: 14, color: "#fff" }}>Understand the platform before you spend a dollar</strong>
+                    </div>
+                    <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.65 }}>
+                      Watch the walkthrough below, then choose the inventory model that fits your buying style.
+                    </p>
                   </div>
-
-                  {(data.model === "subscription" || data.model === "hybrid") && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+                    <div className="how-card" style={{ minHeight: 160 }}>
+                      <div className="how-icon"><Star size={24} strokeWidth={2} /></div>
+                      <div className="how-title">Premium Leads</div>
+                      <div className="how-desc">
+                        For subscribers only: pre-vetted cold call leads with monthly premium credits on Basic or Pro.
+                      </div>
+                    </div>
+                    <div className="how-card" style={{ minHeight: 160 }}>
+                      <div className="how-icon"><Target size={24} strokeWidth={2} /></div>
+                      <div className="how-title">Exclusive Leads</div>
+                      <div className="how-desc">
+                        Inbound leads qualified via SMS and purchased directly from your wallet.
+                      </div>
+                    </div>
+                  </div>
+                  {process.env.NEXT_PUBLIC_ONBOARDING_VIDEO_URL ? (
+                    <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}>
+                      <iframe
+                        title="How lead buying works"
+                        src={process.env.NEXT_PUBLIC_ONBOARDING_VIDEO_URL}
+                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  ) : (
                     <div
                       style={{
-                        background: "rgba(255,255,255,0.03)",
-                        border: "1px solid rgba(255,255,255,0.08)",
                         borderRadius: 14,
-                        padding: "16px 16px 14px",
-                        marginTop: -12,
-                        marginBottom: 16,
+                        border: "1px dashed rgba(255,255,255,0.15)",
+                        padding: "28px 20px",
+                        textAlign: "center",
+                        color: "rgba(255,255,255,0.35)",
+                        fontSize: 13,
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                        <Sparkles size={14} color="#c4b5fd" />
-                        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.62)" }}>
-                          Subscription checkout uses the same Stripe flow as the Plans page.
-                        </p>
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 8 }}>
-                        {subscriptionPlans.map((plan) => (
-                          <button
-                            key={plan.planType}
-                            type="button"
-                            onClick={() => setSelectedSubscriptionPlan(plan.planType)}
-                            style={{
-                              borderRadius: 10,
-                              border: selectedSubscriptionPlan === plan.planType
-                                ? "1px solid #818cf8"
-                                : "1px solid rgba(255,255,255,0.12)",
-                              background: selectedSubscriptionPlan === plan.planType
-                                ? "rgba(99,102,241,0.14)"
-                                : "rgba(255,255,255,0.02)",
-                              color: "rgba(255,255,255,0.9)",
-                              padding: "10px 12px",
-                              textAlign: "left",
-                              cursor: "pointer",
-                            }}
-                          >
-                            <div style={{ fontSize: 13, fontWeight: 600, textTransform: "capitalize" }}>
-                              {plan.name}
-                            </div>
-                            <div style={{ fontSize: 11, opacity: 0.7 }}>{plan.displayPrice}</div>
-                          </button>
-                        ))}
-                      </div>
-                      {subscriptionCheckoutMutation.isError ? (
-                        <p style={{ color: "#fca5a5", fontSize: 12, marginTop: 10 }}>
-                          {subscriptionCheckoutMutation.error instanceof Error
-                            ? subscriptionCheckoutMutation.error.message
-                            : "Could not start subscription checkout."}
-                        </p>
-                      ) : null}
+                      Set <code style={{ color: "#a5b4fc" }}>NEXT_PUBLIC_ONBOARDING_VIDEO_URL</code> to embed your walkthrough video.
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Step 3 — Basic / Pro (Stripe) vs Exclusive (wallet) */}
+              {step === 3 && (
+                <>
+                  <div className="plan-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+                    {subscriptionPlans
+                      .filter((p) => p.planType === "basic" || p.planType === "pro")
+                      .map((plan) => (
+                        <div
+                          key={plan.planType}
+                          role="button"
+                          tabIndex={0}
+                          className={`plan-card ${
+                            data.purchase_path === "subscription" &&
+                            selectedSubscriptionPlan === plan.planType
+                              ? "selected"
+                              : ""
+                          }`}
+                          onClick={() => {
+                            setData((d) => ({ ...d, purchase_path: "subscription", model: "subscription" }));
+                            setSelectedSubscriptionPlan(plan.planType);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setData((d) => ({ ...d, purchase_path: "subscription", model: "subscription" }));
+                              setSelectedSubscriptionPlan(plan.planType);
+                            }
+                          }}
+                        >
+                          <div className="plan-name">{plan.name}</div>
+                          <div className="plan-price">{plan.displayPrice}</div>
+                          <div className="plan-desc">
+                            {plan.planType === "basic"
+                              ? "25 premium leads + $50 cash in your wallet every month."
+                              : "40 premium leads + $100 cash in your wallet every month."}
+                          </div>
+                          <div className="plan-desc" style={{ marginTop: 8, fontSize: 11, opacity: 0.75 }}>
+                            {plan.planType === "basic"
+                              ? "Selecting Basic goes directly to Stripe checkout."
+                              : "Selecting Pro goes directly to Stripe checkout."}
+                          </div>
+                        </div>
+                      ))}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      className={`plan-card ${data.purchase_path === "exclusive" ? "selected" : ""}`}
+                      onClick={() => {
+                        setSelectedSubscriptionPlan(null);
+                        setData((d) => ({
+                          ...d,
+                          purchase_path: "exclusive",
+                          model: "exclusive_wallet",
+                        }));
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedSubscriptionPlan(null);
+                          setData((d) => ({
+                            ...d,
+                            purchase_path: "exclusive",
+                            model: "exclusive_wallet",
+                          }));
+                        }
+                      }}
+                    >
+                      <div className="plan-name">Exclusive</div>
+                      <div className="plan-price">Charge your wallet</div>
+                      <div className="plan-desc">
+                        Start talking to sellers who raised their hand today. Continue to wallet funding next.
+                      </div>
+                    </div>
+                  </div>
+                  {data.purchase_path === "subscription" && (
+                    <div style={{ marginTop: 12 }}>
+                      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", display: "flex", gap: 8, alignItems: "center" }}>
+                        <Sparkles size={14} color="#c4b5fd" />
+                        Continue opens Stripe checkout. You can finish geography & webhook after you return.
+                      </p>
+                    </div>
+                  )}
+                  {subscriptionCheckoutMutation.isError ? (
+                    <p style={{ color: "#fca5a5", fontSize: 12, marginTop: 10 }}>
+                      {subscriptionCheckoutMutation.error instanceof Error
+                        ? subscriptionCheckoutMutation.error.message
+                        : "Could not start subscription checkout."}
+                    </p>
+                  ) : null}
                 </>
               )}
 
@@ -1756,50 +2094,209 @@ input[type=range]::-webkit-slider-thumb {
                 </>
               )}
 
-              {/* Step 6 - Markets */}
+              {/* Step 6 - State / counties / nationwide */}
               {step === 6 && (
-                <>
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 16 }}>Select all markets you want leads from</p>
-                  <div className="tag-grid">
-                    {MARKETS.map((m) => (
-                      <div key={m} className={`tag ${data.markets.includes(m) ? "selected" : ""}`} onClick={() => toggle("markets", m)}>{m}</div>
-                    ))}
-                  </div>
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 16 }}>Lead types</p>
-                  <div className="tag-grid">
-                    {LEAD_TYPES.map((t) => (
-                      <div key={t} className={`tag ${data.lead_types.includes(t) ? "selected" : ""}`} onClick={() => toggle("lead_types", t)}>{t}</div>
-                    ))}
+                <div className="geo-panel">
+                  <div>
+                    <span className="geo-field-label">State</span>
+                    <div
+                      className={`geo-state-wrap ${stateMenuOpen ? "open" : ""}`}
+                      ref={stateDropdownRef}
+                    >
+                      <button
+                        type="button"
+                        className="geo-state-trigger"
+                        aria-expanded={stateMenuOpen}
+                        aria-haspopup="listbox"
+                        onClick={() => {
+                          setStateMenuOpen((o) => !o);
+                          if (!stateMenuOpen) setStateQuery("");
+                        }}
+                      >
+                        <span className={data.selected_state ? "" : "muted"}>
+                          {data.selected_state
+                            ? US_STATES.find((s) => s.code === data.selected_state)?.name ?? data.selected_state
+                            : "Select a state…"}
+                        </span>
+                        <ChevronDown className="geo-chevron" aria-hidden />
+                      </button>
+                      {stateMenuOpen && (
+                        <div className="geo-dropdown" role="listbox">
+                          <div className="geo-state-search-wrap">
+                            <Search size={16} strokeWidth={2} aria-hidden />
+                            <input
+                              type="search"
+                              className="geo-state-search"
+                              placeholder="Search by name or code…"
+                              value={stateQuery}
+                              onChange={(e) => setStateQuery(e.target.value)}
+                              autoFocus
+                              aria-label="Search states"
+                            />
+                          </div>
+                          <div className="geo-state-list">
+                            {filteredStates.length === 0 ? (
+                              <div className="geo-empty">No states match your search.</div>
+                            ) : (
+                              filteredStates.map((s) => (
+                                <button
+                                  key={s.code}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={data.selected_state === s.code}
+                                  className={`geo-state-option ${data.selected_state === s.code ? "on" : ""}`}
+                                  onClick={() => {
+                                    setData((d) => ({
+                                      ...d,
+                                      selected_state: s.code,
+                                      selected_counties: [],
+                                      nationwide: false,
+                                    }));
+                                    setStateMenuOpen(false);
+                                    setStateQuery("");
+                                    setCountySearch("");
+                                  }}
+                                >
+                                  <span>{s.name}</span>
+                                  <span className="geo-state-code">{s.code}</span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  {/* budget */}
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 12, marginTop: 8 }}>Monthly spend target</p>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {BUDGETS.map((b) => (
-                      <div key={b.value} className={`tag ${data.budget === b.value ? "selected" : ""}`} onClick={() => setData((d) => ({ ...d, budget: b.value }))}>{b.label}</div>
-                    ))}
+                  <div className="geo-switch-row">
+                    <button
+                      type="button"
+                      className={`geo-switch ${data.nationwide ? "on" : ""}`}
+                      role="switch"
+                      aria-checked={Boolean(data.nationwide)}
+                      onClick={() =>
+                        setData((d) => ({
+                          ...d,
+                          nationwide: !d.nationwide,
+                          selected_counties: !d.nationwide ? [] : d.selected_counties,
+                        }))
+                      }
+                    >
+                      <span className="geo-switch-thumb" />
+                    </button>
+                    <div className="geo-switch-label">
+                      <div className="geo-switch-title">Nationwide coverage</div>
+                      <div className="geo-switch-desc">
+                        Target every supported county across all states. You can refine markets later in Settings →
+                        Distribution.
+                      </div>
+                    </div>
                   </div>
-                </>
-              )}
 
-              {/* Step 7 - CRM */}
-              {step === 7 && (
-                <>
-                  <div className="tag-grid" style={{ marginBottom: 28 }}>
-                    {CRMS.map((c) => (
-                      <div key={c} className={`tag ${data.crm === c ? "selected" : ""}`} onClick={() => setData((d) => ({ ...d, crm: c }))}>{c}</div>
-                    ))}
-                  </div>
-                  {data.crm === "GoHighLevel" && (
-                    <div style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 12, padding: "16px 18px", marginBottom: 20 }}>
-                      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", lineHeight: 1.6, display: "flex", gap: 8, alignItems: "flex-start" }}>
-                        <Check size={16} strokeWidth={2.5} style={{ color: "#10b981", flexShrink: 0, marginTop: 2 }} aria-hidden />
-                        <span>GoHighLevel integration is supported. After setup, leads will be pushed to your GHL subaccount automatically with tags and workflows triggered.</span>
+                  {!data.nationwide && (
+                    <div>
+                      <span className="geo-field-label">Counties</span>
+                      <p className="geo-hint">
+                        Select one or more counties in your state. Use search to jump to a name.
                       </p>
+                      {!data.selected_state ? (
+                        <div className="geo-empty" style={{ borderRadius: 14, marginTop: 10 }}>
+                          Choose a state above to load counties.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="geo-county-search-wrap">
+                            <Search size={16} strokeWidth={2} aria-hidden />
+                            <input
+                              type="search"
+                              className="geo-county-search"
+                              placeholder="Search counties…"
+                              value={countySearch}
+                              onChange={(e) => setCountySearch(e.target.value)}
+                              aria-label="Search counties"
+                            />
+                          </div>
+                          <div className="geo-county-panel">
+                            <div className="geo-county-scroll">
+                              {filteredCounties.length === 0 ? (
+                                <div className="geo-empty">
+                                  {countiesForState.length === 0
+                                    ? "No county list for this selection yet."
+                                    : `No counties match “${countySearch.trim()}”. Try a different search.`}
+                                </div>
+                              ) : (
+                                filteredCounties.map((c) => {
+                                  const on = (data.selected_counties || []).includes(c);
+                                  return (
+                                    <button
+                                      key={c}
+                                      type="button"
+                                      className={`geo-county-row ${on ? "on" : ""}`}
+                                      onClick={() => toggleCounty(c)}
+                                    >
+                                      <span className={`geo-check ${on ? "on" : ""}`} aria-hidden>
+                                        {on ? <Check size={14} strokeWidth={3} /> : null}
+                                      </span>
+                                      <span className="geo-county-name">{c}</span>
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                          {(data.selected_counties || []).length > 0 ? (
+                            <p className="geo-hint" style={{ marginTop: 10 }}>
+                              {(data.selected_counties || []).length} selected
+                            </p>
+                          ) : null}
+                        </>
+                      )}
                     </div>
                   )}
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
-                    You can configure the full integration from Settings → Integrations after setup.
+                </div>
+              )}
+
+              {/* Step 7 - Webhook CRM */}
+              {step === 7 && (
+                <>
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14, lineHeight: 1.6 }}>
+                    Paste a webhook URL from Zapier, Lead Connector, GoHighLevel, or any HTTPS endpoint. We POST JSON payloads when leads sync (you can refine in Settings).
+                  </p>
+                  <input
+                    type="url"
+                    className="filter-input"
+                    placeholder="https://hooks.zapier.com/…"
+                    value={data.webhook_url || ""}
+                    onChange={(e) => setData((d) => ({ ...d, webhook_url: e.target.value }))}
+                    style={{ maxWidth: 520, marginBottom: 12 }}
+                  />
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                    <button
+                      type="button"
+                      className="btn-next"
+                      style={{ padding: "10px 18px", fontSize: 13 }}
+                      onClick={() => void patchWebhookIntegration(String(data.webhook_url || "").trim()).then(() => setHookMsg("Webhook URL saved.")).catch((e: Error) => setHookMsg(e.message || "Save failed"))}
+                    >
+                      Save webhook
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-back"
+                      style={{ padding: "10px 18px", fontSize: 13 }}
+                      onClick={() =>
+                        void testWebhookIntegration()
+                          .then((r) => setHookMsg(`Test sent — HTTP ${r.status}`))
+                          .catch((e: Error) => setHookMsg(e.message || "Test failed"))
+                      }
+                    >
+                      Test webhook
+                    </button>
+                  </div>
+                  {hookMsg ? (
+                    <p style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginBottom: 12 }}>{hookMsg}</p>
+                  ) : null}
+                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
+                    You can update this anytime under Settings → Integrations.
                   </p>
                 </>
               )}
@@ -1808,12 +2305,12 @@ input[type=range]::-webkit-slider-thumb {
               {step === 8 && (
                 <div className="resource-grid">
                   {[
-                    { Icon: Video, t: "Platform walkthrough", d: "5-min video covering every feature" },
-                    { Icon: BookOpen, t: "GHL integration guide", d: "Step-by-step CRM connection" },
-                    { Icon: Settings, t: "Auto-buy setup guide", d: "Configure caps and rotation rules" },
-                    { Icon: MessageCircle, t: "Live support chat", d: "Talk to our team directly" },
-                    { Icon: Map, t: "Market coverage map", d: "See all available markets" },
-                    { Icon: CircleHelp, t: "FAQ", d: "Most common questions answered" },
+                    { Icon: MessageCircle, t: "Skool community", d: "Access community support, updates, and best-practice walkthroughs." },
+                    { Icon: Video, t: "GHL setup tutorial", d: "Connect GoHighLevel or Lead Connector and confirm delivery." },
+                    { Icon: Link2, t: "Zap / webhook setup", d: "Map lead fields and test your webhook before you go live." },
+                    { Icon: CircleHelp, t: "FAQs", d: "Get quick answers about plans, wallet funding, refunds, and lead delivery." },
+                    { Icon: Sparkles, t: "Win free leads & cash", d: "Submit contracts, leave reviews, and participate in reward campaigns." },
+                    { Icon: Map, t: "Resources tab", d: "Everything here is also available later from the Resources section." },
                   ].map((r) => {
                     const I = r.Icon;
                     return (
@@ -1837,12 +2334,25 @@ input[type=range]::-webkit-slider-thumb {
                     Your account is configured. Here's what's ready:
                   </p>
                   <div className="checklist">
-                    {[
-                      "Account & wallet created",
-                      `${data.markets?.length || 0} market${data.markets?.length !== 1 ? "s" : ""} selected`,
+                    {(() => {
+                      const geoCount =
+                        Array.isArray(data.markets) && data.markets.length > 0
+                          ? data.markets.length
+                          : buildMarketsFromGeo(data).length;
+                      return [
+                      "Account ready",
+                      data.purchase_path === "subscription"
+                        ? "Subscription: Basic or Pro (complete checkout from Plans if you skipped)"
+                        : data.purchase_path === "exclusive"
+                          ? "Exclusive path — fund wallet to buy"
+                          : "Plan: finish in Settings → Plan",
+                      `${geoCount} geo target${geoCount === 1 ? "" : "s"}`,
                       `Auto-buy ${data.auto_buy ? "enabled" : "disabled"}`,
-                      `CRM: ${data.crm || "Not set — configure later"}`,
-                    ].map((item) => (
+                      data.webhook_url
+                        ? "Webhook URL on file"
+                        : "Webhook: optional — add in Settings",
+                    ];
+                    })().map((item) => (
                       <div key={item} className="check-item">
                         <Check size={16} strokeWidth={2.5} style={{ color: "#10b981", flexShrink: 0 }} aria-hidden />
                         <span>{item}</span>
@@ -1878,20 +2388,21 @@ input[type=range]::-webkit-slider-thumb {
                     saveMutation.isPending ||
                     subscriptionCheckoutMutation.isPending ||
                     (step === 3 &&
-                      (data.model === "subscription" || data.model === "hybrid") &&
-                      !selectedSubscriptionPlan)
+                      (!data.purchase_path ||
+                        (data.purchase_path === "subscription" &&
+                          !selectedSubscriptionPlan))) ||
+                    (step === 6 &&
+                      !data.nationwide &&
+                      (!data.selected_state || !(data.selected_counties || []).length))
                   }
                   onClick={() => {
-                    if (
-                      step === 3 &&
-                      (data.model === "subscription" || data.model === "hybrid")
-                    ) {
-                      if (!selectedSubscriptionPlan) {
-                        return;
-                      }
-                      void subscriptionCheckoutMutation.mutateAsync(
-                        selectedSubscriptionPlan,
-                      );
+                    if (step === 3 && data.purchase_path === "subscription") {
+                      if (!selectedSubscriptionPlan) return;
+                      void subscriptionCheckoutMutation.mutateAsync(selectedSubscriptionPlan);
+                      return;
+                    }
+                    if (step === 3 && data.purchase_path === "exclusive") {
+                      void saveStep(4);
                       return;
                     }
                     void saveStep(step + 1);
@@ -1901,11 +2412,10 @@ input[type=range]::-webkit-slider-thumb {
                     <><span className="spinner" /> Redirecting to Stripe…</>
                   ) : saveMutation.isPending ? (
                     <><span className="spinner" /> Saving…</>
-                  ) : step === 3 &&
-                    (data.model === "subscription" || data.model === "hybrid") ? (
+                  ) : step === 3 && data.purchase_path === "subscription" ? (
                     "Continue to Stripe checkout →"
                   ) : step === TOTAL_STEPS ? (
-                    "Enter dashboard →"
+                    "Go to marketplace →"
                   ) : (
                     "Continue →"
                   )}

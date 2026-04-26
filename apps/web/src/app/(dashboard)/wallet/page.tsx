@@ -21,6 +21,7 @@ import {
 import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import {
+  type WalletAccountDto,
   type WalletTransactionDto,
   getWalletMe,
   getWalletTransactions,
@@ -262,6 +263,12 @@ export default function WalletPage() {
   } = useQuery({
     queryKey: queryKeys.wallet.me,
     queryFn: getWalletMe,
+    // Auto-reload runs server-side; poll so balance/txs update without a full navigation.
+    refetchInterval: (q) =>
+      (q.state.data as WalletAccountDto | undefined)?.auto_reload_enabled
+        ? 30_000
+        : false,
+    refetchOnWindowFocus: true,
   });
 
   const {
@@ -273,11 +280,15 @@ export default function WalletPage() {
   } = useQuery({
     queryKey: queryKeys.wallet.transactions(txQueryOpts),
     queryFn: () => getWalletTransactions(txQueryOpts),
+    refetchInterval: wallet?.auto_reload_enabled ? 30_000 : false,
+    refetchOnWindowFocus: true,
   });
 
   const { data: txTotals } = useQuery({
     queryKey: queryKeys.wallet.transactionTotals,
     queryFn: getWalletTransactionTotals,
+    refetchInterval: wallet?.auto_reload_enabled ? 30_000 : false,
+    refetchOnWindowFocus: true,
   });
 
   const { data: pmPreview, isLoading: pmPreviewLoading } = useQuery({

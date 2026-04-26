@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { GoogleAuthDto } from './dto/google-auth.dto';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt.auth.guard';
 
@@ -10,7 +11,12 @@ export class AuthController {
 
 @Post('register')
 register(@Body() body: RegisterDto): Promise<{ access_token: string }> {
-  return this.authService.register(body.email, body.password,body.full_name,body.company_name)
+  return this.authService.register(body)
+}
+
+@Post('google')
+loginGoogle(@Body() body: GoogleAuthDto): Promise<{ access_token: string }> {
+  return this.authService.loginWithGoogleIdToken(body.id_token)
 }
 
 @Post('login')

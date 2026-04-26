@@ -13,6 +13,7 @@ import {
   CircleDollarSign,
   Clock,
   Loader2,
+  Lock,
   MapPin,
   PauseCircle,
   Settings2,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/distribution-api";
 import { getWalletMe, centsToNumber } from "@/lib/wallet-api";
 import { queryKeys } from "@/lib/query-keys";
+import { getAuthMe } from "@/lib/auth-api";
 
 /* ─── constants ─────────────────────────────────────────────────────────── */
 
@@ -444,7 +446,15 @@ function WalletWidget({ balanceCents }: { balanceCents: number }) {
 
 /* ─── DistributionForm ───────────────────────────────────────────────────── */
 
-function DistributionForm({ initial, walletBalanceCents }: { initial: DistributionRuleDto; walletBalanceCents: number }) {
+function DistributionForm({
+  initial,
+  walletBalanceCents,
+  distributionLocked,
+}: {
+  initial: DistributionRuleDto;
+  walletBalanceCents: number;
+  distributionLocked: boolean;
+}) {
   const qc = useQueryClient();
 
   const [participation, setParticipation] = useState(initial.participation_enabled);
@@ -485,11 +495,50 @@ function DistributionForm({ initial, walletBalanceCents }: { initial: Distributi
     },
   });
 
+  const readOnly = distributionLocked;
+
   return (
     <div>
       <StatusBanner rule={liveRule} walletBalanceCents={walletBalanceCents} />
       <WalletWidget balanceCents={walletBalanceCents} />
 
+      {readOnly && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+            padding: "14px 16px",
+            borderRadius: 14,
+            marginBottom: 14,
+            background: "rgba(245,158,11,0.08)",
+            border: "1px solid rgba(245,158,11,0.28)",
+            color: "#fcd34d",
+            fontSize: 13,
+            lineHeight: 1.45,
+          }}
+        >
+          <Lock size={18} style={{ flexShrink: 0, marginTop: 2 }} aria-hidden />
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 4, color: "#fde68a" }}>
+              Distribution settings are locked
+            </div>
+            <div style={{ color: "rgba(253,230,138,0.88)" }}>
+              An administrator has frozen changes to your auto-distribution rule. You can still review your
+              settings and manage your wallet; contact support if you need this updated.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div
+        style={
+          readOnly
+            ? { opacity: 0.55, pointerEvents: "none" as const, userSelect: "none" as const }
+            : undefined
+        }
+        aria-hidden={readOnly ? true : undefined}
+      >
       {/* ── Participation ── */}
       <SectionCard
         accentColor="#6366f1"
@@ -648,7 +697,7 @@ function DistributionForm({ initial, walletBalanceCents }: { initial: Distributi
         <button
           type="button"
           onClick={() => mutation.mutate()}
-          disabled={mutation.isPending}
+          disabled={mutation.isPending || readOnly}
           style={{
             display: "inline-flex", alignItems: "center", gap: 8,
             padding: "13px 32px", borderRadius: 12, border: "none",
@@ -691,6 +740,7 @@ function DistributionForm({ initial, walletBalanceCents }: { initial: Distributi
           </div>
         )}
       </div>
+      </div>
     </div>
   );
 }
@@ -714,7 +764,12 @@ export default function DistributionSettingsPage() {
     queryFn: getWalletMe,
   });
 
-  const isLoading = ruleLoading || walletLoading;
+  const { data: me, isLoading: meLoading } = useQuery({
+    queryKey: queryKeys.auth.me,
+    queryFn: getAuthMe,
+  });
+
+  const isLoading = ruleLoading || walletLoading || meLoading;
   const walletBalanceCents = wallet ? centsToNumber(wallet.balance_cents) : 0;
 
   return (
@@ -811,7 +866,11 @@ export default function DistributionSettingsPage() {
           {/* ── Form ── */}
           {!isLoading && rule && (
             <div style={{ animation: "fadeUp 0.4s ease 0.1s both" }}>
-              <DistributionForm initial={rule} walletBalanceCents={walletBalanceCents} />
+              <DistributionForm
+                initial={rule}
+                walletBalanceCents={walletBalanceCents}
+                distributionLocked={Boolean(me?.distribution_locked)}
+              />
             </div>
           )}
         </div>
