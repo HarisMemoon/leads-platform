@@ -535,42 +535,13 @@ export class StripeService {
     await this.subscriptionRepo.save(localSub);
   }
 
-  private monthlyWalletCreditCentsForPlan(planType: PlanType): number {
-    if (planType === PlanType.BASIC) return 50_00;
-    if (planType === PlanType.PRO) return 100_00;
-    return 0;
-  }
-
-  private async handleInvoicePaid(invoice: Stripe.Invoice) {
-    const inv = invoice as Stripe.Invoice & { amount_paid?: number };
-    if (inv.status !== 'paid') return;
-    if ((inv.amount_paid ?? 0) <= 0) return;
-
-    const subId = this.extractSubscriptionIdFromInvoice(invoice);
-    if (!subId) return;
-
-    const br = (invoice as Stripe.Invoice & { billing_reason?: string | null })
-      .billing_reason;
-    if (br !== 'subscription_cycle' && br !== 'subscription_create') {
-      return;
-    }
-
-    const localSub = await this.subscriptionRepo.findOne({
-      where: { stripe_subscription_id: subId },
-      relations: { user: true },
-    });
-    if (!localSub?.user?.id) return;
-
-    const creditCents = this.monthlyWalletCreditCentsForPlan(localSub.plan_type);
-    if (creditCents <= 0) return;
-
-    await this.walletService.applyIdempotentCredit(
-      localSub.user.id,
-      creditCents,
-      'subscription_invoice_wallet',
-      invoice.id,
-      `Monthly wallet credit (${localSub.plan_type})`,
-    );
+  /**
+   * Marketplace v2: monthly wallet credits are removed. Pro is an entitlement
+   * plan (10% discount, early access, priority notifications) — no wallet top-up.
+   * This handler is kept as a no-op stub so the webhook pipeline stays intact.
+   */
+  private async handleInvoicePaid(_invoice: Stripe.Invoice) {
+    // No-op: monthly wallet credits removed in marketplace v2.
   }
 
   private async handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
@@ -718,11 +689,14 @@ export class StripeService {
   }
 
   private planDefaults(planType: PlanType) {
+    // Marketplace v2: priority_weight and monthly_lead_limit are no longer used
+    // for runtime eligibility — distribution is rule-based only. Kept for
+    // backwards compatibility with existing subscription rows.
     const map: Record<PlanType, { priorityWeight: number; monthlyLeadLimit: number | null }> = {
-      [PlanType.BASIC]: { priorityWeight: 1, monthlyLeadLimit: 25 },
-      [PlanType.PRO]: { priorityWeight: 2, monthlyLeadLimit: 40 },
-      [PlanType.MARKET_SPECIFIC]: { priorityWeight: 3, monthlyLeadLimit: null },
-      [PlanType.PREMIUM]: { priorityWeight: 4, monthlyLeadLimit: null },
+      [PlanType.BASIC]: { priorityWeight: 1, monthlyLeadLimit: null },
+      [PlanType.PRO]: { priorityWeight: 1, monthlyLeadLimit: null },
+      [PlanType.MARKET_SPECIFIC]: { priorityWeight: 1, monthlyLeadLimit: null },
+      [PlanType.PREMIUM]: { priorityWeight: 1, monthlyLeadLimit: null },
     };
 
     return map[planType];

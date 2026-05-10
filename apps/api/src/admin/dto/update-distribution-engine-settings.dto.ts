@@ -33,4 +33,12 @@ export class UpdateDistributionEngineSettingsDto {
   @Min(1)
   @Max(90)
   markdown_percent?: number;
+
+  /** Minutes after lead creation during which only Pro subscribers can purchase. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1440)
+  early_access_minutes?: number;
 }

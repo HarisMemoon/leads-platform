@@ -81,17 +81,53 @@ export class LeadPricingService {
       const newPrice = (oldPrice * BigInt(100 - pct)) / 100n;
       if (newPrice >= oldPrice || newPrice < 1n) continue;
 
-      const history = this.priceHistoryRepo.create({
-        lead,
-        old_price_cents: lead.price_cents,
-        new_price_cents: newPrice.toString(),
-        reason: `Scheduled markdown (${pct}% after ${afterDays}d)`,
-      });
+      const reason = `Scheduled markdown (${pct}% after ${afterDays}d)`;
+
+      const histories = [
+        this.priceHistoryRepo.create({
+          lead,
+          old_price_cents: lead.price_cents,
+          new_price_cents: newPrice.toString(),
+          reason,
+        }),
+      ];
+
+      // Also markdown exclusive_price_cents and shared_price_cents proportionally
+      if (lead.exclusive_price_cents != null) {
+        const oldExcl = BigInt(lead.exclusive_price_cents);
+        const newExcl = (oldExcl * BigInt(100 - pct)) / 100n;
+        if (newExcl < oldExcl && newExcl >= 1n) {
+          histories.push(
+            this.priceHistoryRepo.create({
+              lead,
+              old_price_cents: lead.exclusive_price_cents,
+              new_price_cents: newExcl.toString(),
+              reason: `${reason} [exclusive]`,
+            }),
+          );
+          lead.exclusive_price_cents = newExcl.toString();
+        }
+      }
+      if (lead.shared_price_cents != null) {
+        const oldShared = BigInt(lead.shared_price_cents);
+        const newShared = (oldShared * BigInt(100 - pct)) / 100n;
+        if (newShared < oldShared && newShared >= 1n) {
+          histories.push(
+            this.priceHistoryRepo.create({
+              lead,
+              old_price_cents: lead.shared_price_cents,
+              new_price_cents: newShared.toString(),
+              reason: `${reason} [shared]`,
+            }),
+          );
+          lead.shared_price_cents = newShared.toString();
+        }
+      }
 
       lead.price_cents = newPrice.toString();
       lead.marketplace_tier = this.computeMarketplaceTier(lead);
 
-      await this.priceHistoryRepo.save(history);
+      await this.priceHistoryRepo.save(histories);
       await this.leadRepo.save(lead);
       updated++;
     }

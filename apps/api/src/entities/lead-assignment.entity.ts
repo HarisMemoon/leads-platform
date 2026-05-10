@@ -80,6 +80,10 @@ import {
 
     @Column({ type: 'text', nullable: true })
     buyer_notes!: string | null
+
+    /** 'exclusive' | 'non_exclusive' — which pricing path the buyer chose. */
+    @Column({ type: 'varchar', nullable: true })
+    exclusivity_choice!: string | null
   
     @CreateDateColumn({ type: 'timestamp with time zone' })
     created_at!: Date

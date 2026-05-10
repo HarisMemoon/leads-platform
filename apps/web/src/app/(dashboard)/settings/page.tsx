@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpRight,
   Bell,
@@ -14,13 +14,22 @@ import {
   Route,
   ShieldCheck,
   Sparkles,
+  ToggleLeft,
+  ToggleRight,
   Wallet,
   XCircle,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { getWebhookIntegration, patchWebhookIntegration, testWebhookIntegration } from "@/lib/integrations-api";
 import { queryKeys } from "@/lib/query-keys";
 import { getMySubscription } from "@/lib/subscriptions-api";
+import {
+  getDistributionMe,
+  patchDistributionMe,
+  type ExclusivityPreference,
+} from "@/lib/distribution-api";
+import { getWalletMe, centsToNumber } from "@/lib/wallet-api";
 
 type Tone = "good" | "warn" | "info" | "muted" | "bad";
 
@@ -47,7 +56,7 @@ const SETTINGS_AREAS: HubCard[] = [
   {
     href: "/subscriptions",
     title: "Plan & billing",
-    desc: "Plan access, billing, and premium lead credits.",
+    desc: "Pro plan, billing, and subscription status.",
     eyebrow: "Subscription",
     cta: "View billing",
     Icon: CreditCard,
@@ -121,12 +130,45 @@ function SettingsCard({ item }: { item: HubCard }) {
   );
 }
 
+const MARKET_OPTIONS = [
+  "Phoenix, AZ", "Dallas, TX", "Houston, TX", "Atlanta, GA",
+  "Las Vegas, NV", "Tampa, FL", "Orlando, FL", "Miami, FL",
+  "Charlotte, NC", "Nashville, TN", "Denver, CO", "Seattle, WA",
+  "Chicago, IL", "Los Angeles, CA", "San Diego, CA", "Sacramento, CA",
+];
+
+const LEAD_TYPE_OPTIONS = [
+  { value: "motivated_seller", label: "Motivated seller" },
+  { value: "probate", label: "Probate" },
+  { value: "foreclosure", label: "Foreclosure" },
+  { value: "tax_delinquent", label: "Tax delinquent" },
+  { value: "pre_foreclosure", label: "Pre-foreclosure" },
+  { value: "vacant_property", label: "Vacant property" },
+  { value: "inherited", label: "Inherited" },
+  { value: "distressed", label: "Distressed" },
+];
+
+const EXCLUSIVITY_OPTIONS: { value: ExclusivityPreference; label: string; hint: string }[] = [
+  { value: "exclusive", label: "Exclusive only", hint: "Buy leads exclusively — sole buyer" },
+  { value: "non_exclusive", label: "Shared only", hint: "Buy shared leads at lower per-buyer price" },
+  { value: "both", label: "Either type", hint: "Auto-buy exclusive or shared, whichever qualifies" },
+];
+
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [webhookUrl, setWebhookUrl] = useState("");
   const [hookMsg, setHookMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [isSavingWebhook, setIsSavingWebhook] = useState(false);
   const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+
+  // ── auto-distribution local state ────────────────────────────────────────
+  const [distEnabled, setDistEnabled] = useState(false);
+  const [distMarkets, setDistMarkets] = useState<string[]>([]);
+  const [distLeadTypes, setDistLeadTypes] = useState<string[]>([]);
+  const [distMinWallet, setDistMinWallet] = useState("");
+  const [distMaxPrice, setDistMaxPrice] = useState("");
+  const [distExclusivity, setDistExclusivity] = useState<ExclusivityPreference>("both");
+  const [distMsg, setDistMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   const { data: sub, isLoading: subLoading } = useQuery({
     queryKey: queryKeys.subscriptions.me,
@@ -138,9 +180,78 @@ export default function SettingsPage() {
     queryFn: getWebhookIntegration,
   });
 
+  const { data: wallet } = useQuery({
+    queryKey: queryKeys.wallet.me,
+    queryFn: getWalletMe,
+  });
+
+  const { data: distRule, isLoading: distLoading } = useQuery({
+    queryKey: queryKeys.distribution.me,
+    queryFn: getDistributionMe,
+  });
+
+  const distMutation = useMutation({
+    mutationFn: patchDistributionMe,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.distribution.me });
+      setDistMsg({ tone: "success", text: "Auto-distribution settings saved." });
+    },
+    onError: (e: unknown) => {
+      setDistMsg({ tone: "error", text: e instanceof Error ? e.message : "Save failed" });
+    },
+  });
+
   useEffect(() => {
     if (hook?.webhook_url != null) setWebhookUrl(hook.webhook_url);
   }, [hook?.webhook_url]);
+
+  useEffect(() => {
+    if (!distRule) return;
+    setDistEnabled(distRule.is_active);
+    setDistMarkets(distRule.market_filters ?? []);
+    setDistLeadTypes(distRule.lead_type_filters ?? []);
+    setDistMinWallet(
+      distRule.min_wallet_balance_cents
+        ? String(Math.round(Number(distRule.min_wallet_balance_cents) / 100))
+        : ""
+    );
+    setDistMaxPrice(
+      distRule.max_lead_price_cents
+        ? String(Math.round(Number(distRule.max_lead_price_cents) / 100))
+        : ""
+    );
+    setDistExclusivity(distRule.exclusivity_preference ?? "both");
+  }, [distRule]);
+
+  function toggleMarket(m: string) {
+    setDistMarkets((prev) =>
+      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]
+    );
+  }
+
+  function toggleLeadType(t: string) {
+    setDistLeadTypes((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  }
+
+  function saveDistribution() {
+    setDistMsg(null);
+    const minWalletCents = distMinWallet ? Math.round(parseFloat(distMinWallet) * 100) : 0;
+    const maxPriceCents = distMaxPrice ? Math.round(parseFloat(distMaxPrice) * 100) : null;
+    distMutation.mutate({
+      is_active: distEnabled,
+      market_filters: distMarkets,
+      lead_type_filters: distLeadTypes,
+      min_wallet_balance_cents: minWalletCents,
+      max_lead_price_cents: maxPriceCents,
+      exclusivity_preference: distExclusivity,
+    });
+  }
+
+  const walletBalanceDollars = wallet
+    ? (centsToNumber(wallet.balance_cents) / 100).toFixed(2)
+    : null;
 
   const hasActiveSubscription = sub?.status === "active";
   const planLabel = subLoading ? "Checking..." : sub ? titleCase(sub.plan_type) : "No plan";
@@ -673,6 +784,207 @@ export default function SettingsPage() {
             grid-template-columns: 1fr;
           }
         }
+        /* ── auto-distribution panel ── */
+        .autodist-panel {
+          margin-bottom: 30px;
+          border-radius: 20px;
+          border: 1px solid rgba(255,255,255,0.075);
+          background: linear-gradient(135deg, rgba(6,182,212,0.055), rgba(255,255,255,0.025));
+          overflow: hidden;
+        }
+        .autodist-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 16px;
+          padding: 20px 22px;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .autodist-header-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .autodist-icon {
+          width: 42px;
+          height: 42px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 13px;
+          background: rgba(6,182,212,0.13);
+          border: 1px solid rgba(6,182,212,0.28);
+          color: #67e8f9;
+          flex-shrink: 0;
+        }
+        .autodist-header h2 {
+          font-family: "Syne", sans-serif;
+          font-size: 21px;
+          margin: 0 0 3px;
+        }
+        .autodist-header p {
+          color: rgba(255,255,255,0.48);
+          font-size: 13px;
+          margin: 0;
+        }
+        .autodist-toggle-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 9px 16px;
+          border-radius: 11px;
+          border: none;
+          font-family: "DM Sans", sans-serif;
+          font-size: 13px;
+          font-weight: 800;
+          cursor: pointer;
+          transition: all 0.18s ease;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .autodist-toggle-btn.on {
+          background: rgba(6,182,212,0.16);
+          border: 1px solid rgba(6,182,212,0.3);
+          color: #67e8f9;
+        }
+        .autodist-toggle-btn.off {
+          background: rgba(255,255,255,0.055);
+          border: 1px solid rgba(255,255,255,0.1);
+          color: rgba(255,255,255,0.6);
+        }
+        .autodist-toggle-btn:hover {
+          transform: translateY(-1px);
+        }
+        .autodist-body {
+          padding: 20px 22px;
+          display: grid;
+          gap: 22px;
+        }
+        .autodist-section-label {
+          display: block;
+          color: rgba(255,255,255,0.4);
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          margin-bottom: 10px;
+        }
+        .chip-group {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+        .chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 6px 12px;
+          border-radius: 999px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: rgba(255,255,255,0.04);
+          color: rgba(255,255,255,0.62);
+          transition: all 0.15s;
+          user-select: none;
+        }
+        .chip.active {
+          border-color: rgba(6,182,212,0.38);
+          background: rgba(6,182,212,0.14);
+          color: #67e8f9;
+        }
+        .chip:hover {
+          border-color: rgba(6,182,212,0.28);
+          color: rgba(255,255,255,0.88);
+        }
+        .autodist-fields {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 14px;
+        }
+        .autodist-field label {
+          display: block;
+          color: rgba(255,255,255,0.42);
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-bottom: 7px;
+        }
+        .autodist-field input {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 11px 13px;
+          border-radius: 12px;
+          border: 1px solid rgba(255,255,255,0.1);
+          background: rgba(0,0,0,0.28);
+          color: #fff;
+          font-family: "DM Sans", sans-serif;
+          font-size: 14px;
+          outline: none;
+          transition: border-color 0.16s;
+        }
+        .autodist-field input:focus {
+          border-color: rgba(6,182,212,0.4);
+        }
+        .autodist-field .field-hint {
+          color: rgba(255,255,255,0.3);
+          font-size: 11px;
+          margin-top: 5px;
+        }
+        .excl-options {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+        }
+        .excl-option {
+          padding: 12px 13px;
+          border-radius: 14px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.03);
+          cursor: pointer;
+          transition: all 0.16s;
+          user-select: none;
+        }
+        .excl-option.selected {
+          border-color: rgba(6,182,212,0.35);
+          background: rgba(6,182,212,0.1);
+        }
+        .excl-option:hover {
+          border-color: rgba(6,182,212,0.25);
+        }
+        .excl-option-label {
+          font-size: 13px;
+          font-weight: 800;
+          color: rgba(255,255,255,0.86);
+          margin-bottom: 4px;
+        }
+        .excl-option.selected .excl-option-label {
+          color: #67e8f9;
+        }
+        .excl-option-hint {
+          font-size: 11px;
+          color: rgba(255,255,255,0.38);
+          line-height: 1.4;
+        }
+        .autodist-footer {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+          padding: 14px 22px;
+          border-top: 1px solid rgba(255,255,255,0.06);
+          background: rgba(0,0,0,0.1);
+        }
+        .wallet-hint {
+          font-size: 12px;
+          color: rgba(255,255,255,0.38);
+        }
+        .wallet-hint strong {
+          color: rgba(255,255,255,0.6);
+        }
         @media (max-width: 760px) {
           .settings-shell {
             padding: 24px 16px 80px;
@@ -700,6 +1012,14 @@ export default function SettingsPage() {
           }
           .settings-card {
             min-height: 200px;
+          }
+          .autodist-fields,
+          .excl-options {
+            grid-template-columns: 1fr;
+          }
+          .autodist-header {
+            flex-direction: column;
+            align-items: flex-start;
           }
         }
       `}</style>
@@ -739,7 +1059,7 @@ export default function SettingsPage() {
 
               <div className="hero-metrics">
                 <MetricCard label="Plan" value={planLabel} hint={hasActiveSubscription ? "Active subscription" : "Billing status"} tone={planTone} />
-                <MetricCard label="Premium leads" value={usageLabel} hint={usageHint} tone={hasActiveSubscription ? "info" : "warn"} />
+                <MetricCard label="Plan" value={hasActiveSubscription ? "Pro" : "Free"} hint={hasActiveSubscription ? "Pro entitlements active" : "Upgrade for 10% off leads"} tone={hasActiveSubscription ? "info" : "warn"} />
                 <MetricCard
                   label="Webhook"
                   value={webhookConfigured ? "Configured" : hookLoading ? "Checking..." : "Not set"}
@@ -753,18 +1073,14 @@ export default function SettingsPage() {
           <div className={`notice ${hasActiveSubscription ? "good" : "warn"}`}>
             <div>
               {subLoading ? (
-                <span>Checking your subscription and monthly lead credit status.</span>
+                <span>Checking your subscription status.</span>
               ) : hasActiveSubscription ? (
                 <>
-                  <strong>{titleCase(sub.plan_type)}</strong> is active.
-                  {sub.monthly_lead_limit != null ? (
-                    <> You have used {sub.leads_used_this_period} of {sub.monthly_lead_limit} premium leads this period.</>
-                  ) : null}
-                  {" "}Monthly wallet credits are added after Stripe invoices are paid.
+                  <strong>Pro</strong> is active — you receive 10% off all lead purchases, 60-minute early access, and priority notifications.
                 </>
               ) : (
                 <>
-                  <strong>No active subscription.</strong> Choose a plan to unlock premium lead credits.
+                  <strong>Free plan.</strong> Upgrade to Pro to unlock 10% off every lead, early access, and priority alerts.
                 </>
               )}
             </div>
@@ -792,6 +1108,156 @@ export default function SettingsPage() {
               {SETTINGS_AREAS.map((item) => (
                 <SettingsCard key={item.href} item={item} />
               ))}
+            </div>
+          </section>
+
+          {/* ── Inline auto-distribution control ── */}
+          <section className="autodist-panel">
+            <div className="autodist-header">
+              <div className="autodist-header-left">
+                <span className="autodist-icon">
+                  <Zap size={19} strokeWidth={2} aria-hidden />
+                </span>
+                <div>
+                  <h2>Auto-distribution</h2>
+                  <p>Automatically buy matching leads when your wallet has sufficient funds.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className={`autodist-toggle-btn ${distEnabled ? "on" : "off"}`}
+                onClick={() => setDistEnabled((v) => !v)}
+                disabled={distLoading}
+              >
+                {distLoading ? (
+                  <Loader2 size={15} className="spinner" strokeWidth={2.2} aria-hidden />
+                ) : distEnabled ? (
+                  <ToggleRight size={17} strokeWidth={2} aria-hidden />
+                ) : (
+                  <ToggleLeft size={17} strokeWidth={2} aria-hidden />
+                )}
+                {distLoading ? "Loading..." : distEnabled ? "Enabled" : "Disabled"}
+              </button>
+            </div>
+
+            <div className="autodist-body">
+              {/* Markets */}
+              <div>
+                <span className="autodist-section-label">Markets</span>
+                <div className="chip-group">
+                  {MARKET_OPTIONS.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      className={`chip ${distMarkets.includes(m) ? "active" : ""}`}
+                      onClick={() => toggleMarket(m)}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Lead types */}
+              <div>
+                <span className="autodist-section-label">Lead types</span>
+                <div className="chip-group">
+                  {LEAD_TYPE_OPTIONS.map((lt) => (
+                    <button
+                      key={lt.value}
+                      type="button"
+                      className={`chip ${distLeadTypes.includes(lt.value) ? "active" : ""}`}
+                      onClick={() => toggleLeadType(lt.value)}
+                    >
+                      {lt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Price / wallet fields */}
+              <div className="autodist-fields">
+                <div className="autodist-field">
+                  <label htmlFor="dist-min-wallet">Min wallet balance ($)</label>
+                  <input
+                    id="dist-min-wallet"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={distMinWallet}
+                    onChange={(e) => setDistMinWallet(e.target.value)}
+                    placeholder="e.g. 50"
+                  />
+                  <div className="field-hint">Keep this much in your wallet before auto-buying.</div>
+                </div>
+                <div className="autodist-field">
+                  <label htmlFor="dist-max-price">Max lead price ($)</label>
+                  <input
+                    id="dist-max-price"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={distMaxPrice}
+                    onChange={(e) => setDistMaxPrice(e.target.value)}
+                    placeholder="e.g. 150"
+                  />
+                  <div className="field-hint">Skip leads priced above this amount.</div>
+                </div>
+              </div>
+
+              {/* Exclusivity preference */}
+              <div>
+                <span className="autodist-section-label">Exclusivity preference</span>
+                <div className="excl-options">
+                  {EXCLUSIVITY_OPTIONS.map((opt) => (
+                    <div
+                      key={opt.value}
+                      role="button"
+                      tabIndex={0}
+                      className={`excl-option ${distExclusivity === opt.value ? "selected" : ""}`}
+                      onClick={() => setDistExclusivity(opt.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDistExclusivity(opt.value); }}
+                    >
+                      <div className="excl-option-label">{opt.label}</div>
+                      <div className="excl-option-hint">{opt.hint}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="autodist-footer">
+              <div className="wallet-hint">
+                {walletBalanceDollars !== null ? (
+                  <>Current wallet: <strong>${walletBalanceDollars}</strong></>
+                ) : (
+                  <span>Loading wallet balance…</span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                {distMsg ? (
+                  <div className={`feedback ${distMsg.tone}`} style={{ margin: 0, padding: "8px 12px" }}>
+                    {distMsg.tone === "success" ? (
+                      <CheckCircle2 size={15} strokeWidth={2.2} aria-hidden />
+                    ) : (
+                      <XCircle size={15} strokeWidth={2.2} aria-hidden />
+                    )}
+                    <span>{distMsg.text}</span>
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  className="primary-btn"
+                  style={{ background: "linear-gradient(135deg,#0891b2,#06b6d4)", boxShadow: "0 10px 24px rgba(6,182,212,0.22)" }}
+                  onClick={saveDistribution}
+                  disabled={distMutation.isPending}
+                >
+                  {distMutation.isPending ? (
+                    <Loader2 size={14} className="spinner" strokeWidth={2.2} aria-hidden />
+                  ) : null}
+                  {distMutation.isPending ? "Saving…" : "Save preferences"}
+                </button>
+              </div>
             </div>
           </section>
 
@@ -859,8 +1325,8 @@ export default function SettingsPage() {
                   </div>
                   <div className="readiness-copy">
                     {hasActiveSubscription
-                      ? "Premium lead access is enabled."
-                      : "Pick a plan to unlock credits."}
+                      ? "Pro entitlements are active (10% off, early access)."
+                      : "Upgrade to Pro to unlock discounts and early access."}
                   </div>
                 </div>
 

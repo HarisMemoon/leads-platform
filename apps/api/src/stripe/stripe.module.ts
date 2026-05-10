@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../entities/user.entity';
 import { WalletAccount } from '../entities/wallet-account.entity';
@@ -8,7 +8,10 @@ import { StripeController } from './stripe.controller';
 import { StripeService } from './stripe.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, WalletAccount, Subscription]), WalletModule],
+  imports: [
+    TypeOrmModule.forFeature([User, WalletAccount, Subscription]),
+    forwardRef(() => WalletModule),
+  ],
   controllers: [StripeController],
   providers: [StripeService],
   exports: [StripeService],

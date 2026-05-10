@@ -28,6 +28,7 @@ export type DistributionEngineSettingsDto = {
   cooldown_minutes_between_runs: number;
   markdown_after_days: number;
   markdown_percent: number;
+  early_access_minutes: number;
   created_at: string;
   updated_at: string;
 };
@@ -54,23 +55,139 @@ export function getDistributionEngineSettings() {
   );
 }
 
+export type VendorIntegrationDto = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  allowed_sources: string[];
+  ping_timeout_ms: number;
+  ping_ttl_seconds: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export function getAdminVendors() {
+  return apiGet<VendorIntegrationDto[]>('/admin/vendors');
+}
+
+export function postAdminVendor(body: {
+  name: string;
+  api_key: string;
+  enabled?: boolean;
+  allowed_sources?: string[];
+  ping_timeout_ms?: number;
+  ping_ttl_seconds?: number;
+}) {
+  return apiPost<VendorIntegrationDto>('/admin/vendors', body);
+}
+
+export function patchAdminVendor(
+  id: string,
+  body: Partial<{
+    name: string;
+    api_key: string;
+    enabled: boolean;
+    allowed_sources: string[];
+    ping_timeout_ms: number;
+    ping_ttl_seconds: number;
+  }>,
+) {
+  return apiPatch<VendorIntegrationDto>(`/admin/vendors/${id}`, body);
+}
+
+export type AdminPingRow = {
+  id: string;
+  vendor_ping_id: string;
+  status: string;
+  market: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  lead_type: string;
+  source: string | null;
+  matched_price_cents: string | null;
+  rejection_reason: string | null;
+  latency_ms: number | null;
+  expires_at: string | null;
+  created_at: string;
+  vendor?: { id: string; name: string } | null;
+  matched_buyer?: { id: string; email: string } | null;
+  matched_pricing_rule?: { id: string; name: string } | null;
+};
+
+export type AdminPingDetail = {
+  ping: AdminPingRow;
+  audit: Array<{
+    id: string;
+    eligible: boolean;
+    price_cents: string | null;
+    ranking_score: number;
+    rejection_reason: string | null;
+    details: Record<string, unknown>;
+    created_at: string;
+    buyer?: { id: string; email: string } | null;
+    pricing_rule?: { id: string; name: string } | null;
+  }>;
+};
+
+export function getAdminPings(limit = 50) {
+  return apiGet<AdminPingRow[]>(`/admin/pings?limit=${limit}`);
+}
+
+export function getAdminPing(id: string) {
+  return apiGet<AdminPingDetail>(`/admin/pings/${id}`);
+}
+
+export type AdminLeadRow = {
+  id: string;
+  title: string;
+  market: string;
+  lead_type: string;
+  status: string;
+  price_cents: string;
+  exclusive_price_cents: string | null;
+  shared_price_cents: string | null;
+  max_non_exclusive_buyers: number;
+  non_exclusive_buyers_count: number;
+  early_access_until: string | null;
+  created_at: string;
+};
+
 export function getAdminLeads(opts?: { page?: number; limit?: number }) {
   const q = new URLSearchParams();
   if (opts?.page != null) q.set('page', String(opts.page));
   if (opts?.limit != null) q.set('limit', String(opts.limit));
   const suffix = q.toString() ? `?${q.toString()}` : '';
   return apiGet<{
-    items: Array<{
-      id: string;
-      title: string;
-      market: string;
-      lead_type: string;
-      status: string;
-      price_cents: string;
-      created_at: string;
-    }>;
+    items: AdminLeadRow[];
     pagination: { page: number; limit: number; total: number };
   }>(`/admin/leads${suffix}`);
+}
+
+export function patchAdminLead(
+  id: string,
+  body: Partial<{
+    exclusive_price_cents: number;
+    shared_price_cents: number;
+    max_non_exclusive_buyers: number;
+  }>,
+) {
+  return apiPatch<AdminLeadRow>(`/admin/leads/${id}`, body);
+}
+
+export function postAdminLeadDiscount(
+  id: string,
+  body: { percent: number; until?: string },
+) {
+  return apiPost<{ ok: boolean }>(`/admin/leads/${id}/discount`, body);
+}
+
+export function postAdminLeadBoost(
+  id: string,
+  body: { percent: number },
+) {
+  return apiPost<{ ok: boolean }>(`/admin/leads/${id}/boost`, body);
 }
 
 export type AdminMetricsBreakdown = {
@@ -313,6 +430,7 @@ export function patchDistributionEngineSettings(
     cooldown_minutes_between_runs: number;
     markdown_after_days: number;
     markdown_percent: number;
+    early_access_minutes: number;
   }>,
 ) {
   return apiPatch<DistributionEngineSettingsDto>(

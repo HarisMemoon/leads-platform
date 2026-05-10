@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bull';
 import { ConfigService } from '@nestjs/config';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { Lead } from '../entities/lead.entity';
 import { Subscription } from '../entities/subscription.entity';
 import { DistributionRule } from '../entities/distribution-rule.entity';
@@ -60,6 +61,7 @@ import { IntegrationsModule } from '../integrations/integrations.module';
       User,
     ]),
     forwardRef(() => LeadsModule),
+    forwardRef(() => SubscriptionsModule),
     StripeModule,
     IntegrationsModule,
   ],

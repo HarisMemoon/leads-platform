@@ -19,6 +19,7 @@ import { LeadReservationReleaseWorker } from './lead-reservation-release.worker'
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RefundRequestsService } from './refund-requests.service';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { IntegrationsModule } from '../integrations/integrations.module';
     NotificationsModule,
     IntegrationsModule,
     forwardRef(() => DistributionModule),
+    forwardRef(() => SubscriptionsModule),
   ],
   controllers: [LeadsController, MarketplaceController],
   providers: [

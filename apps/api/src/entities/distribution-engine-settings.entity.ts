@@ -26,6 +26,10 @@ export class DistributionEngineSettings {
   @Column({ type: 'int', default: 10 })
   markdown_percent!: number;
 
+  /** Minutes after a lead is created during which only Pro subscribers can purchase. */
+  @Column({ type: 'int', default: 60 })
+  early_access_minutes!: number;
+
   @CreateDateColumn({ type: 'timestamp with time zone' })
   created_at!: Date;
 

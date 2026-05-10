@@ -17,22 +17,32 @@ import {
   getAdminLeadDuplicateGroups,
   getAdminLeads,
   getAdminMetricsBreakdown,
+  getAdminPings,
   getAdminRefundRequests,
   getAdminResourceItems,
   getAdminSubscriptionPlans,
+  getAdminVendors,
   getDistributionEngineSettings,
+  patchAdminLead,
   patchAdminRefundRequest,
   patchAdminResourceItem,
   patchAdminSubscriptionPlan,
+  patchAdminVendor,
   patchAdminUserDistributionLock,
   patchDistributionEngineSettings,
+  postAdminVendor,
   postAdminGradingOverride,
   postAdminIngestionBatch,
+  postAdminLeadDiscount,
+  postAdminLeadBoost,
   postAdminLeadMarkDuplicate,
   postAdminResourceItem,
   postAdminWalletCredit,
+  type AdminLeadRow,
+  type AdminPingRow,
   type AdminRefundRequestRow,
   type AdminSubscriptionPlan,
+  type VendorIntegrationDto,
   type AuditLogRow,
   type DistributionEngineSettingsDto,
   type IngestionRowInput,
@@ -51,6 +61,7 @@ type TabId =
   | "grading"
   | "flow"
   | "distribution"
+  | "pings"
   | "pricing"
   | "wallet"
   | "subscriptions"
@@ -69,6 +80,7 @@ const TABS: TabDef[] = [
   { id: "grading", label: "AI grading review", group: "Quality", hint: "Grade overrides and exceptions" },
   { id: "flow", label: "Flow control", group: "Operations", hint: "Real-time queue health" },
   { id: "distribution", label: "Distribution engine", group: "Operations", hint: "Auto-runs and cooldowns" },
+  { id: "pings", label: "Vendor pings", group: "Operations", hint: "Ping/post vendors and match audit" },
   { id: "pricing", label: "Pricing controls", group: "Operations", hint: "Markdown ladders" },
   { id: "wallet", label: "Wallet adjustments", group: "Finance", hint: "Manual credits and debits" },
   { id: "subscriptions", label: "Subscriptions", group: "Finance", hint: "Plans and active members" },
@@ -649,6 +661,7 @@ export default function AdminConsolePage() {
             {tab === "grading" && <GradingTab />}
             {tab === "flow" && <FlowTab />}
             {tab === "distribution" && <DistributionTab />}
+            {tab === "pings" && <VendorPingsTab />}
             {tab === "pricing" && <PricingTab />}
             {tab === "wallet" && <WalletTab />}
             {tab === "subscriptions" && <SubscriptionsTab />}
@@ -889,9 +902,129 @@ function OverviewTab() {
 
 // ---------- Inventory ----------
 
+function LeadPriceEditor({ lead, onSaved }: { lead: AdminLeadRow; onSaved: () => void }) {
+  const [excl, setExcl] = useState(
+    lead.exclusive_price_cents ? String(Math.round(Number(lead.exclusive_price_cents) / 100)) : "",
+  );
+  const [shared, setShared] = useState(
+    lead.shared_price_cents ? String(Math.round(Number(lead.shared_price_cents) / 100)) : "",
+  );
+  const [cap, setCap] = useState(String(lead.max_non_exclusive_buyers ?? 3));
+  const [discountPct, setDiscountPct] = useState("");
+  const [boostPct, setBoostPct] = useState("");
+
+  const patchPrice = useMutation({
+    mutationFn: () =>
+      patchAdminLead(lead.id, {
+        exclusive_price_cents: excl ? Math.round(parseFloat(excl) * 100) : undefined,
+        shared_price_cents: shared ? Math.round(parseFloat(shared) * 100) : undefined,
+        max_non_exclusive_buyers: cap ? Number(cap) : undefined,
+      }),
+    onSuccess: onSaved,
+  });
+
+  const applyDiscount = useMutation({
+    mutationFn: () => postAdminLeadDiscount(lead.id, { percent: Number(discountPct) }),
+    onSuccess: onSaved,
+  });
+
+  const applyBoost = useMutation({
+    mutationFn: () => postAdminLeadBoost(lead.id, { percent: Number(boostPct) }),
+    onSuccess: onSaved,
+  });
+
+  return (
+    <div
+      style={{
+        padding: 14,
+        background: "rgba(99,102,241,0.05)",
+        borderRadius: 10,
+        border: "1px solid rgba(99,102,241,0.14)",
+        marginTop: 6,
+      }}
+    >
+      {/* Dual price + cap */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))",
+          gap: 10,
+          alignItems: "end",
+          marginBottom: 12,
+        }}
+      >
+        <label style={S.label}>
+          Exclusive price ($)
+          <input style={S.inp} value={excl} onChange={(e) => setExcl(e.target.value)} placeholder="e.g. 200" />
+        </label>
+        <label style={S.label}>
+          Shared price ($)
+          <input style={S.inp} value={shared} onChange={(e) => setShared(e.target.value)} placeholder="e.g. 100" />
+        </label>
+        <label style={S.label}>
+          Buyer cap
+          <input style={S.inp} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="3" />
+        </label>
+        <button
+          type="button"
+          style={{ ...S.btnPrimary, alignSelf: "flex-end" }}
+          disabled={patchPrice.isPending}
+          onClick={() => patchPrice.mutate()}
+        >
+          Save prices
+        </button>
+      </div>
+
+      {/* Discount / boost */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10 }}>
+        <label style={{ ...S.label, minWidth: 140 }}>
+          Discount (%)
+          <input style={S.inp} value={discountPct} onChange={(e) => setDiscountPct(e.target.value)} placeholder="e.g. 15" />
+        </label>
+        <button
+          type="button"
+          style={{ ...S.btn, background: "#f59e0b", alignSelf: "flex-end" }}
+          disabled={applyDiscount.isPending || !discountPct}
+          onClick={() => applyDiscount.mutate()}
+        >
+          Apply discount
+        </button>
+        <label style={{ ...S.label, minWidth: 140 }}>
+          Boost (%)
+          <input style={S.inp} value={boostPct} onChange={(e) => setBoostPct(e.target.value)} placeholder="e.g. 10" />
+        </label>
+        <button
+          type="button"
+          style={{ ...S.btn, background: "#10b981", alignSelf: "flex-end" }}
+          disabled={applyBoost.isPending || !boostPct}
+          onClick={() => applyBoost.mutate()}
+        >
+          Apply boost
+        </button>
+      </div>
+
+      {(patchPrice.isError || applyDiscount.isError || applyBoost.isError) && (
+        <div style={{ marginTop: 8 }}>
+          <Banner tone="bad">
+            {((patchPrice.error ?? applyDiscount.error ?? applyBoost.error) as Error).message}
+          </Banner>
+        </div>
+      )}
+      {(patchPrice.isSuccess || applyDiscount.isSuccess || applyBoost.isSuccess) && (
+        <div style={{ marginTop: 8 }}>
+          <Banner tone="good">Saved.</Banner>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InventoryTab() {
+  const qc = useQueryClient();
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   const leads = useQuery({
     queryKey: ["admin", "leads", page],
     queryFn: () => getAdminLeads({ page, limit: 20 }),
@@ -900,11 +1033,16 @@ function InventoryTab() {
   const filtered = statusFilter ? items.filter((l) => l.status === statusFilter) : items;
   const statuses = Array.from(new Set(items.map((l) => l.status)));
 
+  function fmtPrice(cents: string | null) {
+    if (!cents) return "—";
+    return `$${(Number(cents) / 100).toFixed(2)}`;
+  }
+
   return (
     <>
       <SectionTitle
         title="Lead inventory"
-        sub="Browse the live catalog. Use filters to drill in by status."
+        sub="Browse the live catalog. Expand a row to edit dual prices, apply discounts, or boost."
       />
 
       <div
@@ -965,24 +1103,55 @@ function InventoryTab() {
                 <th style={S.th}>Type</th>
                 <th style={S.th}>Market</th>
                 <th style={S.th}>Status</th>
-                <th style={S.th}>Price</th>
+                <th style={S.th}>Excl. price</th>
+                <th style={S.th}>Shared price</th>
+                <th style={S.th}>Buyers</th>
                 <th style={S.th}>Created</th>
+                <th style={S.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((l) => (
-                <tr key={l.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-                  <td style={S.td}>{l.title}</td>
-                  <td style={S.td}>
-                    <Pill>{l.lead_type}</Pill>
-                  </td>
-                  <td style={S.td}>{l.market}</td>
-                  <td style={S.td}>
-                    <Pill tone={statusTone(l.status)}>{l.status}</Pill>
-                  </td>
-                  <td style={S.td}>{fmtCents(l.price_cents)}</td>
-                  <td style={S.td}>{new Date(l.created_at).toLocaleDateString()}</td>
-                </tr>
+                <>
+                  <tr key={l.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                    <td style={S.td}>{l.title}</td>
+                    <td style={S.td}>
+                      <Pill>{l.lead_type}</Pill>
+                    </td>
+                    <td style={S.td}>{l.market}</td>
+                    <td style={S.td}>
+                      <Pill tone={statusTone(l.status)}>{l.status}</Pill>
+                    </td>
+                    <td style={S.td}>{fmtPrice(l.exclusive_price_cents)}</td>
+                    <td style={S.td}>{fmtPrice(l.shared_price_cents)}</td>
+                    <td style={{ ...S.td, fontVariantNumeric: "tabular-nums" }}>
+                      {l.non_exclusive_buyers_count}/{l.max_non_exclusive_buyers}
+                    </td>
+                    <td style={S.td}>{new Date(l.created_at).toLocaleDateString()}</td>
+                    <td style={S.td}>
+                      <button
+                        type="button"
+                        style={{ ...S.btnGhost, padding: "5px 10px", fontSize: 12 }}
+                        onClick={() => setExpandedId((prev) => (prev === l.id ? null : l.id))}
+                      >
+                        {expandedId === l.id ? "Close" : "Edit prices"}
+                      </button>
+                    </td>
+                  </tr>
+                  {expandedId === l.id && (
+                    <tr key={`${l.id}-editor`} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                      <td colSpan={9} style={{ padding: "0 12px 12px" }}>
+                        <LeadPriceEditor
+                          lead={l}
+                          onSaved={() => {
+                            setExpandedId(null);
+                            void qc.invalidateQueries({ queryKey: ["admin", "leads", page] });
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>
@@ -1864,24 +2033,37 @@ function PricingTab() {
     queryFn: getDistributionEngineSettings,
   });
   const patch = useMutation({
-    mutationFn: (body: Partial<{ markdown_after_days: number; markdown_percent: number }>) =>
-      patchDistributionEngineSettings(body),
+    mutationFn: (body: Partial<{
+      markdown_after_days: number;
+      markdown_percent: number;
+      early_access_minutes: number;
+    }>) => patchDistributionEngineSettings(body),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.admin.engine }),
   });
   const [days, setDays] = useState("14");
   const [pct, setPct] = useState("10");
+  const [earlyAccess, setEarlyAccess] = useState("60");
+
+  // Sync from server when data arrives
+  const engineData = engine.data;
+  if (engineData && days === "14" && pct === "10" && earlyAccess === "60") {
+    if (engineData.markdown_after_days !== 14) setDays(String(engineData.markdown_after_days));
+    if (engineData.markdown_percent !== 10) setPct(String(engineData.markdown_percent));
+    if (engineData.early_access_minutes !== 60) setEarlyAccess(String(engineData.early_access_minutes));
+  }
 
   return (
     <>
       <SectionTitle
         title="Pricing controls"
-        sub="Markdown ladder applied to aging inventory."
+        sub="Markdown ladder and Pro early-access window."
       />
 
       {engine.data && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-          <Stat label="Current trigger" value={`${engine.data.markdown_after_days} days`} />
-          <Stat label="Current discount" value={`${engine.data.markdown_percent}%`} />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+          <Stat label="Markdown trigger" value={`${engine.data.markdown_after_days} days`} />
+          <Stat label="Markdown amount" value={`${engine.data.markdown_percent}%`} />
+          <Stat label="Pro early access" value={`${engine.data.early_access_minutes} min`} hint="Window before non-Pro can buy" />
           <Stat
             label="Last updated"
             value={new Date(engine.data.updated_at).toLocaleDateString()}
@@ -1891,7 +2073,7 @@ function PricingTab() {
 
       <div style={S.card}>
         <h3 style={{ fontFamily: "Syne, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 12 }}>
-          Edit markdown rule
+          Markdown settings
         </h3>
         <div
           style={{
@@ -1925,11 +2107,40 @@ function PricingTab() {
         </div>
       </div>
 
+      <div style={S.card}>
+        <h3 style={{ fontFamily: "Syne, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 8 }}>
+          Pro early-access window
+        </h3>
+        <p style={{ color: "rgba(255,255,255,0.48)", fontSize: 13, margin: "0 0 14px" }}>
+          How many minutes after a lead is created only Pro subscribers can purchase it. Default is 60.
+        </p>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <label style={{ ...S.label, minWidth: 180 }}>
+            Early-access window (minutes)
+            <input
+              style={S.inp}
+              type="number"
+              min="0"
+              value={earlyAccess}
+              onChange={(e) => setEarlyAccess(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={patch.isPending}
+            style={{ ...S.btnPrimary, background: "linear-gradient(135deg,#8b5cf6,#6366f1)" }}
+            onClick={() => patch.mutate({ early_access_minutes: Number(earlyAccess) })}
+          >
+            Save window
+          </button>
+        </div>
+      </div>
+
       {patch.isError && <Banner tone="bad">{(patch.error as Error).message}</Banner>}
-      {patch.isSuccess && <Banner tone="good">Markdown rule applied.</Banner>}
+      {patch.isSuccess && <Banner tone="good">Pricing settings saved.</Banner>}
       <Banner tone="info">
-        Pricing also respects per-vendor floors set on the lead record. Markdown only applies to
-        leads older than the configured threshold.
+        Markdown applies proportionally to both exclusive and shared prices. Early-access window
+        restricts purchases to Pro subscribers only during that period.
       </Banner>
     </>
   );
@@ -2044,23 +2255,25 @@ function SubscriptionsTab() {
     ? `${(breakdown.data.subscriptionChurn30d.churnRate * 100).toFixed(1)}%`
     : "—";
 
+  const proPlan = plans.data?.find((p) => p.plan_type === "pro");
+
   return (
     <>
       <SectionTitle
-        title="Subscription management"
-        sub="Plans, active members, and renewals."
+        title="Pro subscriptions"
+        sub="Read-only health metrics for the Pro plan. Edit pricing via the Pro plan editor below."
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
         <Stat
-          label="Active subscriptions"
+          label="Active Pro subscribers"
           value={String(metrics.data?.activeSubscriptions ?? "—")}
           accent="linear-gradient(90deg,#ec4899,#8b5cf6)"
         />
         <Stat
           label="MRR estimate"
           value={breakdown.data ? fmtCents(breakdown.data.mrrEstimateCents) : "—"}
-          hint="Active subs × monthly price"
+          hint="Active Pro subs × $49.99"
           accent="linear-gradient(90deg,#10b981,#34d399)"
         />
         <Stat
@@ -2072,23 +2285,49 @@ function SubscriptionsTab() {
               : "Awaiting data"
           }
         />
+        <Stat label="Plan" value="Pro only" hint="Basic/Market/Premium hidden from users" />
+      </div>
+
+      <div
+        style={{
+          ...S.card,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 14,
+          padding: 16,
+        }}
+      >
+        <div>
+          <div style={{ fontFamily: "Syne, sans-serif", fontSize: 15, marginBottom: 4 }}>
+            Stripe billing portal
+          </div>
+          <div style={{ color: "rgba(255,255,255,0.48)", fontSize: 13 }}>
+            View subscriptions, invoices, and payment methods in Stripe.
+          </div>
+        </div>
+        <a
+          href="https://dashboard.stripe.com/subscriptions"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ ...S.btnGhost, textDecoration: "none", whiteSpace: "nowrap" as const }}
+        >
+          Open Stripe dashboard ↗
+        </a>
       </div>
 
       <div style={S.card}>
         <h3 style={{ fontFamily: "Syne, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 14 }}>
-          Plan catalog
+          Pro plan editor
         </h3>
+        <p style={{ color: "rgba(255,255,255,0.48)", fontSize: 13, margin: "0 0 14px" }}>
+          Only the Pro plan is visible to users. Legacy plans (Basic, Market Specific, Premium) remain in the database for historical rows but are hidden from the public catalog and checkout.
+        </p>
         {plans.isLoading && <Empty title="Loading plans…" />}
-        {plans.data && plans.data.length === 0 && (
-          <Empty title="No plans configured" body="Run migrations to seed Basic and Pro." />
+        {plans.data && !proPlan && (
+          <Empty title="Pro plan not found" body="Run migrations to seed the Pro plan." />
         )}
-        {plans.data && plans.data.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {plans.data.map((p) => (
-              <PlanEditorCard key={p.plan_type} plan={p} />
-            ))}
-          </div>
-        )}
+        {proPlan && <PlanEditorCard plan={proPlan} />}
       </div>
     </>
   );
@@ -2627,6 +2866,129 @@ function NotificationsTab() {
                       Delete
                     </button>
                   </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---------- Vendor pings ----------
+
+function VendorPingsTab() {
+  const qc = useQueryClient();
+  const vendors = useQuery({ queryKey: queryKeys.admin.vendors, queryFn: getAdminVendors });
+  const pings = useQuery({ queryKey: queryKeys.admin.pings, queryFn: () => getAdminPings(75) });
+  const [name, setName] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [sources, setSources] = useState("");
+
+  const createVendor = useMutation({
+    mutationFn: () =>
+      postAdminVendor({
+        name,
+        api_key: apiKey,
+        allowed_sources: sources
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      }),
+    onSuccess: () => {
+      setName("");
+      setApiKey("");
+      setSources("");
+      qc.invalidateQueries({ queryKey: queryKeys.admin.vendors });
+    },
+  });
+
+  const toggleVendor = useMutation({
+    mutationFn: (vendor: VendorIntegrationDto) => patchAdminVendor(vendor.id, { enabled: !vendor.enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.admin.vendors }),
+  });
+
+  return (
+    <>
+      <SectionTitle
+        title="Vendor ping routing"
+        sub="Manage vendor credentials and inspect real-time ping match decisions."
+      />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16, marginBottom: 16 }}>
+        <div style={S.card}>
+          <h3 style={{ margin: "0 0 14px", fontSize: 16, fontFamily: "Syne, sans-serif" }}>Add vendor integration</h3>
+          <div style={{ display: "grid", gap: 10 }}>
+            <input placeholder="Vendor name" style={S.inp} value={name} onChange={(e) => setName(e.target.value)} />
+            <input placeholder="API key to hash and store" style={S.inp} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+            <input placeholder="Allowed sources, comma-separated (optional)" style={S.inp} value={sources} onChange={(e) => setSources(e.target.value)} />
+            <button
+              type="button"
+              style={S.btnPrimary}
+              disabled={createVendor.isPending || !name.trim() || !apiKey.trim()}
+              onClick={() => createVendor.mutate()}
+            >
+              {createVendor.isPending ? "Creating..." : "Create vendor"}
+            </button>
+            {createVendor.isError && <p style={{ color: "#fca5a5", fontSize: 12 }}>{(createVendor.error as Error).message}</p>}
+          </div>
+        </div>
+
+        <div style={S.card}>
+          <h3 style={{ margin: "0 0 14px", fontSize: 16, fontFamily: "Syne, sans-serif" }}>Active vendors</h3>
+          {vendors.isLoading && <Empty title="Loading vendors..." />}
+          {(vendors.data ?? []).map((vendor) => (
+            <div
+              key={vendor.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "10px 0",
+                borderBottom: "1px solid rgba(255,255,255,0.06)",
+                fontSize: 13,
+              }}
+            >
+              <span>
+                <strong>{vendor.name}</strong>
+                <br />
+                <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                  TTL {vendor.ping_ttl_seconds}s · {vendor.allowed_sources.length ? vendor.allowed_sources.join(", ") : "all sources"}
+                </span>
+              </span>
+              <button type="button" style={S.btnGhost} onClick={() => toggleVendor.mutate(vendor)}>
+                {vendor.enabled ? "Disable" : "Enable"}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ ...S.card, padding: 0, overflow: "auto" }}>
+        {pings.isLoading && <Empty title="Loading ping decisions..." />}
+        {pings.data && pings.data.length === 0 && <Empty title="No vendor pings yet" />}
+        {pings.data && pings.data.length > 0 && (
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+            <thead>
+              <tr style={{ background: "rgba(255,255,255,0.03)" }}>
+                {["Time", "Vendor", "Market", "Type", "Status", "Buyer", "Price", "Reason", "Latency"].map((h) => (
+                  <th key={h} style={S.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pings.data.map((row: AdminPingRow) => (
+                <tr key={row.id} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <td style={S.td}>{new Date(row.created_at).toLocaleString()}</td>
+                  <td style={S.td}>{row.vendor?.name ?? "Vendor"}</td>
+                  <td style={S.td}>{row.market ?? [row.city, row.state, row.zip].filter(Boolean).join(", ")}</td>
+                  <td style={S.td}>{row.lead_type}</td>
+                  <td style={S.td}>{row.status}</td>
+                  <td style={S.td}>{row.matched_buyer?.email ?? "-"}</td>
+                  <td style={S.td}>{row.matched_price_cents ? fmtCents(row.matched_price_cents) : "-"}</td>
+                  <td style={S.td}>{row.rejection_reason ?? "-"}</td>
+                  <td style={S.td}>{row.latency_ms != null ? `${row.latency_ms}ms` : "-"}</td>
                 </tr>
               ))}
             </tbody>

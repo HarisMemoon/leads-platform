@@ -18,6 +18,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { MarketAlertsModule } from './market-alerts/market-alerts.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { ResourcesModule } from './resources/resources.module';
+import { PingModule } from './ping/ping.module';
 
 @Module({
   imports: [
@@ -117,6 +118,7 @@ import { ResourcesModule } from './resources/resources.module';
     MarketAlertsModule,
     IntegrationsModule,
     ResourcesModule,
+    PingModule,
   ],
 
   controllers: [AppController],

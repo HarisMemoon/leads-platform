@@ -341,6 +341,9 @@ export class AdminController {
     if (dto.markdown_percent !== undefined) {
       row.markdown_percent = dto.markdown_percent;
     }
+    if (dto.early_access_minutes !== undefined) {
+      row.early_access_minutes = dto.early_access_minutes;
+    }
     const saved = await this.engineSettingsRepo.save(row);
     await this.auditLogService.append({
       actorId: req.user.userId,

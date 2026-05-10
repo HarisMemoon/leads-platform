@@ -7,7 +7,8 @@ export type MyLeadRow = {
   type: string;
   exclusivity: string;
   charged_amount: string;
-  purchase_type: 'auto_buy' | 'manual' | 'subscription_distribution';
+  exclusivity_choice?: 'exclusive' | 'non_exclusive';
+  purchase_type: 'auto_buy' | 'manual' | 'subscription_distribution' | 'vendor_ping';
   status: string;
   ghl_sync_status: string;
   crm_sync_status: string;
@@ -37,6 +38,12 @@ export type MarketplaceLeadRow = {
   current_price: string;
   list_price_anchor_cents: string | null;
   marketplace_tier: string | null;
+  // Dual-price fields (marketplace v2)
+  exclusive_price_cents: string | null;
+  shared_price_cents: string | null;
+  max_non_exclusive_buyers: number;
+  non_exclusive_buyers_count: number;
+  early_access_until: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
 };
@@ -73,6 +80,7 @@ export type LeadDetailResponse = {
   lead_assignments: Array<{
     assignment_id: string;
     purchase_type: string;
+    exclusivity_choice?: "exclusive" | "non_exclusive";
     charged_amount: string;
     ghl_sync_status: string;
     crm_sync_status: string;
@@ -110,11 +118,10 @@ export function listMarketplaceLeads(params: {
   condition?: string;
   zip?: string;
   exclusivity?: string;
+  exclusivity_filter?: 'exclusive_only' | 'non_exclusive_only' | 'both';
   minPrice?: number;
   maxPrice?: number;
   maxAgeDays?: number;
-  marketplaceTier?: string;
-  lead_mode?: 'premium' | 'exclusive';
   date_from?: string;
   date_to?: string;
 }) {
@@ -130,11 +137,10 @@ export function listMarketplaceLeads(params: {
   if (params.condition) q.set('condition', params.condition);
   if (params.zip) q.set('zip', params.zip);
   if (params.exclusivity) q.set('exclusivity', params.exclusivity);
+  if (params.exclusivity_filter) q.set('exclusivity_filter', params.exclusivity_filter);
   if (params.minPrice != null) q.set('minPrice', String(params.minPrice));
   if (params.maxPrice != null) q.set('maxPrice', String(params.maxPrice));
   if (params.maxAgeDays != null) q.set('maxAgeDays', String(params.maxAgeDays));
-  if (params.marketplaceTier) q.set('marketplaceTier', params.marketplaceTier);
-  if (params.lead_mode) q.set('lead_mode', params.lead_mode);
   if (params.date_from) q.set('date_from', params.date_from);
   if (params.date_to) q.set('date_to', params.date_to);
   const suffix = q.toString() ? `?${q.toString()}` : '';
@@ -145,15 +151,28 @@ export function reserveLead(leadId: string) {
   return apiPost<ReserveLeadResponse>(`/leads/${leadId}/reserve`, {});
 }
 
-export function buyLead(leadId: string) {
-  return apiPost<{ id: string }>(`/leads/${leadId}/buy`, {});
+export function buyLead(leadId: string, exclusivityChoice: 'exclusive' | 'non_exclusive' = 'non_exclusive') {
+  return apiPost<{ id: string }>(`/leads/${leadId}/buy`, { exclusivity_choice: exclusivityChoice });
+}
+
+export type LeadQuoteResponse = {
+  exclusive_price_cents: string;
+  shared_price_cents: string;
+  effective_price_cents: string;
+  is_pro: boolean;
+  early_access_until: string | null;
+  can_buy_now: boolean;
+};
+
+export function getLeadQuote(leadId: string, choice: 'exclusive' | 'non_exclusive') {
+  return apiGet<LeadQuoteResponse>(`/leads/${leadId}/quote?choice=${choice}`);
 }
 
 export function getMyLeads(opts?: {
   page?: number;
   limit?: number;
-  /** API: auto_buy | manual (subscription_distribution when unfiltered) */
-  purchaseType?: 'auto_buy' | 'manual';
+  /** API: auto_buy | manual | vendor_ping (subscription_distribution when unfiltered) */
+  purchaseType?: 'auto_buy' | 'manual' | 'vendor_ping';
   /** Lead status: available | sold | distributed | archived | … */
   status?: string;
   lifecyclePhase?: 'open' | 'contacted' | 'under_contract' | 'closed_won';

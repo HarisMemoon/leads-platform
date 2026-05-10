@@ -68,6 +68,16 @@ function phaseLabel(phase?: string | null) {
   return TRACKED_PHASES.find((p) => p.value === phase)?.label ?? "Open";
 }
 
+function purchaseTypeLabel(type: MyLeadRow["purchase_type"]) {
+  const labels: Record<MyLeadRow["purchase_type"], string> = {
+    auto_buy: "Auto-buy",
+    manual: "Marketplace",
+    subscription_distribution: "Subscription",
+    vendor_ping: "Vendor ping",
+  };
+  return labels[type] ?? type;
+}
+
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { bg: string; color: string; border: string }> = {
     open: { bg: "rgba(99,102,241,0.12)", color: "#a5b4fc", border: "rgba(99,102,241,0.25)" },
@@ -92,9 +102,9 @@ function parsePage(raw: string | null): number {
 }
 
 function downloadLeadsCsv(rows: MyLeadRow[]) {
-  const headers = ["Date purchased", "Market", "Lead type", "Status", "Contract price", "Sell price", "CRM sync", "GHL sync"];
+  const headers = ["Date purchased", "Market", "Lead type", "Source", "Status", "Contract price", "Sell price", "CRM sync", "GHL sync"];
   const dataRows = rows.map((r) => [
-    formatPurchasedAt(r.assigned_at), r.market, r.type,
+    formatPurchasedAt(r.assigned_at), r.market, r.type, purchaseTypeLabel(r.purchase_type),
     phaseLabel(r.lifecycle_phase),
     r.contract_price_cents ? centsToDollars(r.contract_price_cents) : "",
     r.sell_price_cents ? centsToDollars(r.sell_price_cents) : "",
@@ -227,6 +237,7 @@ function LeadsHistoryInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [selectedRow, setSelectedRow] = useState<MyLeadRow | null>(null);
   const [filterOpen, setFilterOpen] = useState(false);
 
   const page = parsePage(searchParams.get("page"));
@@ -545,7 +556,7 @@ function LeadsHistoryInner() {
                   <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                     <thead>
                       <tr style={{ background: "rgba(255,255,255,0.025)" }}>
-                        {["Date purchased", "Market", "Lead type", "Status", "Contract price", "Sell price", "CRM sync"].map((h) => (
+                        {["Date purchased", "Market", "Lead type", "Source", "Status", "Contract price", "Sell price", "CRM sync"].map((h) => (
                           <th key={h} style={{
                             textAlign: "left", padding: "13px 16px",
                             fontSize: 11, fontWeight: 600,
@@ -564,7 +575,10 @@ function LeadsHistoryInner() {
                         <tr
                           key={`${row.lead_id}-${row.assignment_id}`}
                           className="leads-row"
-                          onClick={() => setSelectedLeadId(row.lead_id)}
+                          onClick={() => {
+                            setSelectedLeadId(row.lead_id);
+                            setSelectedRow(row);
+                          }}
                           style={{
                             borderBottom: i < items.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
                             animation: `fadeUp 0.35s ease ${0.05 * Math.min(i, 8)}s both`,
@@ -581,6 +595,20 @@ function LeadsHistoryInner() {
                           </td>
                           <td style={{ padding: "13px 16px", fontSize: 13, color: "rgba(255,255,255,0.75)", textTransform: "capitalize" }}>
                             {row.type?.replace(/_/g, " ")}
+                          </td>
+                          <td style={{ padding: "13px 16px" }}>
+                            <span style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: "4px 9px",
+                              borderRadius: 999,
+                              color: row.purchase_type === "vendor_ping" ? "#86efac" : "#a5b4fc",
+                              background: row.purchase_type === "vendor_ping" ? "rgba(34,197,94,0.1)" : "rgba(99,102,241,0.1)",
+                              border: `1px solid ${row.purchase_type === "vendor_ping" ? "rgba(34,197,94,0.22)" : "rgba(99,102,241,0.22)"}`,
+                              whiteSpace: "nowrap",
+                            }}>
+                              {purchaseTypeLabel(row.purchase_type)}
+                            </span>
                           </td>
                           <td style={{ padding: "13px 16px" }}>
                             <StatusBadge status={row.lifecycle_phase ?? "open"} />
@@ -661,7 +689,11 @@ function LeadsHistoryInner() {
 
       <LeadDetailModal
         leadId={selectedLeadId}
-        onClose={() => setSelectedLeadId(null)}
+        onClose={() => {
+          setSelectedLeadId(null);
+          setSelectedRow(null);
+        }}
+        myLeadPreview={selectedRow}
         detail={detail}
         detailLoading={detailLoading}
         purchaseActions={false}

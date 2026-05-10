@@ -32,6 +32,9 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ExclusivityLevel } from '../../common/enums/exclusivity-level.enum';
 import { redactLeadMetadata } from './lead-redaction.util';
 import { IntegrationsService } from '../integrations/integrations.service';
+import { ProEntitlementService } from '../subscriptions/pro-entitlement.service';
+
+export type ExclusivityChoice = 'exclusive' | 'non_exclusive';
 
 @Injectable()
 export class LeadsService {
@@ -55,7 +58,29 @@ export class LeadsService {
     private readonly notificationsService: NotificationsService,
     private readonly integrationsService: IntegrationsService,
     private readonly config: ConfigService,
+    private readonly proEntitlementService: ProEntitlementService,
   ) {}
+
+  private getExclusivePriceCents(lead: Pick<Lead, 'exclusive_price_cents' | 'price_cents'>): bigint {
+    return BigInt(lead.exclusive_price_cents ?? lead.price_cents);
+  }
+
+  private getSharedCap(lead: Pick<Lead, 'max_non_exclusive_buyers'>): number {
+    return Math.max(1, Number(lead.max_non_exclusive_buyers ?? 3));
+  }
+
+  /**
+   * Canonical shared-per-buyer pricing: shared = exclusive / cap.
+   * This is the single source used by quote + purchase charging.
+   */
+  private getSharedPriceCents(
+    lead: Pick<Lead, 'exclusive_price_cents' | 'price_cents' | 'max_non_exclusive_buyers'>,
+  ): bigint {
+    const exclusive = this.getExclusivePriceCents(lead);
+    const cap = BigInt(this.getSharedCap(lead));
+    const computed = exclusive / cap;
+    return computed > 0n ? computed : 1n;
+  }
 
   private normalizeContactValue(value: unknown): string | null {
     if (typeof value !== 'string') return null;
@@ -100,6 +125,23 @@ export class LeadsService {
   async createLead(dto: CreateLeadDto) {
     const { utm, canonical_lead_source, ...rest } = dto;
     const duplicateOf = await this.detectCanonicalDuplicate(dto.metadata ?? {});
+
+    const earlyAccessMinutes: number =
+      (dto as any).early_access_minutes ?? 60;
+    const earlyAccessUntil = new Date(
+      Date.now() + earlyAccessMinutes * 60 * 1000,
+    );
+
+    const exclusivePriceCents =
+      (dto as any).exclusive_price_cents != null
+        ? String((dto as any).exclusive_price_cents)
+        : dto.price_cents.toString();
+
+    const sharedPriceCents =
+      (dto as any).shared_price_cents != null
+        ? String((dto as any).shared_price_cents)
+        : dto.price_cents.toString();
+
     const lead = this.leadRepo.create({
       ...rest,
       external_id: dto.external_id ?? null,
@@ -108,18 +150,25 @@ export class LeadsService {
       canonical_lead_source: canonical_lead_source ?? null,
       duplicate_of_lead: duplicateOf,
       price_cents: dto.price_cents.toString(),
+      exclusive_price_cents: exclusivePriceCents,
+      shared_price_cents: sharedPriceCents,
+      max_non_exclusive_buyers: (dto as any).max_non_exclusive_buyers ?? 3,
+      early_access_until: earlyAccessUntil,
     });
 
     const savedLead = await this.leadRepo.save(lead);
     await this.leadPricingService.applyTierToLead(savedLead);
-    await this.notificationsService.notifyMarketAlertsForLead({
-      id: savedLead.id,
-      title: savedLead.title,
-      market: savedLead.market,
-      lead_type: savedLead.lead_type,
-      exclusivity_level: savedLead.exclusivity_level,
-      price_cents: savedLead.price_cents,
-    });
+    await this.notificationsService.notifyMarketAlertsForLead(
+      {
+        id: savedLead.id,
+        title: savedLead.title,
+        market: savedLead.market,
+        lead_type: savedLead.lead_type,
+        exclusivity_level: savedLead.exclusivity_level,
+        price_cents: savedLead.price_cents,
+      },
+      earlyAccessMinutes,
+    );
     await this.distributionService.enqueueLeadDistribution(savedLead.id);
     return (
       (await this.leadRepo.findOne({ where: { id: savedLead.id } })) ?? savedLead
@@ -167,6 +216,16 @@ export class LeadsService {
 
     if (dto.title !== undefined) {
       lead.title = dto.title;
+    }
+
+    if ((dto as any).exclusive_price_cents !== undefined) {
+      lead.exclusive_price_cents = String((dto as any).exclusive_price_cents);
+    }
+    if ((dto as any).shared_price_cents !== undefined) {
+      lead.shared_price_cents = String((dto as any).shared_price_cents);
+    }
+    if ((dto as any).max_non_exclusive_buyers !== undefined) {
+      lead.max_non_exclusive_buyers = (dto as any).max_non_exclusive_buyers;
     }
 
     await this.leadRepo.save(lead);
@@ -256,12 +315,6 @@ export class LeadsService {
       .skip(skip)
       .take(limit);
 
-    if (query.marketplaceTier) {
-      qb.andWhere('lead.marketplace_tier = :tier', {
-        tier: query.marketplaceTier,
-      });
-    }
-
     if (query.market) {
       qb.andWhere('lead.market = :market', { market: query.market });
     }
@@ -311,11 +364,12 @@ export class LeadsService {
       qb.andWhere('lead.created_at >= :cutoff', { cutoff });
     }
 
-    if (query.lead_mode === 'exclusive') {
+    // Marketplace v2: filter on the active purchase modes, not legacy marketplace labels.
+    if (query.exclusivity_filter === 'exclusive_only') {
       qb.andWhere('lead.exclusivity_level = :excl', {
         excl: ExclusivityLevel.EXCLUSIVE,
       });
-    } else if (query.lead_mode === 'premium') {
+    } else if (query.exclusivity_filter === 'non_exclusive_only') {
       qb.andWhere('lead.exclusivity_level != :excl', {
         excl: ExclusivityLevel.EXCLUSIVE,
       });
@@ -343,6 +397,11 @@ export class LeadsService {
       'lead.metadata',
       'lead.marketplace_tier',
       'lead.list_price_anchor_cents',
+      'lead.exclusive_price_cents',
+      'lead.shared_price_cents',
+      'lead.max_non_exclusive_buyers',
+      'lead.non_exclusive_buyers_count',
+      'lead.early_access_until',
     ]);
 
     const [items, total] = await qb.getManyAndCount();
@@ -358,6 +417,11 @@ export class LeadsService {
         current_price: lead.price_cents,
         list_price_anchor_cents: lead.list_price_anchor_cents,
         marketplace_tier: lead.marketplace_tier,
+        exclusive_price_cents: lead.exclusive_price_cents,
+        shared_price_cents: lead.shared_price_cents,
+        max_non_exclusive_buyers: lead.max_non_exclusive_buyers,
+        non_exclusive_buyers_count: lead.non_exclusive_buyers_count,
+        early_access_until: lead.early_access_until,
         metadata: redactLeadMetadata(lead.metadata ?? {}),
         created_at: lead.created_at,
       })),
@@ -366,6 +430,135 @@ export class LeadsService {
         limit,
         total,
       },
+    };
+  }
+
+  /**
+   * Returns the effective price a specific user would pay for a lead, after
+   * applying any Pro discount.  Used by the frontend "quote" modal.
+   */
+  /**
+   * Applies a percentage discount to both exclusive_price_cents and
+   * shared_price_cents, writing a LeadPriceHistory record for each changed
+   * price. Also updates the legacy price_cents to match exclusive price.
+   */
+  async applyPriceDiscount(id: string, percent: number, until?: string) {
+    const lead = await this.findLeadOrThrow(id);
+    const pct = Math.min(99, Math.max(1, percent));
+    const multiplier = BigInt(100 - pct);
+
+    const oldExclusive = BigInt(lead.exclusive_price_cents ?? lead.price_cents);
+    const oldShared = BigInt(lead.shared_price_cents ?? lead.price_cents);
+
+    const newExclusive = (oldExclusive * multiplier) / 100n;
+    const newShared = (oldShared * multiplier) / 100n;
+    const reason = `Admin discount (${pct}%)${until ? ` until ${until}` : ''}`;
+
+    const histories = [
+      this.leadPriceHistoryRepo.create({
+        lead,
+        old_price_cents: oldExclusive.toString(),
+        new_price_cents: newExclusive.toString(),
+        reason: `${reason} [exclusive]`,
+      }),
+      this.leadPriceHistoryRepo.create({
+        lead,
+        old_price_cents: oldShared.toString(),
+        new_price_cents: newShared.toString(),
+        reason: `${reason} [shared]`,
+      }),
+    ];
+
+    lead.exclusive_price_cents = newExclusive.toString();
+    lead.shared_price_cents = newShared.toString();
+    lead.price_cents = newExclusive.toString(); // keep legacy field in sync
+
+    await this.leadRepo.save(lead);
+    await this.leadPriceHistoryRepo.save(histories);
+    await this.leadPricingService.applyTierToLead(
+      (await this.findLeadOrThrow(id)) as Lead,
+    );
+    return { exclusive_price_cents: newExclusive.toString(), shared_price_cents: newShared.toString() };
+  }
+
+  /**
+   * Applies a percentage boost (increase) to both exclusive and shared prices.
+   * Used by admin to temporarily raise price on high-demand leads.
+   */
+  async applyPriceBoost(id: string, percent: number) {
+    const lead = await this.findLeadOrThrow(id);
+    const pct = Math.min(500, Math.max(1, percent));
+    const multiplier = BigInt(100 + pct);
+
+    const oldExclusive = BigInt(lead.exclusive_price_cents ?? lead.price_cents);
+    const oldShared = BigInt(lead.shared_price_cents ?? lead.price_cents);
+
+    const newExclusive = (oldExclusive * multiplier) / 100n;
+    const newShared = (oldShared * multiplier) / 100n;
+    const reason = `Admin boost (+${pct}%)`;
+
+    const histories = [
+      this.leadPriceHistoryRepo.create({
+        lead,
+        old_price_cents: oldExclusive.toString(),
+        new_price_cents: newExclusive.toString(),
+        reason: `${reason} [exclusive]`,
+      }),
+      this.leadPriceHistoryRepo.create({
+        lead,
+        old_price_cents: oldShared.toString(),
+        new_price_cents: newShared.toString(),
+        reason: `${reason} [shared]`,
+      }),
+    ];
+
+    lead.exclusive_price_cents = newExclusive.toString();
+    lead.shared_price_cents = newShared.toString();
+    lead.price_cents = newExclusive.toString();
+
+    await this.leadRepo.save(lead);
+    await this.leadPriceHistoryRepo.save(histories);
+    await this.leadPricingService.applyTierToLead(
+      (await this.findLeadOrThrow(id)) as Lead,
+    );
+    return { exclusive_price_cents: newExclusive.toString(), shared_price_cents: newShared.toString() };
+  }
+
+  async getLeadQuote(
+    userId: string,
+    leadId: string,
+    choice: ExclusivityChoice,
+  ): Promise<{
+    exclusive_price_cents: string;
+    shared_price_cents: string;
+    effective_price_cents: string;
+    is_pro: boolean;
+    early_access_until: Date | null;
+    can_buy_now: boolean;
+  }> {
+    const lead = await this.findLeadOrThrow(leadId);
+
+    const exclusiveRaw = this.getExclusivePriceCents(lead);
+    const sharedRaw = this.getSharedPriceCents(lead);
+
+    const [isPro, canBuyNow] = await Promise.all([
+      this.proEntitlementService.isPro(userId),
+      this.proEntitlementService.canBuyDuringEarlyAccess(userId, lead),
+    ]);
+
+    const rawPrice = choice === 'exclusive' ? exclusiveRaw : sharedRaw;
+    const effectivePrice = await this.proEntitlementService.discountedPriceCents(
+      userId,
+      rawPrice,
+    );
+
+    return {
+      exclusive_price_cents: exclusiveRaw.toString(),
+      shared_price_cents: sharedRaw.toString(),
+      effective_price_cents: effectivePrice.toString(),
+      is_pro: isPro,
+      early_access_until: lead.early_access_until,
+      can_buy_now: canBuyNow,
     };
   }
 
@@ -467,6 +660,7 @@ export class LeadsService {
           'lead.lead_type AS type',
           'lead.exclusivity_level AS exclusivity',
           'assignment.amount_charged_cents AS charged_amount',
+          'assignment.exclusivity_choice AS exclusivity_choice',
           'assignment.purchase_type AS purchase_type',
           'lead.status AS status',
           'assignment.ghl_sync_status AS ghl_sync_status',
@@ -509,6 +703,7 @@ export class LeadsService {
       .select([
         'assignment.id AS assignment_id',
         'assignment.purchase_type AS purchase_type',
+        'assignment.exclusivity_choice AS exclusivity_choice',
         'assignment.amount_charged_cents AS charged_amount',
         'assignment.ghl_sync_status AS ghl_sync_status',
         'assignment.crm_sync_status AS crm_sync_status',
@@ -706,9 +901,20 @@ export class LeadsService {
     buyerId: string,
     leadId: string,
     purchaseType: PurchaseType = PurchaseType.MANUAL,
+    exclusivityChoice: ExclusivityChoice = 'non_exclusive',
   ) {
-    const queryRunner = this.dataSource.createQueryRunner();
+    // ── Pre-transaction checks (no locking needed here) ──────────────────────
+    const canBuy = await this.proEntitlementService.canBuyDuringEarlyAccess(
+      buyerId,
+      await this.findLeadOrThrow(leadId),
+    );
+    if (!canBuy) {
+      throw new ForbiddenException(
+        'This lead is in early access — available to Pro subscribers only for now.',
+      );
+    }
 
+    const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
@@ -727,8 +933,10 @@ export class LeadsService {
       if (!lead) throw new NotFoundException('Lead not found');
 
       const now = new Date();
+
+      // ── Status gating ───────────────────────────────────────────────────────
       if (lead.status === LeadStatus.AVAILABLE) {
-        /* direct purchase */
+        /* direct purchase — allowed */
       } else if (lead.status === LeadStatus.RESERVED) {
         const rows = await queryRunner.manager.query<
           Array<{ reserved_by_user_id: string | null }>
@@ -744,15 +952,59 @@ export class LeadsService {
         throw new BadRequestException('Lead is not available');
       }
 
-      const buyerWallet = await queryRunner.manager.findOne(WalletAccount, {
-        where: { user: { id: buyerId } },
-      });
+      // ── Dual-price exclusivity lifecycle ─────────────────────────────────
+      const rawExclusivePrice = this.getExclusivePriceCents(lead);
+      const rawSharedPrice = this.getSharedPriceCents(lead);
 
-      if (!buyerWallet) throw new NotFoundException('Wallet not found');
+      if (exclusivityChoice === 'exclusive') {
+        if (lead.non_exclusive_buyers_count > 0) {
+          throw new BadRequestException(
+            'This lead already has non-exclusive buyers — exclusive purchase is no longer available.',
+          );
+        }
+        // Check no existing exclusive assignment
+        const existingExclusive = await queryRunner.manager
+          .getRepository(LeadAssignment)
+          .createQueryBuilder('a')
+          .where('a.lead_id = :leadId', { leadId })
+          .andWhere("a.exclusivity_choice = 'exclusive'")
+          .getCount();
+        if (existingExclusive > 0) {
+          throw new BadRequestException('Lead has already been purchased exclusively.');
+        }
+      } else {
+        // non_exclusive
+        const existingExclusive = await queryRunner.manager
+          .getRepository(LeadAssignment)
+          .createQueryBuilder('a')
+          .where('a.lead_id = :leadId', { leadId })
+          .andWhere("a.exclusivity_choice = 'exclusive'")
+          .getCount();
+        if (existingExclusive > 0) {
+          throw new BadRequestException(
+            'This lead was purchased exclusively by another buyer.',
+          );
+        }
+        if (lead.non_exclusive_buyers_count >= lead.max_non_exclusive_buyers) {
+          throw new BadRequestException(
+            'This lead has reached its maximum number of shared buyers.',
+          );
+        }
+        // Prevent the same buyer from buying the same lead twice as non-exclusive
+        const alreadyBought = await queryRunner.manager
+          .getRepository(LeadAssignment)
+          .createQueryBuilder('a')
+          .where('a.lead_id = :leadId', { leadId })
+          .andWhere('a.buyer_id = :buyerId', { buyerId })
+          .getCount();
+        if (alreadyBought > 0) {
+          throw new BadRequestException(
+            'You have already purchased this lead.',
+          );
+        }
+      }
 
-      const currentPriceCents = BigInt(lead.price_cents);
-      const buyerBalanceCents = BigInt(buyerWallet.balance_cents);
-
+      // ── Duplicate guard ──────────────────────────────────────────────────
       const duplicateForBuyer = await this.detectCanonicalDuplicate(
         lead.metadata ?? {},
         lead.id,
@@ -772,36 +1024,60 @@ export class LeadsService {
         }
       }
 
-      if (buyerBalanceCents < currentPriceCents) {
+      // ── Effective price after Pro discount ───────────────────────────────
+      const rawPrice =
+        exclusivityChoice === 'exclusive' ? rawExclusivePrice : rawSharedPrice;
+      const effectivePriceCents =
+        await this.proEntitlementService.discountedPriceCents(buyerId, rawPrice);
+
+      const buyerWallet = await queryRunner.manager.findOne(WalletAccount, {
+        where: { user: { id: buyerId } },
+      });
+      if (!buyerWallet) throw new NotFoundException('Wallet not found');
+
+      const buyerBalanceCents = BigInt(buyerWallet.balance_cents);
+      if (buyerBalanceCents < effectivePriceCents) {
         throw new BadRequestException('Insufficient wallet balance');
       }
 
-      lead.status = LeadStatus.SOLD;
+      // ── Update lead counters & status ───────────────────────────────────
+      if (exclusivityChoice === 'exclusive') {
+        lead.status = LeadStatus.SOLD;
+      } else {
+        lead.non_exclusive_buyers_count += 1;
+        if (lead.non_exclusive_buyers_count >= lead.max_non_exclusive_buyers) {
+          lead.status = LeadStatus.SOLD;
+        }
+      }
       lead.reserved_until = null;
       lead.reserved_by_user = null;
       await queryRunner.manager.save(lead);
 
+      // ── Create assignment ────────────────────────────────────────────────
       const assignment = queryRunner.manager.create(LeadAssignment, {
         buyer: { id: buyerId } as any,
         lead,
         purchase_type: purchaseType,
-        amount_charged_cents: currentPriceCents.toString(),
+        amount_charged_cents: effectivePriceCents.toString(),
         lifecycle_phase: 'new',
+        exclusivity_choice: exclusivityChoice,
       });
 
       const savedAssignment = await queryRunner.manager.save(assignment);
 
-      const currentPriceAsNumber = Number(currentPriceCents);
-      if (!Number.isSafeInteger(currentPriceAsNumber)) {
+      const effectivePriceNumber = Number(effectivePriceCents);
+      if (!Number.isSafeInteger(effectivePriceNumber)) {
         throw new BadRequestException('Lead price is too large');
       }
 
       await this.walletService.debitWallet(
         buyerId,
-        currentPriceAsNumber,
+        effectivePriceNumber,
         'lead_purchase',
         lead.id,
-        'Lead purchase',
+        exclusivityChoice === 'exclusive'
+          ? 'Lead purchase (exclusive)'
+          : 'Lead purchase (shared)',
       );
 
       await queryRunner.commitTransaction();
@@ -822,6 +1098,7 @@ export class LeadsService {
             lead_id: lead.id,
             lead_title: lead.title,
             purchase_type: purchaseType,
+            exclusivity_choice: exclusivityChoice,
             amount_charged_cents: savedAssignment.amount_charged_cents,
             market: lead.market,
             lead_type: lead.lead_type,
@@ -834,7 +1111,7 @@ export class LeadsService {
         this.assignmentEventRepo.create({
           assignment: { id: savedAssignment.id } as LeadAssignment,
           event_type: 'purchased',
-          body: { purchase_type: purchaseType },
+          body: { purchase_type: purchaseType, exclusivity_choice: exclusivityChoice },
         }),
       );
 

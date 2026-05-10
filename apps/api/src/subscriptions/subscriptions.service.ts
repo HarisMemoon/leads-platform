@@ -46,19 +46,17 @@ export class SubscriptionsService {
    * definitions if the table is empty (early bootstrap before migrations seed it).
    */
   async getPlanCatalog(): Promise<SubscriptionPlanCatalogItemDto[]> {
+    // Marketplace v2: only the Pro plan is publicly visible. Basic is hidden.
     const rows = await this.planRepo.find({
       where: {
         is_active: true,
-        plan_type: In([PlanType.BASIC, PlanType.PRO]),
+        plan_type: PlanType.PRO,
       },
       order: { priority_rank: 'ASC' },
     });
     if (rows.length === 0) {
       return this.planCatalogDefinitions()
-        .filter(
-          (row) =>
-            row.planType === PlanType.BASIC || row.planType === PlanType.PRO,
-        )
+        .filter((row) => row.planType === PlanType.PRO)
         .map((row) => ({
           ...row,
           stripeConfigured: !!this.stripePriceIdFor(row.planType),
@@ -92,8 +90,9 @@ export class SubscriptionsService {
     userId: string,
     planType: PlanType,
   ): Promise<SubscriptionCheckoutResult> {
-    if (planType !== PlanType.BASIC && planType !== PlanType.PRO) {
-      throw new BadRequestException('Only Basic and Pro plans are available');
+    // Marketplace v2: only Pro checkout is available.
+    if (planType !== PlanType.PRO) {
+      throw new BadRequestException('Only the Pro plan is available for subscription');
     }
     const user = await this.userRepo.findOne({ where: { id: userId } });
     if (!user) {

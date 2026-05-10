@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -25,8 +25,11 @@ import {
   Zap,
 } from "lucide-react";
 import {
+  getBuyerPricingRulesMe,
   getDistributionMe,
   patchDistributionMe,
+  upsertBuyerPricingRule,
+  type BuyerPricingRuleDto,
   type DistributionRuleDto,
 } from "@/lib/distribution-api";
 import { getWalletMe, centsToNumber } from "@/lib/wallet-api";
@@ -745,6 +748,172 @@ function DistributionForm({
   );
 }
 
+function PricingRulesPanel({
+  rules,
+  distributionLocked,
+}: {
+  rules: BuyerPricingRuleDto[];
+  distributionLocked: boolean;
+}) {
+  const qc = useQueryClient();
+  const [name, setName] = useState("Default vendor bid");
+  const [markets, setMarkets] = useState<string[]>([]);
+  const [leadTypes, setLeadTypes] = useState<string[]>([]);
+  const [fixedPrice, setFixedPrice] = useState("");
+  const [maxBid, setMaxBid] = useState("");
+  const [priority, setPriority] = useState("0");
+  const [exclusivity, setExclusivity] = useState<"exclusive_only" | "non_exclusive_only" | "both">("both");
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      upsertBuyerPricingRule({
+        name,
+        markets,
+        lead_types: leadTypes,
+        fixed_price_cents: dollarsToCents(fixedPrice),
+        max_bid_cents: dollarsToCents(maxBid),
+        priority: parseInt(priority, 10) || 0,
+        exclusivity_preference: exclusivity,
+        routing_strategy: "highest_bid",
+        is_active: true,
+        paused: false,
+      }),
+    onSuccess: () => {
+      setFixedPrice("");
+      setMaxBid("");
+      qc.invalidateQueries({ queryKey: queryKeys.distribution.pricingRules });
+    },
+  });
+
+  return (
+    <SectionCard
+      stackAboveNeighbors
+      accentColor="#22c55e"
+      icon={<CircleDollarSign size={15} color="#86efac" aria-hidden />}
+      title="Ping pricing & bid rules"
+      subtitle="These rules tell the real-time ping engine what markets you buy and what you will pay."
+    >
+      {rules.length > 0 && (
+        <div style={{ display: "grid", gap: 10, marginBottom: 18 }}>
+          {rules.map((rule) => (
+            <div
+              key={rule.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1.2fr 1fr 1fr",
+                gap: 12,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "rgba(255,255,255,0.025)",
+                border: "1px solid rgba(255,255,255,0.07)",
+                fontSize: 12,
+              }}
+            >
+              <div>
+                <div style={{ color: "#fff", fontWeight: 700 }}>{rule.name}</div>
+                <div style={{ color: "rgba(255,255,255,0.38)", marginTop: 3 }}>
+                  {rule.markets.length ? rule.markets.join(", ") : "All markets"} ·{" "}
+                  {rule.lead_types.length ? `${rule.lead_types.length} lead types` : "all lead types"}
+                </div>
+              </div>
+              <div style={{ color: "rgba(255,255,255,0.62)" }}>
+                Fixed {rule.fixed_price_cents ? `$${(Number(rule.fixed_price_cents) / 100).toFixed(0)}` : "not set"}
+                <br />
+                Max bid {rule.max_bid_cents ? `$${(Number(rule.max_bid_cents) / 100).toFixed(0)}` : "not set"}
+              </div>
+              <div style={{ color: rule.paused || !rule.is_active ? "#fca5a5" : "#86efac" }}>
+                {rule.paused || !rule.is_active ? "Paused" : "Live"} · priority {rule.priority}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div
+        style={
+          distributionLocked
+            ? { opacity: 0.55, pointerEvents: "none" as const, userSelect: "none" as const }
+            : undefined
+        }
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontWeight: 500 }}>Rule name</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} style={inputLikeStyle} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontWeight: 500 }}>Exclusivity</span>
+            <select
+              value={exclusivity}
+              onChange={(e) => setExclusivity(e.target.value as typeof exclusivity)}
+              style={inputLikeStyle}
+            >
+              <option value="both">Exclusive or shared</option>
+              <option value="exclusive_only">Exclusive only</option>
+              <option value="non_exclusive_only">Shared only</option>
+            </select>
+          </label>
+          <MultiSelect
+            label="Ping markets"
+            options={MARKET_OPTIONS.map((m) => ({ value: m, label: m }))}
+            selected={markets}
+            onChange={setMarkets}
+            placeholder="All markets"
+            icon={<MapPin size={12} />}
+          />
+          <MultiSelect
+            label="Ping lead types"
+            options={LEAD_TYPE_OPTIONS}
+            selected={leadTypes}
+            onChange={setLeadTypes}
+            placeholder="All lead types"
+            icon={<Tag size={12} />}
+          />
+          <NumberField label="Fixed price" value={fixedPrice} onChange={setFixedPrice} prefix="$" placeholder="Optional" />
+          <NumberField label="Max bid" value={maxBid} onChange={setMaxBid} prefix="$" placeholder="Optional" />
+          <NumberField label="Priority" value={priority} onChange={setPriority} placeholder="0" />
+        </div>
+        <button
+          type="button"
+          disabled={mutation.isPending || distributionLocked || !name.trim()}
+          onClick={() => mutation.mutate()}
+          style={{
+            marginTop: 16,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "11px 18px",
+            borderRadius: 12,
+            border: "none",
+            background: "linear-gradient(135deg,#10b981,#22c55e)",
+            color: "#fff",
+            fontWeight: 700,
+            cursor: mutation.isPending ? "not-allowed" : "pointer",
+          }}
+        >
+          {mutation.isPending ? <Loader2 size={15} style={{ animation: "spin 1s linear infinite" }} /> : <Zap size={15} />}
+          Save pricing rule
+        </button>
+        {mutation.isError && (
+          <span style={{ marginLeft: 12, color: "#fca5a5", fontSize: 13 }}>{(mutation.error as Error).message}</span>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+const inputLikeStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "10px 14px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.09)",
+  background: "rgba(0,0,0,0.3)",
+  color: "#fff",
+  fontSize: 14,
+  outline: "none",
+};
+
 /* ─── Page ───────────────────────────────────────────────────────────────── */
 
 export default function DistributionSettingsPage() {
@@ -769,7 +938,13 @@ export default function DistributionSettingsPage() {
     queryFn: getAuthMe,
   });
 
-  const isLoading = ruleLoading || walletLoading || meLoading;
+  const { data: pricingRules = [], isLoading: pricingLoading } = useQuery({
+    queryKey: queryKeys.distribution.pricingRules,
+    queryFn: getBuyerPricingRulesMe,
+    retry: false,
+  });
+
+  const isLoading = ruleLoading || walletLoading || meLoading || pricingLoading;
   const walletBalanceCents = wallet ? centsToNumber(wallet.balance_cents) : 0;
 
   return (
@@ -869,6 +1044,10 @@ export default function DistributionSettingsPage() {
               <DistributionForm
                 initial={rule}
                 walletBalanceCents={walletBalanceCents}
+                distributionLocked={Boolean(me?.distribution_locked)}
+              />
+              <PricingRulesPanel
+                rules={pricingRules}
                 distributionLocked={Boolean(me?.distribution_locked)}
               />
             </div>

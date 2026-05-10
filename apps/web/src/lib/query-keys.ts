@@ -33,10 +33,13 @@ export const queryKeys = {
     detail: (leadId: string) => ["leads", "detail", leadId] as const,
     marketplace: (opts: Record<string, unknown>) =>
       ["leads", "marketplace", opts] as const,
+    quote: (leadId: string, choice: string) =>
+      ["leads", "quote", leadId, choice] as const,
   },
   distribution: {
     rules: ["distribution", "rules"] as const,
     me: ["distribution", "me"] as const,
+    pricingRules: ["distribution", "pricing-rules"] as const,
   },
   marketAlerts: {
     me: ["market-alerts", "me"] as const,
@@ -59,6 +62,8 @@ export const queryKeys = {
     gradingOverrides: ["admin", "grading", "overrides"] as const,
     integrationsHealth: ["admin", "integrations", "health"] as const,
     plans: ["admin", "subscription-plans"] as const,
+    vendors: ["admin", "vendors"] as const,
+    pings: ["admin", "pings"] as const,
   },
   subscriptions: {
     me: ["subscriptions", "me"] as const,

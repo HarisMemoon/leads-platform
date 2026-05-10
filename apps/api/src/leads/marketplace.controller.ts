@@ -11,17 +11,30 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { IsIn, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt.auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/enums/user-role.enum';
-import { LeadsService } from './leads.service';
+import { LeadsService, ExclusivityChoice } from './leads.service';
 import { ListMarketplaceLeadsDto } from './dto/list-marketplace-leads.dto';
 import { ListMyLeadsDto } from './dto/list-my-leads.dto';
 import { PatchAssignmentLifecycleDto } from './dto/patch-assignment-lifecycle.dto';
 import { CreateRefundRequestDto } from './dto/create-refund-request.dto';
 import { RefundRequestsService } from './refund-requests.service';
 import { Request } from 'express';
+
+class BuyLeadDto {
+  @IsOptional()
+  @IsIn(['exclusive', 'non_exclusive'])
+  exclusivity_choice?: ExclusivityChoice;
+}
+
+class QuoteQueryDto {
+  @IsOptional()
+  @IsIn(['exclusive', 'non_exclusive'])
+  choice?: ExclusivityChoice;
+}
 
 @Controller('leads')
 export class MarketplaceController {
@@ -95,8 +108,29 @@ export class MarketplaceController {
   buy(
     @Req() req: Request & { user: { userId: string } },
     @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: BuyLeadDto,
   ) {
-    return this.leadsService.buyLead(req.user.userId, id);
+    return this.leadsService.buyLead(
+      req.user.userId,
+      id,
+      undefined,
+      dto.exclusivity_choice ?? 'non_exclusive',
+    );
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.BUYER)
+  @Get(':id/quote')
+  getQuote(
+    @Req() req: Request & { user: { userId: string } },
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Query() query: QuoteQueryDto,
+  ) {
+    return this.leadsService.getLeadQuote(
+      req.user.userId,
+      id,
+      query.choice ?? 'non_exclusive',
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

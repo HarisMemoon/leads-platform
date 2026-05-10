@@ -96,7 +96,22 @@ import {
   
     @Column({ type: 'int', default: 0 })
     rotation_position!: number
-  
+
+    // ── Marketplace-v2 fields (Phase A) ──────────────────────────────────────
+
+    /**
+     * Which exclusivity type this rule targets for auto-distribution.
+     * Values: 'exclusive_only' | 'non_exclusive_only' | 'both'
+     */
+    @Column({ type: 'varchar', default: 'both' })
+    exclusivity_preference!: string
+
+    /** Maximum per-lead price (cents) this rule will auto-buy. NULL = no ceiling. */
+    @Column({ type: 'bigint', nullable: true })
+    max_lead_price_cents!: string | null
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     /*
     timestamps
     */

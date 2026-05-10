@@ -9,6 +9,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Type } from 'class-transformer';
+import { IsInt, IsISO8601, IsOptional, Max, Min } from 'class-validator';
 import { LeadsService } from './leads.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
@@ -21,6 +23,26 @@ import { UserRole } from '../../common/enums/user-role.enum';
 import { RefundRequestsService } from './refund-requests.service';
 import { AdminResolveRefundDto } from './dto/admin-resolve-refund.dto';
 import { MarkDuplicateLeadDto } from './dto/mark-duplicate-lead.dto';
+
+class ApplyDiscountDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(99)
+  percent!: number;
+
+  @IsOptional()
+  @IsISO8601()
+  until?: string;
+}
+
+class ApplyBoostDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  percent!: number;
+}
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
@@ -55,6 +77,22 @@ export class LeadsController {
     @Body() dto: AppendPriceHistoryDto,
   ) {
     return this.leadsService.appendPriceHistory(id, dto);
+  }
+
+  @Post('leads/:id/discount')
+  applyDiscount(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ApplyDiscountDto,
+  ) {
+    return this.leadsService.applyPriceDiscount(id, dto.percent, dto.until);
+  }
+
+  @Post('leads/:id/boost')
+  applyBoost(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: ApplyBoostDto,
+  ) {
+    return this.leadsService.applyPriceBoost(id, dto.percent);
   }
 
   @Get('leads')

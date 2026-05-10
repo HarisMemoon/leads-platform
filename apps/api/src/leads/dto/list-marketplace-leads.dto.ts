@@ -3,11 +3,6 @@ import { IsEnum, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator'
 import { ExclusivityLevel } from '../../../common/enums/exclusivity-level.enum';
 
 export class ListMarketplaceLeadsDto {
-  /** premium = non-exclusive marketplace tier; exclusive = exclusivity exclusive only */
-  @IsOptional()
-  @IsIn(['premium', 'exclusive'])
-  lead_mode?: 'premium' | 'exclusive';
-
   @IsOptional()
   @IsString()
   date_from?: string;
@@ -16,9 +11,15 @@ export class ListMarketplaceLeadsDto {
   @IsString()
   date_to?: string;
 
+  /**
+   * Filter the marketplace feed by exclusivity type.
+   * 'exclusive_only' — leads that can be bought exclusively
+   * 'non_exclusive_only' — leads that can be shared
+   * 'both' (default) — all available leads
+   */
   @IsOptional()
-  @IsIn(['premium', 'standard', 'value'])
-  marketplaceTier?: 'premium' | 'standard' | 'value';
+  @IsIn(['exclusive_only', 'non_exclusive_only', 'both'])
+  exclusivity_filter?: 'exclusive_only' | 'non_exclusive_only' | 'both';
 
   @IsOptional()
   @IsString()

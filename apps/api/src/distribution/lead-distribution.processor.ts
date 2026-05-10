@@ -12,14 +12,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThanOrEqual, Repository } from 'typeorm';
 import { Lead } from '../entities/lead.entity';
 import { LeadAssignment } from '../entities/lead-assignment.entity';
-import { Subscription } from '../entities/subscription.entity';
 import { DistributionRule } from '../entities/distribution-rule.entity';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { DistributionEngineSettings } from '../entities/distribution-engine-settings.entity';
 import { LeadStatus } from '../../common/enums/lead-status.enum';
-import { SubscriptionStatus } from '../../common/enums/subscription-status.enum';
 import { PurchaseType } from '../../common/enums/purchase-type.enum';
-import { LeadsService } from '../leads/leads.service';
+import { LeadsService, ExclusivityChoice } from '../leads/leads.service';
+import { ProEntitlementService } from '../subscriptions/pro-entitlement.service';
 
 type ProcessLeadPayload = {
   leadId: string;
@@ -35,8 +34,6 @@ export class LeadDistributionProcessor {
   constructor(
     @InjectRepository(Lead)
     private readonly leadRepo: Repository<Lead>,
-    @InjectRepository(Subscription)
-    private readonly subscriptionRepo: Repository<Subscription>,
     @InjectRepository(DistributionRule)
     private readonly distributionRuleRepo: Repository<DistributionRule>,
     @InjectRepository(WalletAccount)
@@ -48,7 +45,20 @@ export class LeadDistributionProcessor {
     @Inject(forwardRef(() => LeadsService))
     private readonly leadsService: LeadsService,
     private readonly distributionService: DistributionService,
+    private readonly proEntitlementService: ProEntitlementService,
   ) {}
+
+  /**
+   * Canonical shared-per-buyer price: exclusive / max_non_exclusive_buyers.
+   * Mirrors the formula in LeadsService so all three paths
+   * (quote, manual buy, auto-distribution) charge identically.
+   */
+  private canonicalSharedPrice(lead: Lead): bigint {
+    const exclusive = BigInt(lead.exclusive_price_cents ?? lead.price_cents);
+    const cap = BigInt(Math.max(1, Number(lead.max_non_exclusive_buyers ?? 3)));
+    const computed = exclusive / cap;
+    return computed > 0n ? computed : 1n;
+  }
 
   @Process('processLead')
   async processLead(job: Job<ProcessLeadPayload>) {
@@ -64,6 +74,7 @@ export class LeadDistributionProcessor {
           cooldown_minutes_between_runs: 15,
           markdown_after_days: 7,
           markdown_percent: 10,
+          early_access_minutes: 60,
         }),
       );
     }
@@ -76,17 +87,7 @@ export class LeadDistributionProcessor {
       return;
     }
 
-    const subscriptions = await this.subscriptionRepo.find({
-      where: { status: SubscriptionStatus.ACTIVE },
-      relations: { user: true },
-      order: { priority_weight: 'DESC' },
-    });
-
-    if (subscriptions.length === 0) {
-      await this.scheduleRetryIfNeeded(lead.id, settings);
-      return;
-    }
-
+    // ── Eligible rules: participation on + active ──────────────────────────
     const rules = await this.distributionRuleRepo.find({
       where: {
         participation_enabled: true,
@@ -101,6 +102,9 @@ export class LeadDistributionProcessor {
     }
 
     const now = new Date();
+    const isEarlyAccess =
+      lead.early_access_until != null && new Date(lead.early_access_until) > now;
+
     const startOfDay = new Date(now);
     startOfDay.setHours(0, 0, 0, 0);
 
@@ -111,71 +115,99 @@ export class LeadDistributionProcessor {
 
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const ruleByUserId = new Map(rules.map((rule) => [rule.user.id, rule]));
-    let sortedEligibleSubscriptions = subscriptions.filter((subscription) =>
-      ruleByUserId.has(subscription.user.id),
-    );
-
-    sortedEligibleSubscriptions.sort((a, b) => {
-      const ra = ruleByUserId.get(a.user.id)!;
-      const rb = ruleByUserId.get(b.user.id)!;
-      if (ra.rotation_position !== rb.rotation_position) {
-        return ra.rotation_position - rb.rotation_position;
-      }
-      return (b.priority_weight ?? 0) - (a.priority_weight ?? 0);
+    /*
+     * ── Merry-go-round sort ──────────────────────────────────────────────────
+     * Sort by rotation_position ASC — whoever has the lowest value goes next.
+     * Tiebreak by rule created_at ASC (earliest registered buyer wins the tie).
+     * After a successful assignment we bump that buyer's position to the back,
+     * guaranteeing true round-robin fairness over time.
+     */
+    const sortedRules = [...rules].sort((a, b) => {
+      const posDiff = (a.rotation_position ?? 0) - (b.rotation_position ?? 0);
+      if (posDiff !== 0) return posDiff;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
     });
 
-    for (const subscription of sortedEligibleSubscriptions) {
-      const userId = subscription.user.id;
-      const rule = ruleByUserId.get(userId);
-      if (!rule) continue;
+    for (const rule of sortedRules) {
+      const userId = rule.user.id;
 
-      if (
-        subscription.monthly_lead_limit !== null &&
-        subscription.leads_used_this_period >= subscription.monthly_lead_limit
-      ) {
-        continue;
+      // ── Early-access gate: during window, only Pro buyers participate ──────
+      if (isEarlyAccess) {
+        const isPro = await this.proEntitlementService.isPro(userId);
+        if (!isPro) continue;
       }
 
+      // ── Market + type filters ─────────────────────────────────────────────
       const hasMarketMatch =
         (rule.market_filters || []).length === 0 ||
         (rule.market_filters || []).includes(lead.market);
-      if (!hasMarketMatch) {
-        continue;
-      }
+      if (!hasMarketMatch) continue;
 
       const typeFilters = rule.lead_type_filters || [];
       if (typeFilters.length > 0 && !typeFilters.includes(lead.lead_type)) {
         continue;
       }
 
+      // ── Determine exclusivity choice from rule preference ─────────────────
+      const exclusivityPref: string = rule.exclusivity_preference ?? 'both';
+
+      let exclusivityChoice: ExclusivityChoice | null = null;
+      if (exclusivityPref === 'exclusive_only') {
+        if (lead.non_exclusive_buyers_count > 0) continue;
+        exclusivityChoice = 'exclusive';
+      } else if (exclusivityPref === 'non_exclusive_only') {
+        if (lead.non_exclusive_buyers_count >= lead.max_non_exclusive_buyers) continue;
+        exclusivityChoice = 'non_exclusive';
+      } else {
+        // 'both' — prefer shared if slots remain, otherwise exclusive
+        if (lead.non_exclusive_buyers_count < lead.max_non_exclusive_buyers) {
+          exclusivityChoice = 'non_exclusive';
+        } else if (lead.non_exclusive_buyers_count === 0) {
+          exclusivityChoice = 'exclusive';
+        } else {
+          continue;
+        }
+      }
+
+      if (exclusivityChoice === null) continue;
+
+      // ── Canonical pricing — same formula as quote + manual buy ────────────
+      const rawExclusive = BigInt(lead.exclusive_price_cents ?? lead.price_cents);
+      const rawShared = this.canonicalSharedPrice(lead);
+      const rawPrice = exclusivityChoice === 'exclusive' ? rawExclusive : rawShared;
+
+      const effectivePrice = await this.proEntitlementService.discountedPriceCents(
+        userId,
+        rawPrice,
+      );
+
+      // ── Price ceiling check ───────────────────────────────────────────────
+      if (rule.max_lead_price_cents != null) {
+        if (effectivePrice > BigInt(rule.max_lead_price_cents)) continue;
+      }
+
+      // ── Wallet balance check ──────────────────────────────────────────────
       const wallet = await this.walletRepo.findOne({
         where: { user: { id: userId } },
       });
       if (!wallet) continue;
 
-      const price = BigInt(lead.price_cents);
       const balance = BigInt(wallet.balance_cents);
-      if (balance < price) {
-        continue;
-      }
+      if (balance < effectivePrice) continue;
 
       const minReserve = BigInt(rule.min_wallet_balance_cents ?? '0');
-      if (balance - price < minReserve) {
-        continue;
-      }
+      if (balance - effectivePrice < minReserve) continue;
 
+      // ── Lead-count caps ───────────────────────────────────────────────────
       const maxPerDay = rule.max_per_day ?? rule.max_leads_per_day;
-      if (maxPerDay !== null) {
+      if (maxPerDay != null) {
         const purchasedToday = await this.leadAssignmentRepo.count({
           where: {
             buyer: { id: userId },
             created_at: MoreThanOrEqual(startOfDay),
           },
         });
-        if (purchasedToday >= maxPerDay) {
-          continue;
-        }
+        if (purchasedToday >= maxPerDay) continue;
       }
 
       if (rule.max_leads_per_week != null) {
@@ -196,7 +228,8 @@ export class LeadDistributionProcessor {
         if (n >= rule.max_leads_per_month) continue;
       }
 
-      const sumSpend = async (since: Date) => {
+      // ── Spend caps ────────────────────────────────────────────────────────
+      const sumSpend = async (since: Date): Promise<bigint> => {
         const raw = await this.leadAssignmentRepo
           .createQueryBuilder('a')
           .select('COALESCE(SUM(a.amount_charged_cents), 0)', 'sum')
@@ -208,17 +241,18 @@ export class LeadDistributionProcessor {
 
       if (rule.max_spend_per_day_cents != null) {
         const spent = await sumSpend(startOfDay);
-        if (spent + price > BigInt(rule.max_spend_per_day_cents)) continue;
+        if (spent + effectivePrice > BigInt(rule.max_spend_per_day_cents)) continue;
       }
       if (rule.max_spend_per_week_cents != null) {
         const spent = await sumSpend(startOfWeek);
-        if (spent + price > BigInt(rule.max_spend_per_week_cents)) continue;
+        if (spent + effectivePrice > BigInt(rule.max_spend_per_week_cents)) continue;
       }
       if (rule.max_spend_per_month_cents != null) {
         const spent = await sumSpend(startOfMonth);
-        if (spent + price > BigInt(rule.max_spend_per_month_cents)) continue;
+        if (spent + effectivePrice > BigInt(rule.max_spend_per_month_cents)) continue;
       }
 
+      // ── Cooldown ──────────────────────────────────────────────────────────
       if (rule.cooldown_minutes > 0) {
         const last = await this.leadAssignmentRepo.findOne({
           where: { buyer: { id: userId } },
@@ -231,16 +265,38 @@ export class LeadDistributionProcessor {
         }
       }
 
+      // ── Attempt purchase ──────────────────────────────────────────────────
       try {
-        await this.leadsService.buyLead(userId, lead.id, PurchaseType.AUTO_BUY);
-        subscription.leads_used_this_period += 1;
-        await this.subscriptionRepo.save(subscription);
-        return;
+        await this.leadsService.buyLead(
+          userId,
+          lead.id,
+          PurchaseType.AUTO_BUY,
+          exclusivityChoice,
+        );
+
+        /*
+         * ── Merry-go-round advance ─────────────────────────────────────────
+         * Move this buyer to the back of the rotation queue.
+         * New position = max position across ALL eligible rules + 1,
+         * so they can only be served again after everyone else has had a turn.
+         */
+        const maxPos = rules.reduce(
+          (acc, r) => Math.max(acc, r.rotation_position ?? 0),
+          0,
+        );
+        rule.rotation_position = maxPos + 1;
+        await this.distributionRuleRepo.save(rule);
+
+        this.logger.log(
+          `Merry-go-round: assigned lead ${lead.id} to user ${userId} ` +
+          `(${exclusivityChoice}). New rotation_position=${rule.rotation_position}`,
+        );
+
+        return; // success — stop processing for this lead
       } catch (error) {
         if (error instanceof BadRequestException) {
           continue;
         }
-
         this.logger.error(
           `Failed auto distribution for lead ${lead.id} and user ${userId}`,
           error instanceof Error ? error.stack : undefined,

@@ -65,6 +65,33 @@ import {
     @Column({ type: 'varchar', nullable: true })
     marketplace_tier!: string | null
 
+    // ── Dual-price marketplace fields (Phase A) ──────────────────────────────
+
+    /** Price when a single buyer takes this lead exclusively. */
+    @Column({ type: 'bigint', nullable: true })
+    exclusive_price_cents!: string | null
+
+    /** Per-buyer price when multiple buyers share this lead. */
+    @Column({ type: 'bigint', nullable: true })
+    shared_price_cents!: string | null
+
+    /** Maximum number of non-exclusive (shared) buyers allowed. Default 3. */
+    @Column({ type: 'int', default: 3 })
+    max_non_exclusive_buyers!: number
+
+    /** Running count of completed non-exclusive purchases. */
+    @Column({ type: 'int', default: 0 })
+    non_exclusive_buyers_count!: number
+
+    /**
+     * Until this timestamp only Pro subscribers can purchase / auto-buy.
+     * After it, the lead opens to all buyers.
+     */
+    @Column({ type: 'timestamp with time zone', nullable: true })
+    early_access_until!: Date | null
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     @Column({ type: 'int', default: 0 })
     distribution_run_count!: number
 

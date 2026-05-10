@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,6 +7,7 @@ import { NotificationChannel } from '../../common/enums/notification-channel.enu
 import { User } from '../entities/user.entity';
 import { MarketAlert } from '../entities/market-alert.entity';
 import { PurchaseType } from '../../common/enums/purchase-type.enum';
+import { ProEntitlementService } from '../subscriptions/pro-entitlement.service';
 
 @Injectable()
 export class NotificationsService {
@@ -20,6 +21,8 @@ export class NotificationsService {
     @InjectRepository(MarketAlert)
     private readonly marketAlertRepo: Repository<MarketAlert>,
     private readonly config: ConfigService,
+    @Inject(forwardRef(() => ProEntitlementService))
+    private readonly proEntitlementService: ProEntitlementService,
   ) {}
 
   private async createLog(input: {
@@ -299,18 +302,25 @@ export class NotificationsService {
     });
   }
 
-  async notifyMarketAlertsForLead(lead: {
-    id: string;
-    title: string;
-    market: string;
-    lead_type: string;
-    exclusivity_level: string;
-    price_cents: string;
-  }) {
+  async notifyMarketAlertsForLead(
+    lead: {
+      id: string;
+      title: string;
+      market: string;
+      lead_type: string;
+      exclusivity_level: string;
+      price_cents: string;
+    },
+    earlyAccessMinutes = 60,
+  ) {
     const alerts = await this.marketAlertRepo.find({
       where: { is_active: true },
       relations: { user: true },
     });
+
+    const proAlerts: typeof alerts = [];
+    const freeAlerts: typeof alerts = [];
+
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
@@ -348,18 +358,42 @@ export class NotificationsService {
         if (sentToday >= alert.max_per_day) continue;
       }
 
-      await this.sendUserEvent({
-        userId: alert.user.id,
-        type: 'market_alert_match',
-        title: 'New lead in your market',
-        body: `${lead.title} is available in ${lead.market} for $${(
-          Number(lead.price_cents) / 100
-        ).toFixed(2)}.`,
-        referenceType: 'lead',
-        referenceId: lead.id,
-        channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
-        emailSubject: `New lead available in ${lead.market}`,
-      });
+      const isPro = await this.proEntitlementService.isPro(alert.user.id);
+      if (isPro) {
+        proAlerts.push(alert);
+      } else {
+        freeAlerts.push(alert);
+      }
+    }
+
+    const sendAlertToUsers = async (alertList: typeof alerts, titlePrefix = '') => {
+      for (const alert of alertList) {
+        await this.sendUserEvent({
+          userId: alert.user.id,
+          type: 'market_alert_match',
+          title: `${titlePrefix}New lead in your market`,
+          body: `${lead.title} is available in ${lead.market} for $${(
+            Number(lead.price_cents) / 100
+          ).toFixed(2)}.`,
+          referenceType: 'lead',
+          referenceId: lead.id,
+          channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
+          emailSubject: `${titlePrefix}New lead available in ${lead.market}`,
+        });
+      }
+    };
+
+    // Pro subscribers get notified immediately (priority alert)
+    await sendAlertToUsers(proAlerts, '[Pro] ');
+
+    // Free users are notified after the early-access window closes
+    if (freeAlerts.length > 0) {
+      const delayMs = earlyAccessMinutes * 60 * 1000;
+      setTimeout(() => {
+        sendAlertToUsers(freeAlerts).catch((e) =>
+          this.logger.error('Delayed market alert failed', e),
+        );
+      }, delayMs);
     }
   }
 

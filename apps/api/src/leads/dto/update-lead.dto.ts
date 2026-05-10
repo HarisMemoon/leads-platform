@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   IsEnum,
   IsInt,
@@ -39,6 +40,24 @@ export class UpdateLeadDto {
   @IsInt()
   @Min(0)
   price_cents?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  exclusive_price_cents?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  shared_price_cents?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  max_non_exclusive_buyers?: number;
 
   @IsOptional()
   @IsString()

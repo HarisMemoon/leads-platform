@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -86,4 +87,15 @@ export class UpdateDistributionRuleDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  /** 'exclusive_only' | 'non_exclusive_only' | 'both' */
+  @IsOptional()
+  @IsIn(['exclusive_only', 'non_exclusive_only', 'both'])
+  exclusivity_preference?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  max_lead_price_cents?: number | null;
 }

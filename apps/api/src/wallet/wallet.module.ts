@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { WalletTransaction } from '../entities/wallet-transaction.entity';
@@ -13,7 +13,7 @@ import { IntegrationsModule } from '../integrations/integrations.module';
       WalletAccount,
       WalletTransaction
     ]),
-    NotificationsModule,
+    forwardRef(() => NotificationsModule),
     IntegrationsModule,
   ],
   controllers: [WalletController],

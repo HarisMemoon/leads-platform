@@ -81,6 +81,10 @@ export class DistributionRulesService {
     if (dto.rotation_position !== undefined) rule.rotation_position = dto.rotation_position;
     if (dto.market_filters !== undefined) rule.market_filters = dto.market_filters;
     if (dto.is_active !== undefined) rule.is_active = dto.is_active;
+    if (dto.exclusivity_preference !== undefined) rule.exclusivity_preference = dto.exclusivity_preference;
+    if (dto.max_lead_price_cents !== undefined) {
+      rule.max_lead_price_cents = dto.max_lead_price_cents === null ? null : String(dto.max_lead_price_cents);
+    }
 
     return this.ruleRepo.save(rule);
   }
@@ -141,6 +145,10 @@ export class DistributionRulesService {
       rule.market_filters = dto.market_filters;
     }
     if (dto.is_active !== undefined) rule.is_active = dto.is_active;
+    if (dto.exclusivity_preference !== undefined) rule.exclusivity_preference = dto.exclusivity_preference;
+    if (dto.max_lead_price_cents !== undefined) {
+      rule.max_lead_price_cents = dto.max_lead_price_cents === null ? null : String(dto.max_lead_price_cents);
+    }
 
     return this.ruleRepo.save(rule);
   }

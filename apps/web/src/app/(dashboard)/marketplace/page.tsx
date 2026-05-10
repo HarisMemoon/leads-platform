@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   buyLead,
   getLeadDetail,
+  getLeadQuote,
   listMarketplaceLeads,
   reserveLead,
   type MarketplaceLeadRow,
@@ -12,17 +13,32 @@ import {
 import { getWalletMe, centsToNumber } from "@/lib/wallet-api";
 import { queryKeys } from "@/lib/query-keys";
 import { ApiError } from "@/lib/api";
-import {
-  LeadDetailModal,
-  QualityBar,
-  exclusivityColor,
-  exclusivityLabel,
-} from "@/components/LeadDetailModal";
+import { LeadDetailModal, QualityBar } from "@/components/LeadDetailModal";
 
 const PAGE_SIZE = 24;
 
 function fmtDollars(cents: string | number) {
   return `$${(Number(cents) / 100).toFixed(0)}`;
+}
+
+function toSafeCents(value: string | number | null | undefined): number {
+  if (value == null) return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n);
+}
+
+/**
+ * UX rule: show shared pricing as a fraction of exclusive price (1 / cap).
+ * This keeps what users see aligned with the shared-cap model.
+ */
+function computeSharedDisplayCents(
+  exclusivePriceCents: string | number,
+  sharedCap: number | null | undefined,
+) {
+  const exclusive = toSafeCents(exclusivePriceCents);
+  const cap = Math.max(1, Number(sharedCap ?? 3));
+  return Math.max(0, Math.floor(exclusive / cap));
 }
 
 function addressFromLead(lead: MarketplaceLeadRow) {
@@ -37,6 +53,13 @@ function metaValue(lead: MarketplaceLeadRow, keys: string[], fallback = "—") {
     if (value != null && String(value).trim() !== "") return String(value);
   }
   return fallback;
+}
+
+function timeUntil(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "";
+  const mins = Math.ceil(ms / 60000);
+  return mins < 60 ? `${mins}m` : `${Math.ceil(mins / 60)}h`;
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -60,7 +83,6 @@ export default function MarketplacePage() {
 
   // filter inputs
   const [type, setType] = useState("");
-  const [leadMode, setLeadMode] = useState<"premium" | "exclusive">("premium");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [propertyType, setPropertyType] = useState("");
@@ -69,6 +91,10 @@ export default function MarketplacePage() {
   const [zip, setZip] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [exclusivityFilter, setExclusivityFilter] = useState<"" | "exclusive_only" | "non_exclusive_only">("");
+  const [minPriceStr, setMinPriceStr] = useState("");
+  const [maxPriceStr, setMaxPriceStr] = useState("");
+  const [maxAgeDaysStr, setMaxAgeDaysStr] = useState("");
   const [page, setPage] = useState(1);
 
   // modal state
@@ -77,7 +103,7 @@ export default function MarketplacePage() {
   const [reserveUntil, setReserveUntil] = useState<string | null>(null);
   const [reserveTick, setReserveTick] = useState(0);
 
-  // sold-out leads to hide from list after 409
+  // sold-out leads to hide from list after conflict errors
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
 
   // ── 400ms debounce for query params ──────────────────────────────────────────
@@ -85,7 +111,7 @@ export default function MarketplacePage() {
     page,
     limit: PAGE_SIZE,
     type: type.trim() || undefined,
-    exclusivity: leadMode === "exclusive" ? "exclusive" : "shared",
+    exclusivity_filter: exclusivityFilter || undefined,
     city: city.trim() || undefined,
     state: state.trim() || undefined,
     property_type: propertyType.trim() || undefined,
@@ -94,7 +120,10 @@ export default function MarketplacePage() {
     zip: zip.trim() || undefined,
     date_from: dateFrom.trim() || undefined,
     date_to: dateTo.trim() || undefined,
-  }), [page, type, leadMode, city, state, propertyType, timeline, condition, zip, dateFrom, dateTo]);
+    minPrice: minPriceStr.trim() ? Math.round(parseFloat(minPriceStr) * 100) : undefined,
+    maxPrice: maxPriceStr.trim() ? Math.round(parseFloat(maxPriceStr) * 100) : undefined,
+    maxAgeDays: maxAgeDaysStr.trim() ? parseInt(maxAgeDaysStr, 10) : undefined,
+  }), [page, type, exclusivityFilter, city, state, propertyType, timeline, condition, zip, dateFrom, dateTo, minPriceStr, maxPriceStr, maxAgeDaysStr]);
 
   const [debouncedParams, setDebouncedParams] = useState(rawParams);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,16 +159,8 @@ export default function MarketplacePage() {
   const typesFromData = useMemo(() => Array.from(new Set(items.map((l) => l.type))).sort(), [items]);
 
   const hasActiveFilters =
-    type ||
-    leadMode !== "premium" ||
-    city ||
-    state ||
-    propertyType ||
-    timeline ||
-    condition ||
-    zip ||
-    dateFrom.trim() ||
-    dateTo.trim();
+    type || exclusivityFilter || city || state || propertyType || timeline ||
+    condition || zip || dateFrom.trim() || dateTo.trim() || minPriceStr || maxPriceStr || maxAgeDaysStr;
 
   // ── reserve timer ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -160,7 +181,8 @@ export default function MarketplacePage() {
   });
 
   const buyMutation = useMutation({
-    mutationFn: (id: string) => buyLead(id),
+    mutationFn: ({ id, choice }: { id: string; choice: "exclusive" | "non_exclusive" }) =>
+      buyLead(id, choice),
     onSuccess: async () => {
       setSelectedId(null);
       setSelectedListItem(null);
@@ -170,13 +192,15 @@ export default function MarketplacePage() {
       await queryClient.invalidateQueries({ queryKey: ["leads", "my"] });
       await queryClient.invalidateQueries({ queryKey: ["leads", "marketplace"] });
     },
-    onError: (err: unknown, leadId: string) => {
+    onError: (err: unknown, vars) => {
       if (err instanceof ApiError) {
-        if (err.status === 400) {
-          showToast("Insufficient wallet balance — top up your wallet", "error");
+        if (err.status === 403) {
+          showToast("This lead is in Pro early access — upgrade to Pro to buy now", "error");
+        } else if (err.status === 400) {
+          showToast(err.message.includes("wallet") ? "Insufficient wallet balance — top up your wallet" : err.message, "error");
         } else if (err.status === 409) {
           showToast("This lead was just purchased by someone else", "error");
-          setHiddenIds((s) => new Set([...s, leadId]));
+          setHiddenIds((s) => new Set([...s, vars.id]));
           setSelectedId(null);
           setSelectedListItem(null);
         } else {
@@ -204,17 +228,9 @@ export default function MarketplacePage() {
   }, []);
 
   function clearFilters() {
-    setType("");
-    setLeadMode("premium");
-    setCity("");
-    setState("");
-    setPropertyType("");
-    setTimeline("");
-    setCondition("");
-    setZip("");
-    setDateFrom("");
-    setDateTo("");
-    setPage(1);
+    setType(""); setExclusivityFilter(""); setCity(""); setState(""); setPropertyType("");
+    setTimeline(""); setCondition(""); setZip(""); setDateFrom(""); setDateTo("");
+    setMinPriceStr(""); setMaxPriceStr(""); setMaxAgeDaysStr(""); setPage(1);
   }
 
   return (
@@ -225,136 +241,36 @@ export default function MarketplacePage() {
 
         .mp-root { min-height: 100vh; background: #080a0f; color: white; font-family: 'DM Sans', sans-serif; display: flex; flex-direction: column; }
         .page-body { flex: 1; }
-
         .leads-main { padding: 28px; max-width: 1280px; width: 100%; margin: 0 auto; }
+
         .leads-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 16px; }
         .leads-title { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; }
-        .leads-count { font-size: 13px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+        .leads-sub { font-size: 13px; color: rgba(255,255,255,0.4); margin-top: 3px; }
 
         .filters-shell {
-          margin-bottom: 22px;
-          padding: 18px;
-          border-radius: 18px;
+          margin-bottom: 22px; padding: 18px; border-radius: 18px;
           border: 1px solid rgba(255,255,255,0.08);
-          background:
-            linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)),
-            rgba(8,10,15,0.9);
+          background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)), rgba(8,10,15,0.9);
           box-shadow: 0 14px 40px rgba(0,0,0,0.22);
         }
-        .marketplace-layout {
-          display: grid;
-          grid-template-columns: 220px 1fr;
-          gap: 18px;
-          align-items: start;
-        }
-        .category-sidebar {
-          position: sticky;
-          top: 92px;
-          border-radius: 18px;
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.028);
-          padding: 16px;
-        }
-        .category-btn {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 10px;
-          padding: 12px 13px;
-          border-radius: 12px;
-          border: 1px solid rgba(255,255,255,0.08);
-          background: rgba(255,255,255,0.025);
-          color: rgba(255,255,255,0.62);
-          cursor: pointer;
-          font-family: 'DM Sans', sans-serif;
-          font-weight: 700;
-          margin-top: 10px;
-          text-align: left;
-        }
-        .category-btn.selected {
-          background: linear-gradient(135deg, rgba(99,102,241,0.24), rgba(139,92,246,0.14));
-          border-color: rgba(99,102,241,0.36);
-          color: #fff;
-        }
-        .filters-topline {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          flex-wrap: wrap;
-          margin-bottom: 16px;
-        }
-        .filters-copy {
-          font-size: 13px;
-          color: rgba(255,255,255,0.45);
-          line-height: 1.55;
-        }
-        .filter-row {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 12px;
-          align-items: end;
-        }
-        .filter-group {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          min-width: 0;
-        }
-        .filter-group.span-2,
-        .filter-group.span-3,
-        .filter-group.span-4 { grid-column: span 1; }
+        .filter-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+        .filter-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .filter-group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
         .filter-label { font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.8px; }
-        .filter-label { font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
-        .filter-opt { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: rgba(255,255,255,0.5); cursor: pointer; border: 1px solid transparent; user-select: none; }
-        .filter-opt:hover { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.8); }
-        .filter-opt.selected { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.2); color: #a5b4fc; }
         .filter-input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #fff; font-size: 13px; outline: none; }
         .filter-input:focus { border-color: rgba(99,102,241,0.4); }
-        input[type=range] { width: 100%; -webkit-appearance: none; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; outline: none; }
-        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #6366f1; cursor: pointer; }
+        .filter-select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #fff; font-size: 13px; outline: none; appearance: none; }
+        .filter-select:focus { border-color: rgba(99,102,241,0.4); }
+        .filter-select option { background: #0d0f17; color: #fff; }
 
-        .pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
-        .filter-pill {
-          padding: 8px 14px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 600;
-          cursor: pointer;
-          border: 1px solid rgba(255,255,255,0.1);
-          color: rgba(255,255,255,0.55);
-          background: rgba(255,255,255,0.02);
-          transition: all 0.15s;
-        }
-        .filter-pill:hover { border-color: rgba(99,102,241,0.35); color: rgba(255,255,255,0.82); }
-        .filter-pill.selected {
-          background: rgba(99,102,241,0.16);
-          border-color: rgba(99,102,241,0.3);
-          color: #c7d2fe;
-        }
-        .filter-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
-        .clear-inline-btn {
-          padding: 10px 14px;
-          border-radius: 10px;
-          border: 1px solid rgba(255,255,255,0.12);
-          background: transparent;
-          color: rgba(255,255,255,0.6);
-          font-size: 13px;
-          cursor: pointer;
-          font-family: 'DM Sans', sans-serif;
-        }
+        .filter-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+        .clear-inline-btn { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: transparent; color: rgba(255,255,255,0.6); font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; }
         .clear-inline-btn:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.04); }
-        .search-bar { width: 280px; max-width: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 16px; font-size: 13px; color: #fff; outline: none; }
-        .search-bar:focus { border-color: rgba(99,102,241,0.4); }
 
         /* grid */
         .lead-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
         .lead-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; padding: 20px; cursor: pointer; transition: border-color 0.2s, transform 0.15s; position: relative; }
         .lead-card:hover { border-color: rgba(99,102,241,0.3); transform: translateY(-2px); }
-
-        .excl-badge { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 100px; border: 1px solid; white-space: nowrap; }
-        .tier-pill { font-size: 10px; padding: 3px 8px; background: rgba(255,255,255,0.06); border-radius: 100px; color: rgba(255,255,255,0.45); text-transform: capitalize; white-space: nowrap; }
 
         .lead-title { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; margin: 12px 0 3px; line-height: 1.3; color: rgba(255,255,255,0.92); }
         .lead-address { font-size: 12px; color: rgba(255,255,255,0.35); margin-bottom: 10px; }
@@ -364,42 +280,30 @@ export default function MarketplacePage() {
         .private-label { color: rgba(255,255,255,0.28); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
         .meta-tag { font-size: 11px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 3px 8px; color: rgba(255,255,255,0.45); margin-right: 5px; margin-bottom: 5px; display: inline-block; }
 
-        .card-bottom { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
-        .lead-price { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; }
-        .was-price { font-size: 11px; color: rgba(255,255,255,0.3); text-decoration: line-through; }
+        /* dual price row */
+        .price-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+        .price-option { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); text-align: center; cursor: pointer; transition: border-color 0.15s; }
+        .price-option:hover { border-color: rgba(99,102,241,0.3); }
+        .price-option-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: rgba(255,255,255,0.35); margin-bottom: 4px; }
+        .price-option-amount { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 800; }
+        .price-option-sub { font-size: 10px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+        .price-option.exclusive { border-color: rgba(245,158,11,0.25); }
+        .price-option.exclusive .price-option-amount { color: #fbbf24; }
+        .price-option.shared { border-color: rgba(99,102,241,0.2); }
+        .price-option.shared .price-option-amount { color: #a5b4fc; }
+        .price-option-btn { margin-top: 6px; padding: 5px 10px; border-radius: 7px; border: none; font-size: 11px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: opacity 0.15s; }
+        .price-option-btn.exclusive { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+        .price-option-btn.exclusive:hover { background: rgba(245,158,11,0.25); }
+        .price-option-btn.shared { background: rgba(99,102,241,0.15); color: #c7d2fe; border: 1px solid rgba(99,102,241,0.3); }
+        .price-option-btn.shared:hover { background: rgba(99,102,241,0.25); }
+        .price-option-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-        .buy-btn-card { padding: 8px 16px; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; border-radius: 9px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'Syne', sans-serif; transition: opacity 0.15s; }
-        .buy-btn-card:hover { opacity: 0.88; }
-        .buy-btn-card:disabled { opacity: 0.45; cursor: not-allowed; }
+        /* early access badge */
+        .early-access-badge { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); font-size: 12px; color: #fbbf24; margin-top: 12px; }
 
         /* empty state */
         .empty-state { grid-column: 1 / -1; text-align: center; padding: 80px 20px; color: rgba(255,255,255,0.3); }
         .clear-filters-btn { margin-top: 16px; padding: 10px 22px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; color: #a5b4fc; font-size: 13px; cursor: pointer; font-family: 'DM Sans', sans-serif; }
-
-        /* modal */
-        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(8px); }
-        .modal { background: #0d0f17; border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 32px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
-        .modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; gap: 12px; }
-        .modal-title { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; line-height: 1.3; }
-        .close-btn { background: rgba(255,255,255,0.07); border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; color: rgba(255,255,255,0.5); font-size: 18px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-        .close-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
-
-        .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
-        .detail-item { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 12px 14px; }
-        .detail-item.full { grid-column: 1 / -1; }
-        .detail-label { font-size: 10px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 5px; }
-        .detail-value { font-size: 13px; color: rgba(255,255,255,0.85); }
-
-        .price-section { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; padding: 18px; background: rgba(99,102,241,0.08); border-radius: 14px; border: 1px solid rgba(99,102,241,0.2); }
-        .modal-price { font-family: 'Syne', sans-serif; font-size: 32px; font-weight: 800; }
-
-        .section-header { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.8px; margin: 18px 0 10px; }
-
-        .modal-buy-btn { width: 100%; background: linear-gradient(135deg, #6366f1, #8b5cf6); border: none; border-radius: 14px; padding: 16px; font-size: 16px; font-weight: 700; color: #fff; cursor: pointer; font-family: 'Syne', sans-serif; margin-top: 14px; transition: opacity 0.15s; }
-        .modal-buy-btn:hover { opacity: 0.9; }
-        .modal-buy-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-        .hold-btn { width: 100%; margin-top: 8px; padding: 12px; border-radius: 12px; border: 1px solid rgba(99,102,241,0.35); background: rgba(99,102,241,0.08); color: #c7d2fe; font-weight: 600; cursor: pointer; font-size: 14px; font-family: 'DM Sans', sans-serif; }
-        .timer { text-align: center; font-size: 13px; color: #fbbf24; margin: 10px 0; }
 
         /* pagination */
         .pager { display: flex; gap: 12px; align-items: center; margin-top: 24px; justify-content: center; }
@@ -413,27 +317,20 @@ export default function MarketplacePage() {
         .toast.success { background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); color: #6ee7b7; }
         .toast.error   { background: rgba(239,68,68,0.15);  border: 1px solid rgba(239,68,68,0.35);  color: #fca5a5; }
         @keyframes slideIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-
         .err { color: #f87171; font-size: 13px; margin: 8px 0; }
         .skeleton { background: rgba(255,255,255,0.06); border-radius: 8px; animation: pulse 1.4s ease infinite; }
         @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
+        .was-price { font-size: 11px; color: rgba(255,255,255,0.3); text-decoration: line-through; }
+
         @media (max-width: 960px) {
-          .marketplace-layout { grid-template-columns: 1fr; }
-          .category-sidebar { position: static; }
           .filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          .filter-group.span-2,
-          .filter-group.span-3,
-          .filter-group.span-4 { grid-column: span 1; }
+          .filter-row.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         @media (max-width: 720px) {
           .leads-main { padding: 20px; }
-          .filter-row { grid-template-columns: 1fr; }
-          .filter-group.span-2,
-          .filter-group.span-3,
-          .filter-group.span-4 { grid-column: span 1; }
+          .filter-row, .filter-row.three { grid-template-columns: 1fr; }
           .filters-shell { padding: 16px; }
-          .search-bar { width: 100%; }
         }
       `}</style>
 
@@ -443,176 +340,108 @@ export default function MarketplacePage() {
             <div className="leads-header">
               <div>
                 <div className="leads-title">Lead Marketplace</div>
-                <div className="leads-count">
-                  {isLoading ? "Loading…" : `${total} leads match filters`}
+                <div className="leads-sub">
+                  {isLoading ? "Loading…" : `${total} leads available`}
                   {wallet ? ` · Wallet ${fmtDollars(walletBalance)}` : ""}
                 </div>
               </div>
             </div>
 
-            <div className="marketplace-layout">
-              <aside className="category-sidebar" aria-label="Marketplace categories">
-                <div className="filter-label">Categories</div>
-                {[
-                  { id: "premium" as const, label: "Premium Leads" },
-                  { id: "exclusive" as const, label: "Exclusive Leads" },
-                ].map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={`category-btn ${leadMode === option.id ? "selected" : ""}`}
-                    onClick={() => {
-                      setLeadMode(option.id);
-                      setPage(1);
-                    }}
-                  >
-                    <span>{option.label}</span>
-                    <span>{option.id === "exclusive" ? "1:1" : "Premium"}</span>
-                  </button>
-                ))}
-              </aside>
-
-              <section className="filters-shell" aria-label="Marketplace filters">
-                <div className="filters-topline">
-                  <div>
-                    <div className="filter-label" style={{ marginBottom: 6 }}>Filters</div>
-                    <div className="filters-copy">
-                      Filter by the exact lead attributes buyers use to shortlist opportunities.
-                    </div>
-                  </div>
-                </div>
-
-                <div className="filter-row">
+            {/* ── Filters ── */}
+            <section className="filters-shell" aria-label="Marketplace filters">
+              <div className="filter-row">
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="date-from">Date from</label>
-                  <input
-                    id="date-from"
-                    type="date"
-                    className="filter-input"
-                    value={dateFrom}
-                    onChange={(e) => {
-                      setDateFrom(e.target.value);
-                      setPage(1);
-                    }}
-                    aria-label="Listed from"
-                  />
+                  <label className="filter-label" htmlFor="excl-filter">Exclusivity</label>
+                  <select
+                    id="excl-filter"
+                    className="filter-select"
+                    value={exclusivityFilter}
+                    onChange={(e) => { setExclusivityFilter(e.target.value as typeof exclusivityFilter); setPage(1); }}
+                  >
+                    <option value="">Any</option>
+                    <option value="exclusive_only">Exclusive only</option>
+                    <option value="non_exclusive_only">Shared only</option>
+                  </select>
                 </div>
 
                 <div className="filter-group">
                   <label className="filter-label" htmlFor="type-filter">Lead type</label>
-                  <input
-                    id="type-filter"
-                    className="filter-input"
-                    placeholder="Property type or lead type…"
-                    value={type}
-                    onChange={(e) => {
-                      setType(e.target.value);
-                      setPage(1);
-                    }}
-                    list="types-list"
-                  />
+                  <input id="type-filter" className="filter-input" placeholder="Type…" value={type}
+                    onChange={(e) => { setType(e.target.value); setPage(1); }}
+                    list="types-list" />
                   <datalist id="types-list">{typesFromData.map((t) => <option key={t} value={t} />)}</datalist>
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="city-filter">City</label>
-                  <input
-                    id="city-filter"
-                    className="filter-input"
-                    placeholder="Phoenix"
-                    value={city}
-                    onChange={(e) => {
-                      setCity(e.target.value);
-                      setPage(1);
-                    }}
-                  />
-                </div>
-
-                <div className="filter-group">
                   <label className="filter-label" htmlFor="state-filter">State</label>
-                  <input
-                    id="state-filter"
-                    className="filter-input"
-                    placeholder="AZ"
-                    value={state}
-                    onChange={(e) => {
-                      setState(e.target.value);
-                      setPage(1);
-                    }}
-                  />
+                  <input id="state-filter" className="filter-input" placeholder="AZ" value={state}
+                    onChange={(e) => { setState(e.target.value); setPage(1); }} />
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="property-filter">Property type</label>
-                  <input
-                    id="property-filter"
-                    className="filter-input"
-                    placeholder="Single family"
-                    value={propertyType}
-                    onChange={(e) => {
-                      setPropertyType(e.target.value);
-                      setPage(1);
-                    }}
-                  />
+                  <label className="filter-label" htmlFor="city-filter">City</label>
+                  <input id="city-filter" className="filter-input" placeholder="Phoenix" value={city}
+                    onChange={(e) => { setCity(e.target.value); setPage(1); }} />
+                </div>
+              </div>
+
+              <div className="filter-row">
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="minprice-filter">Min price ($)</label>
+                  <input id="minprice-filter" className="filter-input" type="number" min="0" placeholder="0"
+                    value={minPriceStr} onChange={(e) => { setMinPriceStr(e.target.value); setPage(1); }} />
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="timeline-filter">Timeline</label>
-                  <input
-                    id="timeline-filter"
-                    className="filter-input"
-                    placeholder="0-30 days"
-                    value={timeline}
-                    onChange={(e) => {
-                      setTimeline(e.target.value);
-                      setPage(1);
-                    }}
-                  />
+                  <label className="filter-label" htmlFor="maxprice-filter">Max price ($)</label>
+                  <input id="maxprice-filter" className="filter-input" type="number" min="0" placeholder="No limit"
+                    value={maxPriceStr} onChange={(e) => { setMaxPriceStr(e.target.value); setPage(1); }} />
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="condition-filter">Condition</label>
-                  <input
-                    id="condition-filter"
-                    className="filter-input"
-                    placeholder="Needs repairs"
-                    value={condition}
-                    onChange={(e) => {
-                      setCondition(e.target.value);
-                      setPage(1);
-                    }}
-                  />
+                  <label className="filter-label" htmlFor="maxage-filter">Max age (days)</label>
+                  <input id="maxage-filter" className="filter-input" type="number" min="0" placeholder="No limit"
+                    value={maxAgeDaysStr} onChange={(e) => { setMaxAgeDaysStr(e.target.value); setPage(1); }} />
                 </div>
 
                 <div className="filter-group">
                   <label className="filter-label" htmlFor="zip-filter">ZIP</label>
-                  <input
-                    id="zip-filter"
-                    className="filter-input"
-                    placeholder="85001"
-                    value={zip}
-                    onChange={(e) => {
-                      setZip(e.target.value);
-                      setPage(1);
-                    }}
-                  />
+                  <input id="zip-filter" className="filter-input" placeholder="85001" value={zip}
+                    onChange={(e) => { setZip(e.target.value); setPage(1); }} />
+                </div>
+              </div>
+
+              <div className="filter-row three">
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="property-filter">Property type</label>
+                  <input id="property-filter" className="filter-input" placeholder="Single family" value={propertyType}
+                    onChange={(e) => { setPropertyType(e.target.value); setPage(1); }} />
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="timeline-filter">Timeline</label>
+                  <input id="timeline-filter" className="filter-input" placeholder="0-30 days" value={timeline}
+                    onChange={(e) => { setTimeline(e.target.value); setPage(1); }} />
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="condition-filter">Condition</label>
+                  <input id="condition-filter" className="filter-input" placeholder="Needs repairs" value={condition}
+                    onChange={(e) => { setCondition(e.target.value); setPage(1); }} />
                 </div>
               </div>
 
               {hasActiveFilters && (
                 <div className="filter-actions">
-                  <button type="button" className="clear-inline-btn" onClick={clearFilters}>
-                    Clear all filters
-                  </button>
+                  <button type="button" className="clear-inline-btn" onClick={clearFilters}>Clear all filters</button>
                 </div>
               )}
-              </section>
-            </div>
+            </section>
 
             {isError && (
               <div className="err">
                 {(error as Error)?.message ?? "Failed to load marketplace"}
-                <button type="button" className="buy-btn-card" style={{ marginLeft: 12 }} onClick={() => refetch()}>Retry</button>
+                <button type="button" style={{ marginLeft: 12, padding: "6px 12px", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, color: "#fff", cursor: "pointer" }} onClick={() => refetch()}>Retry</button>
               </div>
             )}
 
@@ -622,31 +451,33 @@ export default function MarketplacePage() {
                   <p style={{ fontSize: 16, marginBottom: 8 }}>No leads match your filters.</p>
                   <p style={{ fontSize: 13 }}>Try adjusting the filters or broadening your search.</p>
                   {hasActiveFilters && (
-                    <button type="button" className="clear-filters-btn" onClick={clearFilters}>
-                      Clear filters
-                    </button>
+                    <button type="button" className="clear-filters-btn" onClick={clearFilters}>Clear filters</button>
                   )}
                 </div>
               )}
 
               {items.map((lead) => {
-                const ec = exclusivityColor(lead.exclusivity);
-                const pc = Number(lead.current_price);
-                const ac = lead.list_price_anchor_cents ? Number(lead.list_price_anchor_cents) : null;
-                const isBuying = buyMutation.isPending && buyMutation.variables === lead.id;
+                const exclusivePrice = lead.exclusive_price_cents ?? lead.current_price;
+                const sharedTaken = lead.non_exclusive_buyers_count ?? 0;
+                const sharedCap = lead.max_non_exclusive_buyers ?? 3;
+                const sharedPrice = computeSharedDisplayCents(exclusivePrice, sharedCap);
+                const sharedAvailable = sharedTaken < sharedCap;
+                const exclusiveAvailable = sharedTaken === 0;
+
+                const isInEarlyAccess =
+                  lead.early_access_until != null &&
+                  new Date(lead.early_access_until) > new Date();
+                const timeLeft = lead.early_access_until ? timeUntil(lead.early_access_until) : "";
+
+                const isBuying = buyMutation.isPending;
+
                 return (
                   <div key={lead.id} className="lead-card" onClick={() => openModal(lead)}>
-                    {/* Top row: exclusivity + tier */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      <span className="excl-badge" style={{ background: ec.bg, color: ec.color, borderColor: ec.border }}>
-                        {exclusivityLabel(lead.exclusivity)}
-                      </span>
-                      {lead.marketplace_tier && <span className="tier-pill">{lead.marketplace_tier}</span>}
-                    </div>
-
-                    {/* Title + key blurred/private fields */}
+                    {/* Title + location */}
                     <div className="lead-title">{lead.title}</div>
-                    <div className="lead-address">{lead.market}</div>
+                    <div className="lead-address">{addressFromLead(lead)}</div>
+
+                    {/* Private fields (blurred) */}
                     <div className="private-fields" aria-label="Private lead fields preview">
                       <div className="private-row">
                         <span className="private-label">Name</span>
@@ -660,43 +491,63 @@ export default function MarketplacePage() {
                         <span className="private-label">Email</span>
                         <span className="blur-field">{metaValue(lead, ["email"], "••••••")}</span>
                       </div>
-                      <div className="private-row">
-                        <span className="private-label">Address</span>
-                        <span className="blur-field">{addressFromLead(lead)}</span>
-                      </div>
                     </div>
 
-                    {/* Meta tags — dynamic fields from metadata */}
+                    {/* Meta tags */}
                     <div>
                       <span className="meta-tag">{lead.type}</span>
-                      <span className="meta-tag">City: {metaValue(lead, ["city"])}</span>
-                      <span className="meta-tag">State: {metaValue(lead, ["state"])}</span>
-                      <span className="meta-tag">Property: {metaValue(lead, ["property_type", "propertyType"])}</span>
-                      <span className="meta-tag">Timeline: {metaValue(lead, ["timeline"])}</span>
-                      <span className="meta-tag">Condition: {metaValue(lead, ["condition"])}</span>
-                      <span className="meta-tag">ZIP: {metaValue(lead, ["zip", "postal"])}</span>
+                      {metaValue(lead, ["state"]) !== "—" && <span className="meta-tag">{metaValue(lead, ["state"])}</span>}
+                      {metaValue(lead, ["property_type", "propertyType"]) !== "—" && <span className="meta-tag">{metaValue(lead, ["property_type", "propertyType"])}</span>}
+                      {metaValue(lead, ["timeline"]) !== "—" && <span className="meta-tag">{metaValue(lead, ["timeline"])}</span>}
                     </div>
 
-                    {/* Quality bar */}
                     <QualityBar score={lead.quality_score} />
 
-                    {/* Price + Buy Now */}
-                    <div className="card-bottom">
-                      <div>
-                        <div className="lead-price">{fmtDollars(pc)}</div>
-                        {ac != null && ac > pc && <div className="was-price">Was {fmtDollars(ac)}</div>}
+                    {/* Early access badge */}
+                    {isInEarlyAccess && (
+                      <div className="early-access-badge">
+                        <span>⚡</span>
+                        <span>Pro early access{timeLeft ? ` — opens in ${timeLeft}` : ""}</span>
                       </div>
-                      <button
-                        type="button"
-                        className="buy-btn-card"
-                        disabled={isBuying}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          buyMutation.mutate(lead.id);
-                        }}
-                      >
-                        {isBuying ? "Buying…" : "Buy Now"}
-                      </button>
+                    )}
+
+                    {/* Dual-price options */}
+                    <div className="price-row" onClick={(e) => e.stopPropagation()}>
+                      <div className={`price-option exclusive${!exclusiveAvailable ? " opacity-40" : ""}`}>
+                        <div className="price-option-label">Exclusive</div>
+                        <div className="price-option-amount">{fmtDollars(exclusivePrice)}</div>
+                        <div className="price-option-sub">1 buyer only</div>
+                        {!isInEarlyAccess ? (
+                          <button
+                            type="button"
+                            className="price-option-btn exclusive"
+                            disabled={isBuying || !exclusiveAvailable}
+                            onClick={() => buyMutation.mutate({ id: lead.id, choice: "exclusive" })}
+                          >
+                            {isBuying ? "…" : exclusiveAvailable ? "Buy" : "Locked"}
+                          </button>
+                        ) : (
+                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Pro only</div>
+                        )}
+                      </div>
+
+                      <div className={`price-option shared${!sharedAvailable ? " opacity-40" : ""}`}>
+                        <div className="price-option-label">Shared</div>
+                        <div className="price-option-amount">{fmtDollars(sharedPrice)}</div>
+                        <div className="price-option-sub">{sharedTaken}/{sharedCap} taken · 1/{sharedCap} price</div>
+                        {!isInEarlyAccess ? (
+                          <button
+                            type="button"
+                            className="price-option-btn shared"
+                            disabled={isBuying || !sharedAvailable}
+                            onClick={() => buyMutation.mutate({ id: lead.id, choice: "non_exclusive" })}
+                          >
+                            {isBuying ? "…" : sharedAvailable ? "Buy" : "Full"}
+                          </button>
+                        ) : (
+                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Pro only</div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -706,7 +557,7 @@ export default function MarketplacePage() {
             {/* Pagination */}
             <div className="pager">
               <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Previous</button>
-              <span className="pager-info">Page {page} {total > 0 ? `of ${Math.ceil(total / PAGE_SIZE)}` : ""}</span>
+              <span className="pager-info">Page {page}{total > 0 ? ` of ${Math.ceil(total / PAGE_SIZE)}` : ""}</span>
               <button type="button" disabled={page * PAGE_SIZE >= total} onClick={() => setPage((p) => p + 1)}>Next →</button>
             </div>
           </main>
@@ -725,9 +576,10 @@ export default function MarketplacePage() {
         buyMutation={buyMutation}
         reserveUntil={reserveUntil}
         secondsLeft={secondsLeft}
+        getLeadQuote={getLeadQuote}
       />
 
-      {/* ── Toast stack ── */}
+      {/* Toast stack */}
       <div className="toast-stack">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.variant}`}>{t.msg}</div>
