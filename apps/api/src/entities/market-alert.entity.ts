@@ -50,7 +50,7 @@ import {
     */
   
     @Column()
-    frequency!: 'instant' | 'every_15min' | 'hourly' | 'daily'
+    frequency!: 'instant' | 'hourly' | 'daily' | 'weekly'
   
     /*
     Do not disturb window

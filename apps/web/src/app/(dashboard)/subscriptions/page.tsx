@@ -9,6 +9,7 @@ import {
   checkoutSubscription,
   createCustomerPortal,
   getMySubscription,
+  getSubscriptionPlans,
   syncSubscriptionCheckout,
   type SubscriptionDto,
 } from "@/lib/subscriptions-api";
@@ -27,6 +28,15 @@ function badgeColor(status: SubscriptionDto["status"]) {
   return { bg: "rgba(148,163,184,0.1)", border: "rgba(148,163,184,0.2)", text: "#cbd5e1" };
 }
 
+const BULLET_ICONS = [Sparkles, Zap, Crown, Check] as const;
+
+const DEFAULT_PRO_BULLETS = [
+  "10% off every lead purchase",
+  "60-minute early access to new leads (buy before free users)",
+  "Priority notifications when new leads drop",
+  "No monthly lead limits or allocations",
+];
+
 function SubscriptionsContent() {
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
@@ -38,14 +48,43 @@ function SubscriptionsContent() {
     queryFn: getMySubscription,
   });
 
+  const { data: plans, isLoading: plansLoading } = useQuery({
+    queryKey: queryKeys.subscriptions.plans,
+    queryFn: getSubscriptionPlans,
+  });
+
+  const proCatalog = plans?.find((p) => p.planType === "pro") ?? plans?.[0];
+  const proName = proCatalog?.name ?? "Pro";
+  const proDisplayPrice =
+    plansLoading && !proCatalog ? "…" : (proCatalog?.displayPrice ?? "—");
+  const proBillingSub = proCatalog
+    ? `${proCatalog.billingPeriodLabel}, billed via Stripe`
+    : "per month, billed via Stripe";
+  const proTagline = proCatalog?.tagline?.trim() ?? "";
+  const proLeadCapHint = proCatalog
+    ? proCatalog.monthlyLeadLimit != null
+      ? (proCatalog.leadLimitSummary?.trim() ||
+        `Up to ${proCatalog.monthlyLeadLimit} leads per billing period`)
+      : "Unlimited leads per billing period"
+    : "";
+  const proBulletLines = proCatalog
+    ? proCatalog.featureBullets.length > 0
+      ? proCatalog.featureBullets
+      : []
+    : DEFAULT_PRO_BULLETS;
+
   const hasActive = sub != null && (ACTIVE_LIKE as readonly string[]).includes(sub.status);
 
   // ── Stripe checkout return handler ────────────────────────────────────────
   useEffect(() => {
     if (synced) return;
+    const checkout = searchParams.get("checkout");
     const status = searchParams.get("status");
     const sessionId = searchParams.get("session_id");
-    if (status === "success" && sessionId) {
+    if (
+      sessionId &&
+      (checkout === "success" || status === "success")
+    ) {
       setSynced(true);
       syncSubscriptionCheckout(sessionId)
         .then(() => {
@@ -53,7 +92,7 @@ function SubscriptionsContent() {
           return queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions.me });
         })
         .catch(() => setNotice({ type: "error", msg: "Sync failed — please refresh." }));
-    } else if (status === "cancel") {
+    } else if (checkout === "cancelled" || status === "cancel") {
       setNotice({ type: "error", msg: "Checkout cancelled." });
     }
   }, [searchParams, synced, queryClient]);
@@ -105,7 +144,8 @@ function SubscriptionsContent() {
         .plan-eyebrow.pro { color: #a5b4fc; }
         .plan-name { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; margin-bottom: 4px; }
         .plan-price { font-family: 'Syne', sans-serif; font-size: 36px; font-weight: 800; margin-bottom: 4px; }
-        .plan-price-sub { font-size: 12px; color: rgba(255,255,255,0.35); margin-bottom: 20px; }
+        .plan-price-sub { font-size: 12px; color: rgba(255,255,255,0.35); margin-bottom: 8px; }
+        .plan-lead-cap { font-size: 12px; color: rgba(165,180,252,0.9); font-weight: 500; margin-bottom: 18px; line-height: 1.4; }
         .plan-bullets { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
         .plan-bullet { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: rgba(255,255,255,0.75); }
         .plan-bullet-icon { flex-shrink: 0; margin-top: 1px; }
@@ -181,21 +221,33 @@ function SubscriptionsContent() {
             <div className="plan-card pro" style={{ position: "relative" }}>
               {hasActive && <span className="current-badge">Active</span>}
               <div className="plan-eyebrow pro">Pro</div>
-              <div className="plan-name" style={{ color: "#a5b4fc" }}>Pro</div>
-              <div className="plan-price">$49.99</div>
-              <div className="plan-price-sub">per month, billed via Stripe</div>
+              <div className="plan-name" style={{ color: "#a5b4fc" }}>{proName}</div>
+              {proTagline ? (
+                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", lineHeight: 1.45, marginBottom: 12 }}>
+                  {proTagline}
+                </div>
+              ) : null}
+              <div className="plan-price">{proDisplayPrice}</div>
+              <div className="plan-price-sub">{proBillingSub}</div>
+              {proLeadCapHint ? <div className="plan-lead-cap">{proLeadCapHint}</div> : null}
               <ul className="plan-bullets">
-                {[
-                  { text: "10% off every lead purchase", icon: <Sparkles size={14} /> },
-                  { text: "60-minute early access to new leads (buy before free users)", icon: <Zap size={14} /> },
-                  { text: "Priority notifications when new leads drop", icon: <Crown size={14} /> },
-                  { text: "No monthly lead limits or allocations", icon: <Check size={14} /> },
-                ].map(({ text, icon }) => (
-                  <li key={text} className="plan-bullet">
-                    <span className="plan-bullet-icon pro" style={{ display: "flex" }}>{icon}</span>
-                    {text}
+                {proBulletLines.length === 0 ? (
+                  <li className="plan-bullet" style={{ color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
+                    No bullet points are enabled in plan settings.
                   </li>
-                ))}
+                ) : (
+                  proBulletLines.map((text, i) => {
+                  const Icon = BULLET_ICONS[i % BULLET_ICONS.length];
+                  return (
+                    <li key={`${i}-${text}`} className="plan-bullet">
+                      <span className="plan-bullet-icon pro" style={{ display: "flex" }}>
+                        <Icon size={14} />
+                      </span>
+                      {text}
+                    </li>
+                  );
+                })
+                )}
               </ul>
               {hasActive ? (
                 <button type="button" className="plan-cta current" disabled>
@@ -205,7 +257,12 @@ function SubscriptionsContent() {
                 <button
                   type="button"
                   className="plan-cta pro"
-                  disabled={checkoutMut.isPending || subLoading}
+                  disabled={
+                    checkoutMut.isPending ||
+                    subLoading ||
+                    plansLoading ||
+                    (!!proCatalog && !proCatalog.stripeConfigured)
+                  }
                   onClick={() => checkoutMut.mutate()}
                 >
                   {checkoutMut.isPending ? (
@@ -245,6 +302,14 @@ function SubscriptionsContent() {
                   <div className="active-detail-item">
                     <div className="active-detail-label">Renews</div>
                     <div className="active-detail-value">{fmtDate(sub.current_period_end)}</div>
+                  </div>
+                )}
+                {sub.monthly_lead_limit != null && (
+                  <div className="active-detail-item">
+                    <div className="active-detail-label">Leads this period</div>
+                    <div className="active-detail-value">
+                      {sub.leads_used_this_period} / {sub.monthly_lead_limit}
+                    </div>
                   </div>
                 )}
               </div>

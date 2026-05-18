@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -7,7 +8,17 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
+
+export class PlanFeatureBulletPatchDto {
+  @IsString()
+  @MaxLength(280)
+  text!: string;
+
+  @IsBoolean()
+  visible!: boolean;
+}
 
 export class PatchPlanDto {
   @IsOptional()
@@ -75,7 +86,9 @@ export class PatchPlanDto {
 
   @IsOptional()
   @IsArray()
-  feature_bullets?: string[];
+  @ValidateNested({ each: true })
+  @Type(() => PlanFeatureBulletPatchDto)
+  feature_bullets?: PlanFeatureBulletPatchDto[];
 
   @IsOptional()
   @IsBoolean()

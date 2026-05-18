@@ -9,6 +9,7 @@ import { LeadPing } from '../entities/lead-ping.entity';
 import { LeadPost } from '../entities/lead-post.entity';
 import { PingMatchAudit } from '../entities/ping-match-audit.entity';
 import { VendorIntegration } from '../entities/vendor-integration.entity';
+import { VendorWebhookHit } from '../entities/vendor-webhook-hit.entity';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { LeadsModule } from '../leads/leads.module';
 import { PingAdminController } from './ping-admin.controller';
@@ -29,6 +30,7 @@ import { VendorPingController } from './vendor-ping.controller';
       LeadPost,
       PingMatchAudit,
       VendorIntegration,
+      VendorWebhookHit,
       WalletAccount,
     ]),
     forwardRef(() => LeadsModule),

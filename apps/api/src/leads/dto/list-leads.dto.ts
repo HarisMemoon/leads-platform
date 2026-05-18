@@ -1,11 +1,19 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
 
 export class ListLeadsDto {
   @IsOptional()
   @IsString()
   market?: string;
+
+  @IsOptional()
+  @IsIn(['inbound', 'outbound'])
+  source?: 'inbound' | 'outbound';
+
+  @IsOptional()
+  @IsString()
+  date_from?: string;
 
   @IsOptional()
   @IsString()

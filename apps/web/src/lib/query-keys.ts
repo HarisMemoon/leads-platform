@@ -51,8 +51,11 @@ export const queryKeys = {
     engine: ["admin", "distribution-engine"] as const,
     refundRequests: ["admin", "refund-requests"] as const,
     resourceItems: ["admin", "resources", "items"] as const,
-    leads: (opts?: { page?: number; limit?: number }) =>
+    leads: (opts?: { page?: number; limit?: number; source?: string; date_from?: string }) =>
       ["admin", "leads", opts ?? {}] as const,
+    metricsIntake: (period: string) => ["admin", "metrics", "intake", period] as const,
+    vendorWebhookHits: (vendorId: string) => ["admin", "vendors", vendorId, "webhook-hits"] as const,
+    vendorPayoutStats: (vendorId: string) => ["admin", "vendors", vendorId, "payout-stats"] as const,
     duplicateGroups: ["admin", "lead-duplicate-groups"] as const,
     ingestionBatches: ["admin", "ingestion", "batches"] as const,
     ingestionStats: ["admin", "ingestion", "stats"] as const,
@@ -64,6 +67,8 @@ export const queryKeys = {
     plans: ["admin", "subscription-plans"] as const,
     vendors: ["admin", "vendors"] as const,
     pings: ["admin", "pings"] as const,
+    outboundBuyers: ["admin", "outbound", "buyers"] as const,
+    outboundLogs: (opts?: { leadId?: string }) => ["admin", "outbound", "logs", opts ?? {}] as const,
   },
   subscriptions: {
     me: ["subscriptions", "me"] as const,

@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { PlanType } from '../../common/enums/plan-type.enum';
+import type { PlanFeatureBullet } from '../../common/subscription-plan-bullet.util';
 
 @Entity('subscription_plans')
 export class SubscriptionPlan {
@@ -57,7 +58,7 @@ export class SubscriptionPlan {
   card_highlights!: string[];
 
   @Column({ type: 'jsonb', default: () => `'[]'::jsonb` })
-  feature_bullets!: string[];
+  feature_bullets!: PlanFeatureBullet[];
 
   @Column({ type: 'boolean', default: true })
   is_active!: boolean;

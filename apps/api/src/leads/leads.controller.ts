@@ -133,6 +133,21 @@ export class LeadsController {
     return this.leadsService.listDuplicatePhoneGroups();
   }
 
+  @Get('lead-duplicate-groups/resolved')
+  listResolvedDuplicateGroups(
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('date_from') dateFrom?: string,
+    @Query('date_to') dateTo?: string,
+  ) {
+    return this.leadsService.listResolvedDuplicateGroups({
+      limit: limit ? Math.min(parseInt(limit, 10), 100) : 10,
+      offset: offset ? parseInt(offset, 10) : 0,
+      dateFrom,
+      dateTo,
+    });
+  }
+
   @Post('leads/:duplicateId/mark-duplicate')
   markLeadDuplicate(
     @Param('duplicateId', new ParseUUIDPipe()) duplicateId: string,

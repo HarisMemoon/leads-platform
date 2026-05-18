@@ -5,6 +5,7 @@ import Stripe from 'stripe';
 import { In, Repository } from 'typeorm';
 import { PlanType } from '../../common/enums/plan-type.enum';
 import { SubscriptionStatus } from '../../common/enums/subscription-status.enum';
+import { visibleFeatureBulletTexts } from '../../common/subscription-plan-bullet.util';
 import { SubscriptionPlanCatalogItemDto } from './dto/subscription-plan-catalog.dto';
 import { Subscription } from '../entities/subscription.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
@@ -81,7 +82,7 @@ export class SubscriptionsService {
         leadType: !!row.filter_scope?.leadType,
       },
       cardHighlights: row.card_highlights ?? [],
-      featureBullets: row.feature_bullets ?? [],
+      featureBullets: visibleFeatureBulletTexts(row.feature_bullets),
       stripeConfigured: !!this.stripePriceIdFor(row.plan_type),
     }));
   }

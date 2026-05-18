@@ -117,6 +117,7 @@ export function listMarketplaceLeads(params: {
   timeline?: string;
   condition?: string;
   zip?: string;
+  source?: 'inbound' | 'outbound';
   exclusivity?: string;
   exclusivity_filter?: 'exclusive_only' | 'non_exclusive_only' | 'both';
   minPrice?: number;
@@ -136,6 +137,7 @@ export function listMarketplaceLeads(params: {
   if (params.timeline) q.set('timeline', params.timeline);
   if (params.condition) q.set('condition', params.condition);
   if (params.zip) q.set('zip', params.zip);
+  if (params.source) q.set('source', params.source);
   if (params.exclusivity) q.set('exclusivity', params.exclusivity);
   if (params.exclusivity_filter) q.set('exclusivity_filter', params.exclusivity_filter);
   if (params.minPrice != null) q.set('minPrice', String(params.minPrice));

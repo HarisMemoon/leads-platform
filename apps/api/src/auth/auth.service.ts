@@ -87,6 +87,7 @@ async login(email: string, password: string){
 const user = await this.userRepo.findOne({ where:{ email }})
 
 if(!user) throw new UnauthorizedException()
+if (!user.is_active) throw new UnauthorizedException('Account is disabled')
 if (!user.password_hash) {
   throw new UnauthorizedException('Use Google sign-in for this account')
 }
@@ -115,11 +116,13 @@ async loginWithGoogleIdToken(idToken: string) {
 
   let user = await this.userRepo.findOne({ where: { google_sub: googleSub } })
   if (user) {
+    if (!user.is_active) throw new UnauthorizedException('Account is disabled')
     return this.signUser(user)
   }
 
   const byEmail = await this.userRepo.findOne({ where: { email } })
   if (byEmail) {
+    if (!byEmail.is_active) throw new UnauthorizedException('Account is disabled')
     if (byEmail.google_sub && byEmail.google_sub !== googleSub) {
       throw new ConflictException('Email is linked to a different Google account')
     }

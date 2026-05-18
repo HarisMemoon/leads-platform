@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { PassportStrategy } from "@nestjs/passport";
 import { ExtractJwt, Strategy } from "passport-jwt";
@@ -34,6 +34,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         distribution_locked: false,
       };
     }
+    if (!user.is_active) throw new UnauthorizedException('Account is disabled');
     return {
       userId: user.id,
       email: user.email,

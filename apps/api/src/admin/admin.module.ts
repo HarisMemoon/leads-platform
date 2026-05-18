@@ -20,6 +20,8 @@ import { AdminGradingService } from './admin-grading.service';
 import { AdminIntegrationsHealthService } from './admin-integrations-health.service';
 import { AdminPlansService } from './admin-plans.service';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { LeadsModule } from '../leads/leads.module';
+import { OutboundModule } from '../outbound/outbound.module';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { IntegrationsModule } from '../integrations/integrations.module';
     ]),
     WalletModule,
     IntegrationsModule,
+    LeadsModule,
+    OutboundModule,
   ],
   controllers: [AdminController],
   providers: [

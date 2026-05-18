@@ -82,19 +82,41 @@ export class AdminIngestionService {
       typeof row.quality_score === 'number'
         ? Math.max(0, Math.min(100, row.quality_score))
         : 50;
+
+    const isExclusive = row.exclusivity_level === 'exclusive';
+    const exclusivityLevel = isExclusive ? ExclusivityLevel.EXCLUSIVE : ExclusivityLevel.SHARED;
+    // For non-exclusive: display exclusive price = per-buyer price × 3
+    const exclusivePriceCents = isExclusive ? row.price_cents : row.price_cents * 3;
+
     const lead = this.leadRepo.create({
       title: row.title?.trim() || `${row.lead_type} · ${row.market}`,
       market: row.market.trim(),
       lead_type: row.lead_type.trim(),
       source: row.source?.trim() || 'admin-ingestion',
       status: LeadStatus.AVAILABLE,
-      exclusivity_level: ExclusivityLevel.SHARED,
+      exclusivity_level: exclusivityLevel,
       quality_score: score,
       price_cents: String(row.price_cents),
       list_price_anchor_cents: String(row.price_cents),
+      exclusive_price_cents: String(exclusivePriceCents),
+      max_non_exclusive_buyers: isExclusive ? 1 : 3,
       metadata: {
-        contact_email: row.contact_email ?? null,
+        // contact
+        seller_name: row.seller_name ?? null,
+        first_name: row.first_name ?? null,
+        last_name: row.last_name ?? null,
+        email: row.contact_email ?? null,
         phone: row.contact_phone ?? null,
+        address: row.address ?? null,
+        // location
+        city: row.city ?? null,
+        state: row.state ?? null,
+        zip: row.zip ?? null,
+        // property
+        property_type: row.property_type ?? null,
+        condition: row.condition ?? null,
+        timeline: row.timeline ?? null,
+        notes: row.notes ?? null,
         ingestion_source: 'admin_csv',
       },
     });

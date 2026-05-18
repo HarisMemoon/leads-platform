@@ -25,8 +25,8 @@ export class UpdateMarketAlertDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['instant', 'every_15min', 'hourly', 'daily'])
-  frequency?: 'instant' | 'every_15min' | 'hourly' | 'daily';
+  @IsIn(['instant', 'hourly', 'daily', 'weekly'])
+  frequency?: 'instant' | 'hourly' | 'daily' | 'weekly';
 
   @IsOptional()
   @IsString()

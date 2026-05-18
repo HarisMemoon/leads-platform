@@ -11,6 +11,6 @@ export class AdminResolveRefundDto {
 
   @ValidateIf((o) => o.status === 'approved')
   @IsString()
-  @IsIn(['wallet_credit', 'premium_credit'])
-  resolution?: 'wallet_credit' | 'premium_credit';
+  @IsIn(['wallet_credit'])
+  resolution?: 'wallet_credit';
 }

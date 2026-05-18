@@ -19,6 +19,7 @@ import { MarketAlertsModule } from './market-alerts/market-alerts.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { ResourcesModule } from './resources/resources.module';
 import { PingModule } from './ping/ping.module';
+import { InboundModule } from './inbound/inbound.module';
 
 @Module({
   imports: [
@@ -119,6 +120,7 @@ import { PingModule } from './ping/ping.module';
     IntegrationsModule,
     ResourcesModule,
     PingModule,
+    InboundModule,
   ],
 
   controllers: [AppController],

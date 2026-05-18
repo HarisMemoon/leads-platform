@@ -9,8 +9,8 @@ import { GoogleSignInButton } from "@/components/GoogleSignInButton";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("t1@gmail.com");
-  const [password, setPassword] = useState("Pakistan7@");
+  const [email, setEmail] = useState("demo@newleey.com");
+  const [password, setPassword] = useState("Demo2024!");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);

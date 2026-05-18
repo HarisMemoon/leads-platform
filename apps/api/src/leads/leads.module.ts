@@ -8,6 +8,7 @@ import { LeadAssignmentEvent } from '../entities/lead-assignment-event.entity';
 import { LeadRefundRequest } from '../entities/lead-refund-request.entity';
 import { Subscription } from '../entities/subscription.entity';
 import { DistributionEngineSettings } from '../entities/distribution-engine-settings.entity';
+import { DistributionRule } from '../entities/distribution-rule.entity';
 import { LeadsService } from './leads.service';
 import { LeadsController } from './leads.controller';
 import { WalletModule } from '../wallet/wallet.module';
@@ -32,6 +33,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
       LeadRefundRequest,
       Subscription,
       DistributionEngineSettings,
+      DistributionRule,
     ]),
     WalletModule,
     NotificationsModule,

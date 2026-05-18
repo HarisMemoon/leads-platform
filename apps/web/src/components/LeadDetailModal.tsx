@@ -548,13 +548,22 @@ export function LeadDetailModal({
                       onClick={() => setExclusivityChoice("exclusive")}
                     >
                       Exclusive — {fmtDollarsModal(exclusivePrice)}
+                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>1 buyer only</div>
                     </button>
                     <button
                       type="button"
                       className={`ldm-seg-btn${exclusivityChoice === "non_exclusive" ? " active-shared" : ""}`}
                       onClick={() => setExclusivityChoice("non_exclusive")}
                     >
-                      Shared — {fmtDollarsModal(sharedPrice)} ({sharedTaken}/{sharedCap} · 1/{sharedCap})
+                      Non Exclusive — {fmtDollarsModal(sharedPrice)}
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center", marginTop: 4 }}>
+                        {Array.from({ length: sharedCap }).map((_, i) => {
+                          let bg = "rgba(255,255,255,0.18)";
+                          if (i < sharedTaken) bg = "#10b981";
+                          else if (i === sharedTaken && sharedTaken === sharedCap - 1) bg = "#f59e0b";
+                          return <span key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: bg, display: "inline-block" }} />;
+                        })}
+                      </div>
                     </button>
                   </div>
                 </>
@@ -588,11 +597,11 @@ export function LeadDetailModal({
                       {matchedAssignment?.exclusivity_choice === "exclusive"
                         ? "Exclusive"
                         : matchedAssignment?.exclusivity_choice === "non_exclusive"
-                          ? "Shared"
+                          ? "Non Exclusive"
                           : myLeadPreview?.exclusivity_choice === "exclusive"
                             ? "Exclusive"
                             : myLeadPreview?.exclusivity_choice === "non_exclusive"
-                              ? "Shared"
+                              ? "Non Exclusive"
                           : (matchedAssignment?.purchase_type ?? myLeadPreview?.purchase_type ?? "")
                               .replace(/_/g, " ")
                               .replace(/\b\w/g, (c) => c.toUpperCase())}
@@ -681,7 +690,7 @@ export function LeadDetailModal({
                     ? "Pro early access only"
                     : buyMutation.isPending
                       ? "Processing…"
-                      : `Confirm ${exclusivityChoice === "exclusive" ? "exclusive " : "shared "}purchase`}
+                      : `Confirm ${exclusivityChoice === "exclusive" ? "exclusive" : "non-exclusive"} purchase`}
                 </button>
               )}
 

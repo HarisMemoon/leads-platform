@@ -12,6 +12,7 @@ import { User } from '../entities/user.entity';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { WalletService } from '../wallet/wallet.service';
 import { Subscription } from '../entities/subscription.entity';
+import { SubscriptionPlan } from '../entities/subscription-plan.entity';
 import { SubscriptionStatus } from '../../common/enums/subscription-status.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
 
@@ -30,6 +31,8 @@ export class StripeService {
     private readonly walletRepo: Repository<WalletAccount>,
     @InjectRepository(Subscription)
     private readonly subscriptionRepo: Repository<Subscription>,
+    @InjectRepository(SubscriptionPlan)
+    private readonly subscriptionPlanRepo: Repository<SubscriptionPlan>,
     private readonly walletService: WalletService,
   ) {
     const secretKey = configService.get<string>('STRIPE_SECRET_KEY');
@@ -581,8 +584,11 @@ export class StripeService {
         throw new BadRequestException('Stripe subscription is missing a price');
       })();
     const planType = this.mapPriceIdToPlan(priceId);
-    const { priorityWeight, monthlyLeadLimit } =
-      this.planDefaults(planType);
+    const { priorityWeight } = this.planDefaults(planType);
+    const planRow = await this.subscriptionPlanRepo.findOne({
+      where: { plan_type: planType },
+    });
+    const monthlyLeadLimit = planRow?.monthly_lead_limit ?? null;
     const { periodStart, periodEnd } =
       this.extractPeriodBoundsFromSubscription(stripeSub);
 
@@ -689,14 +695,11 @@ export class StripeService {
   }
 
   private planDefaults(planType: PlanType) {
-    // Marketplace v2: priority_weight and monthly_lead_limit are no longer used
-    // for runtime eligibility — distribution is rule-based only. Kept for
-    // backwards compatibility with existing subscription rows.
-    const map: Record<PlanType, { priorityWeight: number; monthlyLeadLimit: number | null }> = {
-      [PlanType.BASIC]: { priorityWeight: 1, monthlyLeadLimit: null },
-      [PlanType.PRO]: { priorityWeight: 1, monthlyLeadLimit: null },
-      [PlanType.MARKET_SPECIFIC]: { priorityWeight: 1, monthlyLeadLimit: null },
-      [PlanType.PREMIUM]: { priorityWeight: 1, monthlyLeadLimit: null },
+    const map: Record<PlanType, { priorityWeight: number }> = {
+      [PlanType.BASIC]: { priorityWeight: 1 },
+      [PlanType.PRO]: { priorityWeight: 1 },
+      [PlanType.MARKET_SPECIFIC]: { priorityWeight: 1 },
+      [PlanType.PREMIUM]: { priorityWeight: 1 },
     };
 
     return map[planType];

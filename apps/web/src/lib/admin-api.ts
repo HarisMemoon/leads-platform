@@ -8,6 +8,10 @@ export type AdminExtendedMetrics = {
   activeSubscriptions: number;
   distinctBuyers: number;
   totalAssignments: number;
+  /** Leads currently on the marketplace (AVAILABLE) — primary input to auto-distribution. */
+  availableLeads?: number;
+  /** Distribution rules with participation on and rule active — buyers in the auto-buy pool. */
+  autoDistributionParticipants?: number;
 };
 
 export type AuditLogRow = {
@@ -145,19 +149,56 @@ export type AdminLeadRow = {
   market: string;
   lead_type: string;
   status: string;
+  source: string;
+  canonical_lead_source: string | null;
   price_cents: string;
   exclusive_price_cents: string | null;
   shared_price_cents: string | null;
   max_non_exclusive_buyers: number;
   non_exclusive_buyers_count: number;
   early_access_until: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  buyers: string[];
+};
+
+export type IntakePeriodStats = {
+  leads_in: number;
+  leads_sold: number;
+  revenue_cents: string;
+  period_start: string;
+};
+
+export type AdminVendorWebhookHit = {
+  id: string;
+  vendor_id: string | null;
+  lead_id: string | null;
+  status: 'accepted' | 'rejected';
+  rejection_reason: string | null;
+  ip_address: string | null;
+  payload_snapshot: Record<string, unknown>;
   created_at: string;
 };
 
-export function getAdminLeads(opts?: { page?: number; limit?: number }) {
+export type AdminVendorPayoutStats = {
+  vendor_id: string;
+  vendor_name: string;
+  total_hits: number;
+  accepted: number;
+  rejected: number;
+};
+
+export function getAdminLeads(opts?: {
+  page?: number;
+  limit?: number;
+  source?: 'inbound' | 'outbound';
+  date_from?: string;
+}) {
   const q = new URLSearchParams();
   if (opts?.page != null) q.set('page', String(opts.page));
   if (opts?.limit != null) q.set('limit', String(opts.limit));
+  if (opts?.source) q.set('source', opts.source);
+  if (opts?.date_from) q.set('date_from', opts.date_from);
   const suffix = q.toString() ? `?${q.toString()}` : '';
   return apiGet<{
     items: AdminLeadRow[];
@@ -165,15 +206,40 @@ export function getAdminLeads(opts?: { page?: number; limit?: number }) {
   }>(`/admin/leads${suffix}`);
 }
 
+export function deleteAdminLead(id: string) {
+  return apiDelete<{ ok: boolean; archived: boolean }>(`/admin/leads/${id}`);
+}
+
 export function patchAdminLead(
   id: string,
   body: Partial<{
+    title: string;
+    market: string;
+    lead_type: string;
+    status: string;
+    source: string;
+    metadata: Record<string, unknown>;
     exclusive_price_cents: number;
     shared_price_cents: number;
     max_non_exclusive_buyers: number;
+    price_cents: number;
   }>,
 ) {
   return apiPatch<AdminLeadRow>(`/admin/leads/${id}`, body);
+}
+
+export function getAdminMetricsIntake(period: 'today' | 'week' | 'month' = 'today') {
+  return apiGet<IntakePeriodStats>(`/admin/metrics/intake?period=${period}`);
+}
+
+export function getAdminVendorWebhookHits(vendorId: string, limit = 50) {
+  return apiGet<AdminVendorWebhookHit[]>(
+    `/admin/vendors/${vendorId}/webhook-hits?limit=${limit}`,
+  );
+}
+
+export function getAdminVendorPayoutStats(vendorId: string) {
+  return apiGet<AdminVendorPayoutStats>(`/admin/vendors/${vendorId}/payout-stats`);
 }
 
 export function postAdminLeadDiscount(
@@ -220,14 +286,85 @@ export function getAdminMetricsBreakdown() {
   return apiGet<AdminMetricsBreakdown>('/admin/metrics/breakdown');
 }
 
+export function lookupAdminUserByEmail(email: string) {
+  return apiGet<{ id: string; email: string; full_name: string | null; created_at: string }>(
+    `/admin/users/lookup?email=${encodeURIComponent(email)}`,
+  );
+}
+
+export type AdminUserRow = {
+  id: string;
+  email: string;
+  full_name: string | null;
+  company_name: string | null;
+  phone: string | null;
+  role: string;
+  is_active: boolean;
+  distribution_locked: boolean;
+  email_verified: boolean;
+  onboarding_completed: boolean;
+  created_at: string;
+};
+
+export function getAdminUsers(params?: {
+  limit?: number;
+  offset?: number;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
+  const q = new URLSearchParams();
+  if (params?.limit != null) q.set('limit', String(params.limit));
+  if (params?.offset != null) q.set('offset', String(params.offset));
+  if (params?.dateFrom) q.set('date_from', params.dateFrom);
+  if (params?.dateTo) q.set('date_to', params.dateTo);
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return apiGet<{ users: AdminUserRow[]; total: number }>(`/admin/users${suffix}`);
+}
+
+export function patchAdminUserActive(userId: string, isActive: boolean) {
+  return apiPatch<{ id: string; email: string; is_active: boolean }>(
+    `/admin/users/${userId}/active`,
+    { is_active: isActive },
+  );
+}
+
 export type AdminLeadDuplicateGroup = {
   phone: string;
-  ids: string[];
   count: string;
+  leads: Array<{
+    id: string;
+    title: string;
+    status: string;
+    created_at: string;
+    is_duplicate: boolean;
+  }>;
 };
 
 export function getAdminLeadDuplicateGroups() {
   return apiGet<AdminLeadDuplicateGroup[]>('/admin/lead-duplicate-groups');
+}
+
+export type AdminResolvedDuplicateGroup = {
+  canonical_id: string;
+  canonical_title: string;
+  phone: string;
+  duplicate_count: string;
+  duplicates: Array<{ id: string; title: string; created_at: string }>;
+};
+
+export function getAdminResolvedDuplicateGroups(params?: {
+  limit?: number;
+  offset?: number;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
+  const q = new URLSearchParams();
+  if (params?.limit != null) q.set('limit', String(params.limit));
+  if (params?.offset != null) q.set('offset', String(params.offset));
+  if (params?.dateFrom) q.set('date_from', params.dateFrom);
+  if (params?.dateTo) q.set('date_to', params.dateTo);
+  const suffix = q.toString() ? `?${q.toString()}` : '';
+  return apiGet<AdminResolvedDuplicateGroup[]>(`/admin/lead-duplicate-groups/resolved${suffix}`);
 }
 
 export function postAdminLeadMarkDuplicate(
@@ -272,12 +409,27 @@ export function getAdminIngestionStats() {
 export type IngestionRowInput = {
   market: string;
   lead_type: string;
-  contact_email?: string;
-  contact_phone?: string;
+  price_cents: number;
+  exclusivity_level?: 'exclusive' | 'non_exclusive';
   title?: string;
   source?: string;
   quality_score?: number;
-  price_cents: number;
+  // contact
+  seller_name?: string;
+  first_name?: string;
+  last_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  address?: string;
+  // location
+  city?: string;
+  state?: string;
+  zip?: string;
+  // property
+  property_type?: string;
+  condition?: string;
+  timeline?: string;
+  notes?: string;
 };
 
 export function postAdminIngestionBatch(body: {
@@ -367,6 +519,8 @@ export function getAdminIntegrationsHealth() {
   return apiGet<IntegrationHealthRow[]>('/admin/integrations/health');
 }
 
+export type AdminPlanFeatureBullet = { text: string; visible: boolean };
+
 export type AdminSubscriptionPlan = {
   plan_type: 'basic' | 'pro' | 'market_specific' | 'premium';
   name: string;
@@ -387,7 +541,7 @@ export type AdminSubscriptionPlan = {
     leadType?: boolean;
   };
   card_highlights: string[];
-  feature_bullets: string[];
+  feature_bullets: AdminPlanFeatureBullet[];
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -413,7 +567,7 @@ export function patchAdminSubscriptionPlan(
     included_lead_credits_summary: string | null;
     filter_scope: AdminSubscriptionPlan['filter_scope'];
     card_highlights: string[];
-    feature_bullets: string[];
+    feature_bullets: AdminPlanFeatureBullet[];
     is_active: boolean;
   }>,
 ) {
@@ -512,4 +666,100 @@ export function patchAdminResourceItem(
 
 export function deleteAdminResourceItem(id: string) {
   return apiDelete<{ ok: boolean }>(`/admin/resources/items/${id}`);
+}
+
+// ── Outbound buyer endpoints (ping/post to external buyers) ───────────────
+
+export type OutboundBuyerEndpointDto = {
+  id: string;
+  name: string;
+  ping_url: string;
+  post_url: string | null;
+  auth_header_name: string | null;
+  auth_header_value: string | null;
+  field_map: Record<string, string>;
+  price_floor_cents: string;
+  timeout_ms: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OutboundPingLogRow = {
+  id: string;
+  lead_id: string | null;
+  buyer_endpoint_id: string;
+  status: 'accepted' | 'declined' | 'timeout' | 'error' | 'below_floor' | 'posted';
+  bid_price_cents: string | null;
+  floor_price_cents: string;
+  response_payload: Record<string, unknown> | null;
+  latency_ms: number | null;
+  error_message: string | null;
+  is_test: boolean;
+  created_at: string;
+};
+
+export type TestPingResult = {
+  log_id: string;
+  status: string;
+  bid_price_cents: number | null;
+  latency_ms: number;
+  response: Record<string, unknown> | null;
+  error: string | null;
+};
+
+export function getAdminOutboundBuyers() {
+  return apiGet<OutboundBuyerEndpointDto[]>('/admin/outbound/buyers');
+}
+
+export function postAdminOutboundBuyer(body: {
+  name: string;
+  ping_url: string;
+  post_url?: string | null;
+  auth_header_name?: string | null;
+  auth_header_value?: string | null;
+  field_map?: Record<string, string>;
+  price_floor_cents?: number;
+  timeout_ms?: number;
+  is_active?: boolean;
+}) {
+  return apiPost<OutboundBuyerEndpointDto>('/admin/outbound/buyers', body);
+}
+
+export function patchAdminOutboundBuyer(
+  id: string,
+  body: Partial<{
+    name: string;
+    ping_url: string;
+    post_url: string | null;
+    auth_header_name: string | null;
+    auth_header_value: string | null;
+    field_map: Record<string, string>;
+    price_floor_cents: number;
+    timeout_ms: number;
+    is_active: boolean;
+  }>,
+) {
+  return apiPatch<OutboundBuyerEndpointDto>(`/admin/outbound/buyers/${id}`, body);
+}
+
+export function deleteAdminOutboundBuyer(id: string) {
+  return apiDelete<{ ok: boolean }>(`/admin/outbound/buyers/${id}`);
+}
+
+export function postAdminOutboundBuyerTestPing(id: string) {
+  return apiPost<TestPingResult>(`/admin/outbound/buyers/${id}/test-ping`, {});
+}
+
+export function getAdminOutboundPingLogs(limit = 50, leadId?: string) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (leadId) params.set('lead_id', leadId);
+  return apiGet<OutboundPingLogRow[]>(`/admin/outbound/logs?${params}`);
+}
+
+export function postAdminTriggerOutboundPing(leadId: string) {
+  return apiPost<{ sold: boolean; buyerName?: string; priceCents?: number; attempts: number }>(
+    `/admin/leads/${leadId}/ping-outbound`,
+    {},
+  );
 }

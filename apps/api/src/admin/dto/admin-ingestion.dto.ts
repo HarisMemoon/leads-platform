@@ -1,7 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
-  IsEmail,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -22,7 +22,8 @@ export class IngestionRowDto {
   lead_type!: string;
 
   @IsOptional()
-  @IsEmail()
+  @IsString()
+  @MaxLength(40)
   contact_email?: string;
 
   @IsOptional()
@@ -49,6 +50,68 @@ export class IngestionRowDto {
   @IsInt()
   @Min(0)
   price_cents!: number;
+
+  @IsOptional()
+  @IsIn(['exclusive', 'non_exclusive'])
+  exclusivity_level?: 'exclusive' | 'non_exclusive';
+
+  // Seller contact
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  seller_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  first_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  last_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  address?: string;
+
+  // Location metadata
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  zip?: string;
+
+  // Property metadata
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  property_type?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  condition?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  timeline?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
 }
 
 export class CreateIngestionBatchDto {

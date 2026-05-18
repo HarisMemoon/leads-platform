@@ -10,7 +10,6 @@ import { LeadRefundRequest } from '../entities/lead-refund-request.entity';
 import { LeadAssignment } from '../entities/lead-assignment.entity';
 import { Lead } from '../entities/lead.entity';
 import { RefundRequestStatus } from '../../common/enums/refund-request-status.enum';
-import { PurchaseType } from '../../common/enums/purchase-type.enum';
 import { WalletService } from '../wallet/wallet.service';
 import { Subscription } from '../entities/subscription.entity';
 import { SubscriptionStatus } from '../../common/enums/subscription-status.enum';
@@ -47,14 +46,23 @@ export class RefundRequestsService {
     if (assignment.buyer.id !== buyerId) {
       throw new ForbiddenException('Not your purchase');
     }
+    if (assignment.disposition === 'refunded') {
+      throw new BadRequestException('This lead has already been refunded');
+    }
     const existing = await this.refundRepo
       .createQueryBuilder('r')
       .innerJoin('r.lead_assignment', 'a')
       .where('a.id = :aid', { aid: assignmentId })
-      .andWhere('r.status = :st', { st: RefundRequestStatus.PENDING })
+      .andWhere('r.status IN (:...statuses)', {
+        statuses: [RefundRequestStatus.PENDING, RefundRequestStatus.APPROVED],
+      })
       .getOne();
     if (existing) {
-      throw new BadRequestException('A pending refund already exists for this lead');
+      throw new BadRequestException(
+        existing.status === RefundRequestStatus.APPROVED
+          ? 'This lead has already been refunded'
+          : 'A pending refund already exists for this lead',
+      );
     }
     const row = this.refundRepo.create({
       buyer: { id: buyerId } as any,
@@ -93,7 +101,7 @@ export class RefundRequestsService {
     id: string,
     status: 'approved' | 'rejected',
     adminNotes: string | undefined,
-    resolution: 'wallet_credit' | 'premium_credit' | undefined,
+    resolution: 'wallet_credit' | undefined,
   ) {
     const row = await this.refundRepo.findOne({
       where: { id },
@@ -139,43 +147,25 @@ export class RefundRequestsService {
     const assignment = row.lead_assignment;
     const buyerId = assignment.buyer.id;
     const amount = Number(assignment.amount_charged_cents);
-    if (resolution === 'wallet_credit') {
-      if (
-        assignment.purchase_type !== PurchaseType.MANUAL &&
-        assignment.purchase_type !== PurchaseType.AUTO_BUY
-      ) {
-        throw new BadRequestException(
-          'Wallet credit refunds apply to wallet (exclusive) purchases',
-        );
-      }
-      await this.walletService.topup(
-        buyerId,
-        amount,
-        'Lead purchase refund',
-        'refund_approved',
-        row.id,
-      );
-    } else {
-      if (assignment.purchase_type !== PurchaseType.SUBSCRIPTION_DISTRIBUTION) {
-        throw new BadRequestException(
-          'Premium credit refunds apply to subscription-distributed leads',
-        );
-      }
-      const sub = await this.subscriptionRepo.findOne({
-        where: {
-          user: { id: buyerId },
-          status: In([
-            SubscriptionStatus.ACTIVE,
-            SubscriptionStatus.PAST_DUE,
-            SubscriptionStatus.PAUSED,
-          ]),
-        },
-        order: { updated_at: 'DESC' },
-      });
-      if (!sub) throw new BadRequestException('No active subscription to credit');
-      sub.leads_used_this_period = Math.max(0, sub.leads_used_this_period - 1);
-      await this.subscriptionRepo.save(sub);
+    await this.walletService.topup(
+      buyerId,
+      amount,
+      'Lead purchase refund',
+      'refund_approved',
+      row.id,
+    );
+    await this.adjustCappedSubscriptionLeadUsage(buyerId, -1);
+    // Direct UPDATE so the change is guaranteed to hit the DB regardless of proxy state.
+    await this.assignmentRepo.update(assignment.id, { disposition: 'refunded' });
+    // Restore lead slot: decrement count if non-exclusive, then reopen the lead if it was sold.
+    const lead = assignment.lead;
+    if (lead.non_exclusive_buyers_count > 0) {
+      await this.leadRepo.decrement({ id: lead.id }, 'non_exclusive_buyers_count', 1);
     }
+    if (lead.status === LeadStatus.SOLD) {
+      await this.leadRepo.update({ id: lead.id }, { status: LeadStatus.AVAILABLE });
+    }
+
     row.status = RefundRequestStatus.APPROVED;
     row.resolution = resolution;
     const saved = await this.refundRepo.save(row);
@@ -219,5 +209,23 @@ export class RefundRequestsService {
       }),
     ]);
     return saved;
+  }
+
+  /** When purchases count against subscription monthly cap, refunds should restore it. */
+  private async adjustCappedSubscriptionLeadUsage(buyerId: string, delta: number) {
+    const sub = await this.subscriptionRepo.findOne({
+      where: {
+        user: { id: buyerId },
+        status: In([
+          SubscriptionStatus.ACTIVE,
+          SubscriptionStatus.PAST_DUE,
+          SubscriptionStatus.PAUSED,
+        ]),
+      },
+      order: { updated_at: 'DESC' },
+    });
+    if (!sub || sub.monthly_lead_limit == null) return;
+    sub.leads_used_this_period = Math.max(0, sub.leads_used_this_period + delta);
+    await this.subscriptionRepo.save(sub);
   }
 }

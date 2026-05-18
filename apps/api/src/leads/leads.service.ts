@@ -33,6 +33,7 @@ import { ExclusivityLevel } from '../../common/enums/exclusivity-level.enum';
 import { redactLeadMetadata } from './lead-redaction.util';
 import { IntegrationsService } from '../integrations/integrations.service';
 import { ProEntitlementService } from '../subscriptions/pro-entitlement.service';
+import { DistributionRule } from '../entities/distribution-rule.entity';
 
 export type ExclusivityChoice = 'exclusive' | 'non_exclusive';
 
@@ -51,6 +52,8 @@ export class LeadsService {
     private readonly assignmentEventRepo: Repository<LeadAssignmentEvent>,
     @InjectRepository(Subscription)
     private readonly subscriptionRepo: Repository<Subscription>,
+    @InjectRepository(DistributionRule)
+    private readonly distributionRuleRepo: Repository<DistributionRule>,
     private readonly dataSource: DataSource,
     private readonly walletService: WalletService,
     private readonly distributionService: DistributionService,
@@ -166,6 +169,8 @@ export class LeadsService {
         lead_type: savedLead.lead_type,
         exclusivity_level: savedLead.exclusivity_level,
         price_cents: savedLead.price_cents,
+        state: (savedLead.metadata as any)?.state ?? null,
+        source: savedLead.source ?? null,
       },
       earlyAccessMinutes,
     );
@@ -291,16 +296,69 @@ export class LeadsService {
       qb.andWhere('lead.status = :status', { status: query.status });
     }
 
+    if ((query as any).source) {
+      qb.andWhere('lead.source = :src', { src: (query as any).source });
+    }
+
+    if ((query as any).date_from) {
+      const df = new Date((query as any).date_from as string);
+      qb.andWhere('lead.created_at >= :df', { df });
+    }
+
     const [items, total] = await qb.getManyAndCount();
 
+    const leadIds = items.map((l) => l.id);
+    const assignments =
+      leadIds.length > 0
+        ? await this.leadAssignmentRepo
+            .createQueryBuilder('a')
+            .leftJoin('a.buyer', 'buyer')
+            .select('a.lead_id', 'lead_id')
+            .addSelect('buyer.email', 'buyer_email')
+            .addSelect('a.purchase_type', 'purchase_type')
+            .where('a.lead_id IN (:...ids)', { ids: leadIds })
+            .getRawMany<{ lead_id: string; buyer_email: string; purchase_type: string }>()
+        : [];
+
+    const buyerMap = new Map<string, string[]>();
+    for (const a of assignments) {
+      const list = buyerMap.get(a.lead_id) ?? [];
+      if (a.buyer_email) list.push(a.buyer_email);
+      buyerMap.set(a.lead_id, list);
+    }
+
     return {
-      items,
+      items: items.map((lead) => ({
+        ...lead,
+        buyers: buyerMap.get(lead.id) ?? [],
+      })),
       pagination: {
         page,
         limit,
         total,
       },
     };
+  }
+
+  async getLeadById(id: string): Promise<Lead> {
+    const lead = await this.leadRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException(`Lead ${id} not found`);
+    return lead;
+  }
+
+  async deleteLead(id: string): Promise<{ ok: boolean; archived: boolean }> {
+    const lead = await this.leadRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Lead not found');
+
+    const hasAssignments = await this.leadAssignmentRepo.exists({ where: { lead: { id } } });
+    if (hasAssignments) {
+      lead.status = LeadStatus.ARCHIVED;
+      await this.leadRepo.save(lead);
+      return { ok: true, archived: true };
+    }
+
+    await this.leadRepo.delete({ id });
+    return { ok: true, archived: false };
   }
 
   async listMarketplaceLeads(query: ListMarketplaceLeadsDto) {
@@ -323,9 +381,22 @@ export class LeadsService {
       qb.andWhere('lead.lead_type = :leadType', { leadType: query.type });
     }
 
+    // multi-state: frontend sends comma-separated state codes
+    if (query.state?.trim()) {
+      const stateList = query.state.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+      if (stateList.length === 1) {
+        qb.andWhere(`LOWER(COALESCE(lead.metadata->>'state', '')) LIKE :stateVal`, {
+          stateVal: `%${stateList[0]}%`,
+        });
+      } else if (stateList.length > 1) {
+        const stateConditions = stateList.map((s, i) => `LOWER(COALESCE(lead.metadata->>'state', '')) LIKE :sv${i}`);
+        const stateParams = Object.fromEntries(stateList.map((s, i) => [`sv${i}`, `%${s}%`]));
+        qb.andWhere(`(${stateConditions.join(' OR ')})`, stateParams);
+      }
+    }
+
     const metadataFilters: Array<[string, string | undefined]> = [
       ['city', query.city],
-      ['state', query.state],
       ['property_type', query.property_type],
       ['timeline', query.timeline],
       ['condition', query.condition],
@@ -373,6 +444,10 @@ export class LeadsService {
       qb.andWhere('lead.exclusivity_level != :excl', {
         excl: ExclusivityLevel.EXCLUSIVE,
       });
+    }
+
+    if (query.source) {
+      qb.andWhere('lead.source = :src', { src: query.source });
     }
 
     if (query.date_from) {
@@ -574,11 +649,13 @@ export class LeadsService {
       .createQueryBuilder('tx')
       .select('COALESCE(SUM(tx.amount_cents), 0)', 'sum')
       .where('tx.type = :credit', { credit: WalletTransactionType.CREDIT })
+      .andWhere("tx.reference_type != 'refund_approved'")
       .getRawOne<{ sum: string }>();
 
     const totalRevenueRaw = await this.leadAssignmentRepo
       .createQueryBuilder('assignment')
       .select('COALESCE(SUM(assignment.amount_charged_cents), 0)', 'sum')
+      .where("COALESCE(assignment.disposition, '') != 'refunded'")
       .getRawOne<{ sum: string }>();
 
     const countByStatus = statusRows.reduce<Record<string, number>>((acc, row) => {
@@ -598,16 +675,30 @@ export class LeadsService {
     const activeSubscriptions = await this.subscriptionRepo.count({
       where: { status: SubscriptionStatus.ACTIVE },
     });
-    const buyersRaw = await this.leadAssignmentRepo
-      .createQueryBuilder('a')
-      .select('COUNT(DISTINCT a.buyer_id)', 'c')
-      .getRawOne<{ c: string }>();
-    const assignmentCount = await this.leadAssignmentRepo.count();
+    const availableLeads = await this.leadRepo.count({
+      where: { status: LeadStatus.AVAILABLE },
+    });
+    const autoDistributionParticipants = await this.distributionRuleRepo.count({
+      where: { participation_enabled: true, is_active: true },
+    });
+    const [buyersRaw, activeAssignmentCount] = await Promise.all([
+      this.leadAssignmentRepo
+        .createQueryBuilder('a')
+        .select('COUNT(DISTINCT a.buyer_id)', 'c')
+        .where("COALESCE(a.disposition, '') != 'refunded'")
+        .getRawOne<{ c: string }>(),
+      this.leadAssignmentRepo
+        .createQueryBuilder('a')
+        .where("COALESCE(a.disposition, '') != 'refunded'")
+        .getCount(),
+    ]);
     return {
       ...base,
       activeSubscriptions,
       distinctBuyers: Number(buyersRaw?.c ?? 0),
-      totalAssignments: assignmentCount,
+      totalAssignments: activeAssignmentCount,
+      availableLeads,
+      autoDistributionParticipants,
     };
   }
 
@@ -620,7 +711,10 @@ export class LeadsService {
       const qb = this.leadAssignmentRepo
         .createQueryBuilder('assignment')
         .leftJoin('assignment.lead', 'lead')
-        .where('assignment.buyer_id = :userId', { userId });
+        .where('assignment.buyer_id = :userId', { userId })
+        .andWhere(
+          "COALESCE(assignment.disposition, '') != 'refunded'",
+        );
 
       if (query.purchaseType != null) {
         qb.andWhere('assignment.purchase_type = :purchaseType', {
@@ -869,20 +963,79 @@ export class LeadsService {
   }
 
   async listDuplicatePhoneGroups() {
-    return this.leadRepo.query<
-      Array<{ phone: string; ids: string[]; count: string }>
-    >(
-      `
-      SELECT LOWER(TRIM(metadata->>'phone')) AS phone,
-             array_agg(id::text ORDER BY created_at) AS ids,
-             COUNT(*)::text AS count
-      FROM leads
-      WHERE COALESCE(metadata->>'phone','') <> ''
-      GROUP BY 1
-      HAVING COUNT(*) > 1
-      ORDER BY COUNT(*) DESC
-      LIMIT 50
-    `,
+    return this.leadRepo.manager.query<Array<{
+      phone: string;
+      count: string;
+      leads: Array<{ id: string; title: string; status: string; created_at: string; is_duplicate: boolean }>;
+    }>>(
+      `SELECT LOWER(TRIM(metadata->>'phone')) AS phone,
+              COUNT(*)::text AS count,
+              json_agg(
+                json_build_object(
+                  'id', id,
+                  'title', title,
+                  'status', status,
+                  'created_at', created_at,
+                  'is_duplicate', (duplicate_of_lead_id IS NOT NULL)
+                ) ORDER BY created_at ASC
+              ) AS leads
+       FROM leads
+       WHERE COALESCE(metadata->>'phone', '') <> ''
+         AND status != 'archived'
+       GROUP BY 1
+       HAVING COUNT(*) > 1
+       ORDER BY COUNT(*) DESC
+       LIMIT 50`,
+    );
+  }
+
+  async listResolvedDuplicateGroups(params: {
+    limit: number;
+    offset: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }) {
+    const conditions: string[] = [];
+    const args: unknown[] = [];
+    let idx = 1;
+
+    if (params.dateFrom) {
+      conditions.push(`d.updated_at >= $${idx++}`);
+      args.push(new Date(params.dateFrom));
+    }
+    if (params.dateTo) {
+      conditions.push(`d.updated_at <= $${idx++}`);
+      args.push(new Date(params.dateTo));
+    }
+    const whereClause = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
+    args.push(params.limit);
+    args.push(params.offset);
+
+    return this.leadRepo.manager.query<Array<{
+      canonical_id: string;
+      canonical_title: string;
+      phone: string;
+      duplicate_count: string;
+      duplicates: Array<{ id: string; title: string; created_at: string }>;
+    }>>(
+      `SELECT c.id AS canonical_id,
+              c.title AS canonical_title,
+              LOWER(TRIM(c.metadata->>'phone')) AS phone,
+              COUNT(d.id)::text AS duplicate_count,
+              json_agg(
+                json_build_object(
+                  'id', d.id,
+                  'title', d.title,
+                  'created_at', d.created_at
+                ) ORDER BY d.created_at ASC
+              ) AS duplicates
+       FROM leads d
+       JOIN leads c ON d.duplicate_of_lead_id = c.id
+       WHERE 1=1 ${whereClause}
+       GROUP BY c.id, c.title, c.metadata->>'phone'
+       ORDER BY COUNT(d.id) DESC
+       LIMIT $${idx} OFFSET $${idx + 1}`,
+      args,
     );
   }
 
@@ -893,6 +1046,7 @@ export class LeadsService {
     const canonical = await this.findLeadOrThrow(canonicalLeadId);
     const dup = await this.findLeadOrThrow(duplicateLeadId);
     dup.duplicate_of_lead = canonical;
+    dup.status = LeadStatus.ARCHIVED;
     await this.leadRepo.save(dup);
     return dup;
   }
@@ -962,12 +1116,13 @@ export class LeadsService {
             'This lead already has non-exclusive buyers — exclusive purchase is no longer available.',
           );
         }
-        // Check no existing exclusive assignment
+        // Check no existing exclusive assignment (exclude refunded)
         const existingExclusive = await queryRunner.manager
           .getRepository(LeadAssignment)
           .createQueryBuilder('a')
           .where('a.lead_id = :leadId', { leadId })
           .andWhere("a.exclusivity_choice = 'exclusive'")
+          .andWhere("COALESCE(a.disposition, '') != 'refunded'")
           .getCount();
         if (existingExclusive > 0) {
           throw new BadRequestException('Lead has already been purchased exclusively.');
@@ -979,6 +1134,7 @@ export class LeadsService {
           .createQueryBuilder('a')
           .where('a.lead_id = :leadId', { leadId })
           .andWhere("a.exclusivity_choice = 'exclusive'")
+          .andWhere("COALESCE(a.disposition, '') != 'refunded'")
           .getCount();
         if (existingExclusive > 0) {
           throw new BadRequestException(
@@ -990,12 +1146,13 @@ export class LeadsService {
             'This lead has reached its maximum number of shared buyers.',
           );
         }
-        // Prevent the same buyer from buying the same lead twice as non-exclusive
+        // Prevent the same buyer from buying the same lead twice as non-exclusive (exclude refunded)
         const alreadyBought = await queryRunner.manager
           .getRepository(LeadAssignment)
           .createQueryBuilder('a')
           .where('a.lead_id = :leadId', { leadId })
           .andWhere('a.buyer_id = :buyerId', { buyerId })
+          .andWhere("COALESCE(a.disposition, '') != 'refunded'")
           .getCount();
         if (alreadyBought > 0) {
           throw new BadRequestException(
@@ -1040,6 +1197,30 @@ export class LeadsService {
         throw new BadRequestException('Insufficient wallet balance');
       }
 
+      const activeLikeStatuses = [
+        SubscriptionStatus.ACTIVE,
+        SubscriptionStatus.PAST_DUE,
+        SubscriptionStatus.PAUSED,
+      ];
+      let cappedSub: Subscription | null = await queryRunner.manager
+        .getRepository(Subscription)
+        .createQueryBuilder('s')
+        .setLock('pessimistic_write')
+        .where('s.user_id = :buyerId', { buyerId })
+        .andWhere('s.status IN (:...sts)', { sts: activeLikeStatuses })
+        .andWhere('s.monthly_lead_limit IS NOT NULL')
+        .orderBy('s.updated_at', 'DESC')
+        .getOne();
+
+      if (cappedSub) {
+        const cap = cappedSub.monthly_lead_limit!;
+        if (cappedSub.leads_used_this_period >= cap) {
+          throw new BadRequestException(
+            'You have reached your subscription monthly lead limit for this billing period.',
+          );
+        }
+      }
+
       // ── Update lead counters & status ───────────────────────────────────
       if (exclusivityChoice === 'exclusive') {
         lead.status = LeadStatus.SOLD;
@@ -1079,6 +1260,11 @@ export class LeadsService {
           ? 'Lead purchase (exclusive)'
           : 'Lead purchase (shared)',
       );
+
+      if (cappedSub) {
+        cappedSub.leads_used_this_period += 1;
+        await queryRunner.manager.save(Subscription, cappedSub);
+      }
 
       await queryRunner.commitTransaction();
 

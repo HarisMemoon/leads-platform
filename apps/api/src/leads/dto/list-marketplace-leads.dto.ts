@@ -2,7 +2,12 @@ import { Type } from 'class-transformer';
 import { IsEnum, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { ExclusivityLevel } from '../../../common/enums/exclusivity-level.enum';
 
+
 export class ListMarketplaceLeadsDto {
+  @IsOptional()
+  @IsIn(['inbound', 'outbound'])
+  source?: 'inbound' | 'outbound';
+
   @IsOptional()
   @IsString()
   date_from?: string;

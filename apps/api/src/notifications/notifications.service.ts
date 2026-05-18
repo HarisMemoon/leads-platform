@@ -2,10 +2,12 @@ import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { NotificationLog } from '../entities/notification-log.entity';
 import { NotificationChannel } from '../../common/enums/notification-channel.enum';
 import { User } from '../entities/user.entity';
 import { MarketAlert } from '../entities/market-alert.entity';
+import { Lead } from '../entities/lead.entity';
 import { PurchaseType } from '../../common/enums/purchase-type.enum';
 import { ProEntitlementService } from '../subscriptions/pro-entitlement.service';
 
@@ -20,6 +22,8 @@ export class NotificationsService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(MarketAlert)
     private readonly marketAlertRepo: Repository<MarketAlert>,
+    @InjectRepository(Lead)
+    private readonly leadRepo: Repository<Lead>,
     private readonly config: ConfigService,
     @Inject(forwardRef(() => ProEntitlementService))
     private readonly proEntitlementService: ProEntitlementService,
@@ -310,6 +314,8 @@ export class NotificationsService {
       lead_type: string;
       exclusivity_level: string;
       price_cents: string;
+      state?: string | null;
+      source?: string | null;
     },
     earlyAccessMinutes = 60,
   ) {
@@ -326,26 +332,26 @@ export class NotificationsService {
 
     for (const alert of alerts) {
       if (alert.frequency !== 'instant') continue;
+
       const marketMatch =
-        alert.market.toLowerCase() === 'all' ||
+        ['all', 'any'].includes(alert.market.toLowerCase()) ||
         alert.market.toLowerCase() === lead.market.toLowerCase();
       if (!marketMatch) continue;
 
-      const filters = alert.filters ?? {};
-      const requestedType = String(filters.lead_type ?? filters.type ?? '').trim();
-      if (requestedType && requestedType.toLowerCase() !== lead.lead_type.toLowerCase()) {
-        continue;
+      const filters = (alert.filters ?? {}) as { lead_types?: string[]; states?: string[] };
+
+      if (filters.lead_types?.length) {
+        const typeMatch = filters.lead_types.some(
+          (t) => t.toLowerCase() === lead.lead_type.toLowerCase(),
+        );
+        if (!typeMatch) continue;
       }
-      const requestedExclusivity = String(filters.exclusivity ?? '').trim();
-      if (
-        requestedExclusivity &&
-        requestedExclusivity.toLowerCase() !== lead.exclusivity_level.toLowerCase()
-      ) {
-        continue;
-      }
-      const maxPrice = Number(filters.max_price_cents ?? filters.maxPriceCents ?? NaN);
-      if (Number.isFinite(maxPrice) && Number(lead.price_cents) > maxPrice) {
-        continue;
+
+      if (filters.states?.length && lead.state) {
+        const stateMatch = filters.states.some(
+          (s) => s.toLowerCase() === lead.state!.toLowerCase(),
+        );
+        if (!stateMatch) continue;
       }
 
       if (alert.max_per_day != null) {
@@ -368,6 +374,11 @@ export class NotificationsService {
 
     const sendAlertToUsers = async (alertList: typeof alerts, titlePrefix = '') => {
       for (const alert of alertList) {
+        const channels = alert.delivery_channels ?? ['email'];
+        const notifChannels: NotificationChannel[] = [NotificationChannel.IN_APP];
+        if (channels.includes('email')) notifChannels.push(NotificationChannel.EMAIL);
+        if (channels.includes('sms')) notifChannels.push(NotificationChannel.SMS);
+
         await this.sendUserEvent({
           userId: alert.user.id,
           type: 'market_alert_match',
@@ -377,16 +388,15 @@ export class NotificationsService {
           ).toFixed(2)}.`,
           referenceType: 'lead',
           referenceId: lead.id,
-          channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
+          channels: notifChannels,
           emailSubject: `${titlePrefix}New lead available in ${lead.market}`,
+          smsBody: `Newleey: New lead "${lead.title}" in ${lead.market} — $${(Number(lead.price_cents) / 100).toFixed(2)}`,
         });
       }
     };
 
-    // Pro subscribers get notified immediately (priority alert)
     await sendAlertToUsers(proAlerts, '[Pro] ');
 
-    // Free users are notified after the early-access window closes
     if (freeAlerts.length > 0) {
       const delayMs = earlyAccessMinutes * 60 * 1000;
       setTimeout(() => {
@@ -395,6 +405,93 @@ export class NotificationsService {
         );
       }, delayMs);
     }
+  }
+
+  async sendAlertDigest(frequency: 'hourly' | 'daily' | 'weekly') {
+    const since = new Date();
+    if (frequency === 'hourly') since.setHours(since.getHours() - 1);
+    else if (frequency === 'daily') since.setDate(since.getDate() - 1);
+    else since.setDate(since.getDate() - 7);
+
+    const alerts = await this.marketAlertRepo.find({
+      where: { is_active: true, frequency },
+      relations: { user: true },
+    });
+
+    for (const alert of alerts) {
+      const filters = (alert.filters ?? {}) as { lead_types?: string[]; states?: string[] };
+
+      const qb = this.leadRepo
+        .createQueryBuilder('l')
+        .where('l.created_at >= :since', { since });
+
+      if (filters.lead_types?.length) {
+        qb.andWhere('l.lead_type = ANY(:types)', { types: filters.lead_types });
+      }
+      if (filters.states?.length) {
+        qb.andWhere("l.metadata->>'state' = ANY(:states)", { states: filters.states });
+      }
+      if (!['all', 'any'].includes(alert.market.toLowerCase())) {
+        qb.andWhere('l.market = :market', { market: alert.market });
+      }
+
+      const leads = await qb.orderBy('l.created_at', 'DESC').getMany();
+      if (!leads.length) continue;
+
+      const label =
+        frequency === 'hourly' ? 'past hour' : frequency === 'daily' ? 'today' : 'this week';
+      const title = `${leads.length} new lead${leads.length > 1 ? 's' : ''} available — ${label}`;
+      const items = leads
+        .slice(0, 10)
+        .map(
+          (l) =>
+            `<li style="margin-bottom:8px"><strong>${l.title}</strong> — ${l.market} — $${(Number(l.price_cents) / 100).toFixed(2)}</li>`,
+        )
+        .join('');
+      const emailHtml = `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#111">
+        <h2 style="margin-bottom:16px">${title}</h2>
+        <ul style="padding-left:20px">${items}</ul>
+        ${leads.length > 10 ? `<p>...and ${leads.length - 10} more available on the marketplace.</p>` : ''}
+      </div>`;
+      const smsBody = `Newleey: ${leads.length} new lead${leads.length > 1 ? 's' : ''} available (${label}). Check your marketplace.`;
+
+      const channels = alert.delivery_channels ?? ['email'];
+      const notifChannels: NotificationChannel[] = [NotificationChannel.IN_APP];
+      if (channels.includes('email')) notifChannels.push(NotificationChannel.EMAIL);
+      if (channels.includes('sms')) notifChannels.push(NotificationChannel.SMS);
+
+      await this.sendUserEvent({
+        userId: alert.user.id,
+        type: 'market_alert_digest',
+        title,
+        body: `${leads.length} new lead${leads.length > 1 ? 's' : ''} matching your alert are available.`,
+        channels: notifChannels,
+        emailSubject: title,
+        emailHtml,
+        smsBody,
+      });
+    }
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async digestHourly() {
+    await this.sendAlertDigest('hourly').catch((e) =>
+      this.logger.error('Hourly digest failed', e),
+    );
+  }
+
+  @Cron('0 8 * * *')
+  async digestDaily() {
+    await this.sendAlertDigest('daily').catch((e) =>
+      this.logger.error('Daily digest failed', e),
+    );
+  }
+
+  @Cron('0 8 * * 1')
+  async digestWeekly() {
+    await this.sendAlertDigest('weekly').catch((e) =>
+      this.logger.error('Weekly digest failed', e),
+    );
   }
 
   async listForUser(userId: string, limit = 50) {

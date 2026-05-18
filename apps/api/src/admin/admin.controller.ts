@@ -4,6 +4,8 @@ import {
   DefaultValuePipe,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Ip,
   NotFoundException,
   Param,
@@ -45,6 +47,9 @@ import { CreateIngestionBatchDto } from './dto/admin-ingestion.dto';
 import { GradingOverrideDto } from './dto/admin-grading.dto';
 import { PatchPlanDto } from './dto/admin-plan.dto';
 import { PlanType } from '../../common/enums/plan-type.enum';
+import { LeadsService } from '../leads/leads.service';
+import { OutboundPingService } from '../outbound/outbound-ping.service';
+import { CreateOutboundBuyerDto, PatchOutboundBuyerDto } from '../outbound/dto/outbound-buyer.dto';
 
 const ENGINE_SETTINGS_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -61,6 +66,8 @@ export class AdminController {
     private readonly gradingService: AdminGradingService,
     private readonly integrationsHealthService: AdminIntegrationsHealthService,
     private readonly plansService: AdminPlansService,
+    private readonly leadsService: LeadsService,
+    private readonly outboundPingService: OutboundPingService,
     @InjectRepository(DistributionEngineSettings)
     private readonly engineSettingsRepo: Repository<DistributionEngineSettings>,
     @InjectRepository(User)
@@ -72,6 +79,68 @@ export class AdminController {
   @Get('metrics/breakdown')
   getMetricsBreakdown() {
     return this.metricsService.getBreakdown();
+  }
+
+  @Get('users/lookup')
+  async lookupUserByEmail(@Query('email') email: string) {
+    if (!email?.trim()) throw new NotFoundException('email query param required');
+    const user = await this.userRepo.findOne({
+      where: { email: email.trim().toLowerCase() },
+      select: ['id', 'email', 'full_name', 'created_at'] as any,
+    });
+    if (!user) throw new NotFoundException(`No account found for ${email}`);
+    return user;
+  }
+
+  @Get('users')
+  async listUsers(
+    @Query('limit') limitStr?: string,
+    @Query('offset') offsetStr?: string,
+    @Query('date_from') dateFrom?: string,
+    @Query('date_to') dateTo?: string,
+  ) {
+    const limit = Math.min(parseInt(limitStr ?? '10', 10) || 10, 100);
+    const offset = parseInt(offsetStr ?? '0', 10) || 0;
+    const qb = this.userRepo
+      .createQueryBuilder('u')
+      .select([
+        'u.id', 'u.email', 'u.full_name', 'u.company_name', 'u.phone',
+        'u.role', 'u.is_active', 'u.distribution_locked',
+        'u.email_verified', 'u.onboarding_completed', 'u.created_at',
+      ])
+      .orderBy('u.created_at', 'DESC');
+    if (dateFrom) qb.andWhere('u.created_at >= :dateFrom', { dateFrom: new Date(dateFrom) });
+    if (dateTo) qb.andWhere('u.created_at <= :dateTo', { dateTo: new Date(dateTo) });
+    const [users, total] = await qb.skip(offset).take(limit).getManyAndCount();
+    return { users, total };
+  }
+
+  @Patch('users/:userId/active')
+  async setUserActive(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Body('is_active') isActive: boolean,
+  ) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+    user.is_active = isActive;
+    await this.userRepo.save(user);
+    return { id: user.id, email: user.email, is_active: user.is_active };
+  }
+
+  @Get('metrics/intake')
+  getIntakeStats(
+    @Query('period') period: 'today' | 'week' | 'month' = 'today',
+  ) {
+    const valid = ['today', 'week', 'month'];
+    return this.metricsService.getIntakePeriodStats(
+      valid.includes(period) ? period : 'today',
+    );
+  }
+
+  @Delete('leads/:id')
+  @HttpCode(HttpStatus.OK)
+  deleteAdminLead(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.leadsService.deleteLead(id);
   }
 
   @Get('ingestion/batches')
@@ -183,6 +252,53 @@ export class AdminController {
       ipAddress: ip,
     });
     return updated;
+  }
+
+  // ── Outbound buyer endpoints ────────────────────────────────────────────
+
+  @Get('outbound/buyers')
+  listOutboundBuyers() {
+    return this.outboundPingService.listEndpoints();
+  }
+
+  @Post('outbound/buyers')
+  createOutboundBuyer(@Body() dto: CreateOutboundBuyerDto) {
+    return this.outboundPingService.createEndpoint(dto);
+  }
+
+  @Patch('outbound/buyers/:id')
+  patchOutboundBuyer(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() dto: PatchOutboundBuyerDto,
+  ) {
+    return this.outboundPingService.patchEndpoint(id, dto);
+  }
+
+  @Delete('outbound/buyers/:id')
+  deleteOutboundBuyer(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.outboundPingService.deleteEndpoint(id);
+  }
+
+  @Post('outbound/buyers/:id/test-ping')
+  testOutboundPing(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.outboundPingService.testPing(id);
+  }
+
+  @Get('outbound/logs')
+  getOutboundLogs(
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
+    @Query('lead_id') leadId?: string,
+  ) {
+    return this.outboundPingService.listLogs(limit, leadId);
+  }
+
+  @Post('leads/:id/ping-outbound')
+  @HttpCode(HttpStatus.OK)
+  async triggerOutboundPingForLead(
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    const lead = await this.leadsService.getLeadById(id);
+    return this.outboundPingService.pingAll(lead);
   }
 
   @Post('wallet/credit')

@@ -38,6 +38,13 @@ export type AdminMetricsBreakdown = {
 const HIGH_CONFIDENCE_MIN_SCORE = 85;
 const BORDERLINE_MIN_SCORE = 50;
 
+export type IntakePeriodStats = {
+  leads_in: number;
+  leads_sold: number;
+  revenue_cents: string;
+  period_start: string;
+};
+
 @Injectable()
 export class AdminMetricsService {
   constructor(
@@ -52,6 +59,41 @@ export class AdminMetricsService {
     @InjectRepository(SubscriptionPlan)
     private readonly planRepo: Repository<SubscriptionPlan>,
   ) {}
+
+  async getIntakePeriodStats(period: 'today' | 'week' | 'month'): Promise<IntakePeriodStats> {
+    const now = new Date();
+    let start: Date;
+    if (period === 'today') {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    } else if (period === 'week') {
+      start = new Date(now);
+      start.setDate(now.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+    } else {
+      start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    }
+
+    const [leads_in, assignmentRow] = await Promise.all([
+      this.leadRepo
+        .createQueryBuilder('lead')
+        .where('lead.created_at >= :start', { start })
+        .getCount(),
+      this.assignmentRepo
+        .createQueryBuilder('a')
+        .select('COUNT(a.id)', 'sold')
+        .addSelect('COALESCE(SUM(a.amount_charged_cents), 0)', 'revenue')
+        .where('a.created_at >= :start', { start })
+        .andWhere("COALESCE(a.disposition, '') != 'refunded'")
+        .getRawOne<{ sold: string; revenue: string }>(),
+    ]);
+
+    return {
+      leads_in,
+      leads_sold: Number(assignmentRow?.sold ?? 0),
+      revenue_cents: assignmentRow?.revenue ?? '0',
+      period_start: start.toISOString(),
+    };
+  }
 
   async getBreakdown(): Promise<AdminMetricsBreakdown> {
     const [
@@ -108,6 +150,7 @@ export class AdminMetricsService {
       .addSelect('COALESCE(SUM(a.amount_charged_cents), 0)', 'total_spend_cents')
       .addSelect('COUNT(a.id)', 'assignment_count')
       .where('buyer.id IS NOT NULL')
+      .andWhere("COALESCE(a.disposition, '') != 'refunded'")
       .groupBy('buyer.id')
       .addGroupBy('buyer.email')
       .orderBy('SUM(a.amount_charged_cents)', 'DESC')
@@ -135,6 +178,7 @@ export class AdminMetricsService {
       .addSelect('COUNT(a.id)', 'assignment_count')
       .addSelect('COALESCE(SUM(a.amount_charged_cents), 0)', 'revenue_cents')
       .where('lead.lead_type IS NOT NULL')
+      .andWhere("COALESCE(a.disposition, '') != 'refunded'")
       .groupBy('lead.lead_type')
       .orderBy('COUNT(a.id)', 'DESC')
       .getRawMany<{
