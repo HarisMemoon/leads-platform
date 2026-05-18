@@ -12,6 +12,7 @@ import { LeadIngestionBatch } from '../entities/lead-ingestion-batch.entity';
 import { LeadGradeOverride } from '../entities/lead-grade-override.entity';
 import { Subscription } from '../entities/subscription.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { VendorIntegration } from '../entities/vendor-integration.entity';
 import { AuditLogService } from './audit-log.service';
 import { AdminController } from './admin.controller';
 import { AdminMetricsService } from './admin-metrics.service';
@@ -37,6 +38,7 @@ import { OutboundModule } from '../outbound/outbound.module';
       LeadGradeOverride,
       Subscription,
       SubscriptionPlan,
+      VendorIntegration,
     ]),
     WalletModule,
     IntegrationsModule,

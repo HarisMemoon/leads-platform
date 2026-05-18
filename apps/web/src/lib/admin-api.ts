@@ -763,3 +763,47 @@ export function postAdminTriggerOutboundPing(leadId: string) {
     {},
   );
 }
+
+// ── Pending leads (inbound review queue) ──────────────────────────────────
+
+export type PendingLeadRow = {
+  id: string;
+  title: string;
+  market: string;
+  lead_type: string;
+  price_cents: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type PendingLeadGroup = {
+  vendor_id: string | null;
+  vendor_name: string;
+  count: number;
+  leads: PendingLeadRow[];
+};
+
+export type PendingLeadsResponse = {
+  groups: PendingLeadGroup[];
+  total: number;
+};
+
+export function getAdminPendingLeads() {
+  return apiGet<PendingLeadsResponse>('/admin/leads/pending');
+}
+
+export function patchAdminApproveLead(id: string) {
+  return apiPatch<{ ok: boolean; id: string; status: string }>(`/admin/leads/${id}/approve`, {});
+}
+
+export function patchAdminRejectLead(id: string) {
+  return apiPatch<{ ok: boolean; id: string; status: string }>(`/admin/leads/${id}/reject`, {});
+}
+
+export function postAdminBulkApproveLeads(ids: string[]) {
+  return apiPost<{ ok: boolean; approved: number }>('/admin/leads/bulk-approve', { ids });
+}
+
+export function postAdminBulkRejectLeads(ids: string[]) {
+  return apiPost<{ ok: boolean; rejected: number }>('/admin/leads/bulk-reject', { ids });
+}

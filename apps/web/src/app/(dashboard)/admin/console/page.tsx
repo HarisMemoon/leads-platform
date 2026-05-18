@@ -67,6 +67,12 @@ import {
   type AdminLeadDuplicateGroup,
   type AdminResolvedDuplicateGroup,
   getAdminResolvedDuplicateGroups,
+  getAdminPendingLeads,
+  patchAdminApproveLead,
+  patchAdminRejectLead,
+  postAdminBulkApproveLeads,
+  postAdminBulkRejectLeads,
+  type PendingLeadGroup,
 } from "@/lib/admin-api";
 import { getAuthMe } from "@/lib/auth-api";
 import { queryKeys } from "@/lib/query-keys";
@@ -1484,6 +1490,215 @@ function VendorWebhookPanel() {
   );
 }
 
+function PendingLeadsSection() {
+  const qc = useQueryClient();
+  const pending = useQuery({
+    queryKey: queryKeys.admin.pendingLeads,
+    queryFn: getAdminPendingLeads,
+    refetchInterval: 30_000,
+  });
+
+  const approve = useMutation({
+    mutationFn: (id: string) => patchAdminApproveLead(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.pendingLeads });
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.metrics });
+    },
+  });
+
+  const reject = useMutation({
+    mutationFn: (id: string) => patchAdminRejectLead(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.pendingLeads });
+    },
+  });
+
+  const bulkApprove = useMutation({
+    mutationFn: (ids: string[]) => postAdminBulkApproveLeads(ids),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.pendingLeads });
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.metrics });
+    },
+  });
+
+  const bulkReject = useMutation({
+    mutationFn: (ids: string[]) => postAdminBulkRejectLeads(ids),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.pendingLeads });
+    },
+  });
+
+  const total = pending.data?.total ?? 0;
+
+  if (pending.isLoading) {
+    return (
+      <div style={S.card}>
+        <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>Loading pending leads…</div>
+      </div>
+    );
+  }
+
+  if (total === 0) return null;
+
+  return (
+    <div style={{ ...S.card, borderLeft: "3px solid #f59e0b", padding: 0, overflow: "hidden" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 20px",
+          background: "rgba(245,158,11,0.06)",
+          borderBottom: "1px solid rgba(245,158,11,0.15)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{
+            background: "#f59e0b", color: "#000", borderRadius: 20,
+            padding: "2px 10px", fontSize: 12, fontWeight: 700,
+          }}>
+            {total}
+          </span>
+          <span style={{ fontFamily: "Manrope, sans-serif", fontWeight: 600, fontSize: 15 }}>
+            Leads pending review
+          </span>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+            Approve to make available on marketplace · Reject to discard
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            style={{
+              ...S.btnGhost, fontSize: 12, padding: "5px 14px",
+              opacity: bulkReject.isPending ? 0.6 : 1,
+            }}
+            disabled={bulkReject.isPending}
+            onClick={() => {
+              const ids = pending.data?.groups.flatMap((g) => g.leads.map((l) => l.id)) ?? [];
+              bulkReject.mutate(ids);
+            }}
+          >
+            Reject all
+          </button>
+          <button
+            type="button"
+            style={{
+              ...S.btnPrimary, fontSize: 12, padding: "5px 14px",
+              opacity: bulkApprove.isPending ? 0.6 : 1,
+            }}
+            disabled={bulkApprove.isPending}
+            onClick={() => {
+              const ids = pending.data?.groups.flatMap((g) => g.leads.map((l) => l.id)) ?? [];
+              bulkApprove.mutate(ids);
+            }}
+          >
+            Approve all
+          </button>
+        </div>
+      </div>
+
+      {pending.data?.groups.map((group: PendingLeadGroup) => (
+        <div key={group.vendor_id ?? "unknown"} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "10px 20px",
+              background: "rgba(0,0,0,0.15)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: group.vendor_id ? "#10b981" : "rgba(255,255,255,0.3)",
+                flexShrink: 0,
+              }} />
+              <span style={{ fontWeight: 600, fontSize: 13 }}>{group.vendor_name}</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                {group.count} lead{group.count !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                type="button"
+                style={{ ...S.btnGhost, fontSize: 11, padding: "3px 10px", opacity: bulkReject.isPending ? 0.6 : 1 }}
+                disabled={bulkReject.isPending}
+                onClick={() => bulkReject.mutate(group.leads.map((l) => l.id))}
+              >
+                Reject {group.count}
+              </button>
+              <button
+                type="button"
+                style={{ ...S.btnPrimary, fontSize: 11, padding: "3px 10px", opacity: bulkApprove.isPending ? 0.6 : 1 }}
+                disabled={bulkApprove.isPending}
+                onClick={() => bulkApprove.mutate(group.leads.map((l) => l.id))}
+              >
+                Approve {group.count}
+              </button>
+            </div>
+          </div>
+
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ background: "rgba(0,0,0,0.1)" }}>
+              <tr>
+                <th style={{ ...S.th, fontSize: 11 }}>Title</th>
+                <th style={{ ...S.th, fontSize: 11 }}>Market</th>
+                <th style={{ ...S.th, fontSize: 11 }}>Type</th>
+                <th style={{ ...S.th, fontSize: 11 }}>Price</th>
+                <th style={{ ...S.th, fontSize: 11 }}>Received</th>
+                <th style={{ ...S.th, fontSize: 11, textAlign: "right" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.leads.map((lead) => (
+                <tr key={lead.id} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                  <td style={S.td}>{lead.title}</td>
+                  <td style={S.td}>{lead.market}</td>
+                  <td style={S.td}>{lead.lead_type}</td>
+                  <td style={S.td}>${(parseInt(lead.price_cents || "0", 10) / 100).toFixed(2)}</td>
+                  <td style={S.td}>{new Date(lead.created_at).toLocaleString()}</td>
+                  <td style={{ ...S.td, textAlign: "right" }}>
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                      <button
+                        type="button"
+                        style={{
+                          padding: "2px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.4)",
+                          background: "rgba(239,68,68,0.08)", color: "#fca5a5",
+                          fontSize: 11, cursor: "pointer",
+                          opacity: reject.isPending ? 0.6 : 1,
+                        }}
+                        disabled={reject.isPending}
+                        onClick={() => reject.mutate(lead.id)}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        type="button"
+                        style={{
+                          padding: "2px 10px", borderRadius: 6, border: "1px solid rgba(16,185,129,0.4)",
+                          background: "rgba(16,185,129,0.08)", color: "#6ee7b7",
+                          fontSize: 11, cursor: "pointer",
+                          opacity: approve.isPending ? 0.6 : 1,
+                        }}
+                        disabled={approve.isPending}
+                        onClick={() => approve.mutate(lead.id)}
+                      >
+                        Approve
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function IngestionTab() {
   const qc = useQueryClient();
   const [devOpen, setDevOpen] = useState(false);
@@ -1531,6 +1746,8 @@ function IngestionTab() {
         title="Add leads"
         sub="Upload a CSV file or view recent batches. Connect vendor feeds in the developer section below."
       />
+
+      <PendingLeadsSection />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         <Stat

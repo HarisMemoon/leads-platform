@@ -27,10 +27,13 @@ import { AuditLogService } from './audit-log.service';
 import { AdminCreditWalletDto } from './dto/admin-credit-wallet.dto';
 import { UpdateDistributionEngineSettingsDto } from './dto/update-distribution-engine-settings.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { DistributionEngineSettings } from '../entities/distribution-engine-settings.entity';
 import { User } from '../entities/user.entity';
 import { ResourcesContent } from '../entities/resources-content.entity';
+import { Lead } from '../entities/lead.entity';
+import { VendorIntegration } from '../entities/vendor-integration.entity';
+import { LeadStatus } from '../../common/enums/lead-status.enum';
 import { Request } from 'express';
 import { AdminDistributionLockDto } from './dto/admin-distribution-lock.dto';
 import {
@@ -74,6 +77,10 @@ export class AdminController {
     private readonly userRepo: Repository<User>,
     @InjectRepository(ResourcesContent)
     private readonly resourcesRepo: Repository<ResourcesContent>,
+    @InjectRepository(Lead)
+    private readonly leadRepo: Repository<Lead>,
+    @InjectRepository(VendorIntegration)
+    private readonly vendorRepo: Repository<VendorIntegration>,
   ) {}
 
   @Get('metrics/breakdown')
@@ -141,6 +148,151 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   deleteAdminLead(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.leadsService.deleteLead(id);
+  }
+
+  // ── Pending leads (inbound review queue) ──────────────────────────────────
+
+  @Get('leads/pending')
+  async getPendingLeads() {
+    const leads = await this.leadRepo.find({
+      where: { status: LeadStatus.NEW, source: 'inbound' },
+      order: { created_at: 'DESC' },
+      take: 200,
+    });
+
+    if (leads.length === 0) return { groups: [], total: 0 };
+
+    // collect unique vendor IDs
+    const vendorIds = [...new Set(
+      leads.map((l) => l.canonical_lead_source).filter(Boolean) as string[],
+    )];
+
+    const vendors = vendorIds.length
+      ? await this.vendorRepo.findBy({ id: In(vendorIds) })
+      : [];
+
+    const vendorMap = new Map(vendors.map((v) => [v.id, v]));
+
+    // group by vendor (null = unknown)
+    const byVendor = new Map<string | null, typeof leads>();
+    for (const lead of leads) {
+      const key = lead.canonical_lead_source ?? null;
+      if (!byVendor.has(key)) byVendor.set(key, []);
+      byVendor.get(key)!.push(lead);
+    }
+
+    const groups = [...byVendor.entries()].map(([vendorId, vendorLeads]) => ({
+      vendor_id: vendorId,
+      vendor_name: vendorId ? (vendorMap.get(vendorId)?.name ?? 'Unknown vendor') : 'Direct / unknown',
+      count: vendorLeads.length,
+      leads: vendorLeads.map((l) => ({
+        id: l.id,
+        title: l.title,
+        market: l.market,
+        lead_type: l.lead_type,
+        price_cents: l.price_cents,
+        metadata: l.metadata,
+        created_at: l.created_at,
+      })),
+    }));
+
+    return { groups, total: leads.length };
+  }
+
+  @Patch('leads/:id/approve')
+  @HttpCode(HttpStatus.OK)
+  async approveLead(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    const lead = await this.leadRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Lead not found');
+    lead.status = LeadStatus.AVAILABLE;
+    const saved = await this.leadRepo.save(lead);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_lead_approve',
+      targetType: 'lead',
+      targetId: id,
+      metadata: {},
+      ipAddress: ip,
+    });
+    void this.outboundPingService.pingAll(saved).catch(() => {/* logged internally */});
+    return { ok: true, id: saved.id, status: saved.status };
+  }
+
+  @Patch('leads/:id/reject')
+  @HttpCode(HttpStatus.OK)
+  async rejectLead(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    const lead = await this.leadRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Lead not found');
+    lead.status = LeadStatus.ARCHIVED;
+    await this.leadRepo.save(lead);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_lead_reject',
+      targetType: 'lead',
+      targetId: id,
+      metadata: {},
+      ipAddress: ip,
+    });
+    return { ok: true, id, status: LeadStatus.ARCHIVED };
+  }
+
+  @Post('leads/bulk-approve')
+  @HttpCode(HttpStatus.OK)
+  async bulkApproveLeads(
+    @Body('ids') ids: string[],
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    if (!Array.isArray(ids) || ids.length === 0) return { ok: true, approved: 0 };
+    const leads = await this.leadRepo.findBy({ id: In(ids), status: LeadStatus.NEW });
+    for (const lead of leads) {
+      lead.status = LeadStatus.AVAILABLE;
+    }
+    const saved = await this.leadRepo.save(leads);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_leads_bulk_approve',
+      targetType: 'lead',
+      targetId: ids.join(','),
+      metadata: { count: saved.length },
+      ipAddress: ip,
+    });
+    for (const lead of saved) {
+      void this.outboundPingService.pingAll(lead).catch(() => {/* logged internally */});
+    }
+    return { ok: true, approved: saved.length };
+  }
+
+  @Post('leads/bulk-reject')
+  @HttpCode(HttpStatus.OK)
+  async bulkRejectLeads(
+    @Body('ids') ids: string[],
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    if (!Array.isArray(ids) || ids.length === 0) return { ok: true, rejected: 0 };
+    const leads = await this.leadRepo.findBy({ id: In(ids), status: LeadStatus.NEW });
+    for (const lead of leads) {
+      lead.status = LeadStatus.ARCHIVED;
+    }
+    await this.leadRepo.save(leads);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_leads_bulk_reject',
+      targetType: 'lead',
+      targetId: ids.join(','),
+      metadata: { count: leads.length },
+      ipAddress: ip,
+    });
+    return { ok: true, rejected: leads.length };
   }
 
   @Get('ingestion/batches')

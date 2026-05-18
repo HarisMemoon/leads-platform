@@ -59,6 +59,7 @@ export const queryKeys = {
     duplicateGroups: ["admin", "lead-duplicate-groups"] as const,
     ingestionBatches: ["admin", "ingestion", "batches"] as const,
     ingestionStats: ["admin", "ingestion", "stats"] as const,
+    pendingLeads: ["admin", "leads", "pending"] as const,
     gradingQueue: (opts: { bucket?: string; page?: number; limit?: number }) =>
       ["admin", "grading", "queue", opts] as const,
     gradingStats: ["admin", "grading", "stats"] as const,

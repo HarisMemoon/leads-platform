@@ -50,7 +50,7 @@ export class InboundService {
       market: dto.market,
       lead_type: dto.lead_type,
       title: dto.title ?? `${dto.lead_type} — ${dto.market}`,
-      status: LeadStatus.AVAILABLE,
+      status: LeadStatus.NEW,
       exclusivity_level: ExclusivityLevel.SHARED,
       quality_score: dto.quality_score ?? 70,
       price_cents: String(priceCents),
