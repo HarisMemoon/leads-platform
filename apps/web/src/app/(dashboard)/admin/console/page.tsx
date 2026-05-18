@@ -1365,14 +1365,42 @@ function parseIngestionCsv(text: string): { rows: IngestionRowInput[]; errors: s
   return { rows, errors };
 }
 
+type ScriptTab = "single" | "batch" | "sheets";
+
+const SCRIPT_TABS: Array<{ id: ScriptTab; label: string; endpoint: string; hint: string }> = [
+  { id: "single", label: "Single lead", endpoint: "POST /inbound/lead", hint: "One lead per request · Zapier, Make.com, form submissions" },
+  { id: "batch", label: "Batch leads", endpoint: "POST /inbound/leads", hint: "Array of leads · call centers, nightly syncs, bulk imports" },
+  { id: "sheets", label: "Google Sheets", endpoint: "Apps Script", hint: "Map sheet columns to lead fields, run from a button or trigger" },
+];
+
+const LEAD_FIELDS: Array<{ field: string; type: string; required: boolean; desc: string }> = [
+  { field: "market", type: "string", required: true, desc: 'City + state — e.g. "Phoenix, AZ"' },
+  { field: "lead_type", type: "string", required: true, desc: "inherited · foreclosure · divorce · probate · tired_landlord · other" },
+  { field: "title", type: "string", required: false, desc: "Display name — auto-generated if omitted" },
+  { field: "price_cents", type: "integer", required: false, desc: "Base price in cents · 4500 = $45.00" },
+  { field: "exclusive_price_cents", type: "integer", required: false, desc: "Exclusive-purchase price in cents" },
+  { field: "quality_score", type: "0 – 100", required: false, desc: "Lead quality score — defaults to 70" },
+  { field: "metadata.state", type: "string", required: false, desc: '2-letter state code — e.g. "AZ" · used for market alerts' },
+  { field: "metadata.contact_phone", type: "string", required: false, desc: "Seller phone number" },
+  { field: "metadata.contact_email", type: "string", required: false, desc: "Seller email address" },
+  { field: "metadata.address", type: "string", required: false, desc: "Property street address" },
+  { field: "metadata.city", type: "string", required: false, desc: "Property city" },
+  { field: "metadata.zip", type: "string", required: false, desc: "Property ZIP code" },
+  { field: "metadata.property_type", type: "string", required: false, desc: "single_family · multi_family · land · commercial" },
+  { field: "metadata.timeline", type: "string", required: false, desc: "asap · 30_days · 60_days · flexible" },
+  { field: "metadata.notes", type: "string", required: false, desc: "Free-text notes from the vendor" },
+];
+
 function VendorWebhookPanel() {
   const vendors = useQuery({ queryKey: queryKeys.admin.vendors, queryFn: getAdminVendors });
   const [selectedVendorId, setSelectedVendorId] = useState<string>("");
-  const [showScript, setShowScript] = useState(false);
+  const [activeTab, setActiveTab] = useState<ScriptTab>("single");
+  const [copied, setCopied] = useState(false);
+  const [showFields, setShowFields] = useState(false);
 
   const hitsQ = useQuery({
     queryKey: queryKeys.admin.vendorWebhookHits(selectedVendorId),
-    queryFn: () => getAdminVendorWebhookHits(selectedVendorId, 30),
+    queryFn: () => getAdminVendorWebhookHits(selectedVendorId, 50),
     enabled: !!selectedVendorId,
   });
 
@@ -1382,111 +1410,325 @@ function VendorWebhookPanel() {
     enabled: !!selectedVendorId,
   });
 
-  const webhookUrl = `${typeof window !== "undefined" ? window.location.origin.replace(":3000", ":3001") : "https://api.yourplatform.com"}/inbound/lead`;
+  const apiBase = "https://lead-platform-api.onrender.com";
 
-  const appsScript = `function postLeadToMarketplace() {
+  const scripts: Record<ScriptTab, string> = {
+    single: `curl -X POST ${apiBase}/inbound/lead \\
+  -H "Content-Type: application/json" \\
+  -H "X-Vendor-Key: YOUR_API_KEY" \\
+  -d '{
+    "market": "Phoenix, AZ",
+    "lead_type": "inherited",
+    "title": "Sarah Johnson — Inherited Property",
+    "price_cents": 4500,
+    "quality_score": 82,
+    "metadata": {
+      "state": "AZ",
+      "contact_phone": "602-555-0101",
+      "contact_email": "sarah@example.com",
+      "address": "123 Main St",
+      "city": "Phoenix",
+      "zip": "85001",
+      "property_type": "single_family",
+      "timeline": "asap",
+      "notes": "Inherited from late parent, motivated to sell"
+    }
+  }'`,
+    batch: `curl -X POST ${apiBase}/inbound/leads \\
+  -H "Content-Type: application/json" \\
+  -H "X-Vendor-Key: YOUR_API_KEY" \\
+  -d '{
+    "leads": [
+      {
+        "market": "Phoenix, AZ",
+        "lead_type": "inherited",
+        "title": "Sarah Johnson — Inherited Property",
+        "price_cents": 4500,
+        "quality_score": 82,
+        "metadata": { "state": "AZ", "contact_phone": "602-555-0101" }
+      },
+      {
+        "market": "Dallas, TX",
+        "lead_type": "foreclosure",
+        "title": "Mike Torres — Pre-Foreclosure",
+        "price_cents": 3800,
+        "quality_score": 74,
+        "metadata": { "state": "TX", "contact_phone": "214-555-0188" }
+      },
+      {
+        "market": "Atlanta, GA",
+        "lead_type": "divorce",
+        "title": "Pending Sale — Divorce Settlement",
+        "price_cents": 5200,
+        "quality_score": 90,
+        "metadata": { "state": "GA", "contact_phone": "404-555-0144" }
+      }
+    ]
+  }'`,
+    sheets: `// Paste into Google Sheets → Extensions → Apps Script
+// Add a button or run manually — posts the selected row as a lead
+
+function postLeadToMarketplace() {
   var sheet = SpreadsheetApp.getActiveSheet();
   var row = sheet.getActiveRange().getRow();
-  var data = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  // Row 1 must be headers: market, lead_type, title, price_cents, etc.
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var data    = sheet.getRange(row, 1, 1, sheet.getLastColumn()).getValues()[0];
 
   var payload = {};
-  headers.forEach(function(h, i) { if (h && data[i]) payload[h] = data[i]; });
+  headers.forEach(function(h, i) {
+    if (h && data[i] !== "" && data[i] !== null) payload[h] = data[i];
+  });
 
   var options = {
     method: "post",
     contentType: "application/json",
-    headers: { "x-vendor-key": "YOUR_API_KEY_HERE" },
+    headers: { "X-Vendor-Key": "YOUR_API_KEY" },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   };
 
-  var response = UrlFetchApp.fetch("${webhookUrl}", options);
-  Logger.log(response.getContentText());
-}`;
+  var res = UrlFetchApp.fetch("${apiBase}/inbound/lead", options);
+  var json = JSON.parse(res.getContentText());
+
+  if (json.success) {
+    SpreadsheetApp.getUi().alert("Lead accepted — ID: " + json.lead_id);
+  } else {
+    SpreadsheetApp.getUi().alert("Error: " + res.getContentText());
+  }
+}`,
+  };
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(scripts[activeTab]);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback for non-HTTPS or denied permission
+      const el = document.createElement("textarea");
+      el.value = scripts[activeTab];
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
+
+  const activeTabMeta = SCRIPT_TABS.find((t) => t.id === activeTab)!;
 
   return (
-    <div style={S.card}>
-      <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 4 }}>Vendor webhook</h3>
-      <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, margin: "0 0 14px" }}>
-        Vendors POST leads to this URL using their API key in the <code>x-vendor-key</code> header.
-      </p>
+    <>
+      {/* ── Integration scripts ── */}
+      <div style={S.card}>
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, margin: "0 0 4px" }}>
+            Vendor webhook integration
+          </h3>
+          <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: 0 }}>
+            Vendors POST leads using their API key in the <code style={{ color: "#a5b4fc" }}>X-Vendor-Key</code> header.
+            Leads land in the Pending Review queue and require admin approval before going live.
+          </p>
+        </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
-        <code style={{ flex: 1, padding: "9px 12px", background: "rgba(0,0,0,0.3)", borderRadius: 8, fontSize: 12, color: "#a5b4fc", border: "1px solid rgba(99,102,241,0.25)", wordBreak: "break-all" }}>
-          POST {webhookUrl}
-        </code>
-        <button type="button" style={S.btnGhost} onClick={() => navigator.clipboard.writeText(webhookUrl)}>Copy</button>
-      </div>
+        {/* Tab bar */}
+        <div style={{
+          display: "flex", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 16,
+        }}>
+          {SCRIPT_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => { setActiveTab(t.id); setCopied(false); }}
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                padding: "8px 16px", fontSize: 13, fontWeight: 500,
+                color: activeTab === t.id ? "#a5b4fc" : "rgba(255,255,255,0.45)",
+                borderBottom: activeTab === t.id ? "2px solid #6366f1" : "2px solid transparent",
+                marginBottom: -1,
+                transition: "color 0.15s",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
-      <button type="button" style={{ ...S.btnGhost, marginBottom: 14 }} onClick={() => setShowScript((v) => !v)}>
-        {showScript ? "Hide" : "Show"} Google Sheets Apps Script
-      </button>
+        {/* Tab metadata row */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: 10,
+        }}>
+          <div>
+            <code style={{
+              fontSize: 12, color: "#6ee7b7",
+              background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)",
+              borderRadius: 6, padding: "3px 8px",
+            }}>
+              {activeTabMeta.endpoint}
+            </code>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginLeft: 10 }}>
+              {activeTabMeta.hint}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopy}
+            style={{
+              ...S.btnGhost, fontSize: 12, padding: "4px 14px", minWidth: 70,
+              color: copied ? "#6ee7b7" : undefined,
+              borderColor: copied ? "rgba(16,185,129,0.4)" : undefined,
+              transition: "color 0.2s, border-color 0.2s",
+            }}
+          >
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+        </div>
 
-      {showScript && (
-        <pre style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 14, fontSize: 11, color: "#e2e8f0", overflowX: "auto", marginBottom: 14, lineHeight: 1.6 }}>
-          {appsScript}
+        {/* Script block */}
+        <pre style={{
+          background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.07)",
+          borderRadius: 10, padding: "14px 16px", fontSize: 11, color: "#e2e8f0",
+          overflowX: "auto", lineHeight: 1.7, margin: "0 0 16px",
+          fontFamily: "DM Mono, monospace",
+        }}>
+          {scripts[activeTab]}
         </pre>
-      )}
 
-      <div style={{ marginBottom: 10 }}>
-        <select
-          value={selectedVendorId}
-          onChange={(e) => setSelectedVendorId(e.target.value)}
-          style={{ ...S.inp, width: "auto", minWidth: 220 }}
+        {/* Field reference toggle */}
+        <button
+          type="button"
+          onClick={() => setShowFields((v) => !v)}
+          style={{
+            ...S.btnGhost, fontSize: 12, padding: "5px 14px",
+            display: "flex", alignItems: "center", gap: 6,
+          }}
         >
-          <option value="">Select vendor to inspect…</option>
-          {(vendors.data ?? []).map((v) => (
-            <option key={v.id} value={v.id}>{v.name} {v.enabled ? "" : "(disabled)"}</option>
-          ))}
-        </select>
+          <span style={{ fontSize: 10, opacity: 0.6 }}>{showFields ? "▲" : "▼"}</span>
+          Lead field reference
+        </button>
+
+        {showFields && (
+          <div style={{
+            marginTop: 12, borderRadius: 10, overflow: "hidden",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead style={{ background: "rgba(0,0,0,0.25)" }}>
+                <tr>
+                  <th style={S.th}>Field</th>
+                  <th style={S.th}>Type</th>
+                  <th style={S.th}>Required</th>
+                  <th style={S.th}>Description</th>
+                </tr>
+              </thead>
+              <tbody>
+                {LEAD_FIELDS.map((f) => (
+                  <tr key={f.field} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                    <td style={{ ...S.td, fontFamily: "DM Mono, monospace", fontSize: 11, color: "#a5b4fc" }}>{f.field}</td>
+                    <td style={{ ...S.td, color: "rgba(255,255,255,0.4)", fontSize: 11 }}>{f.type}</td>
+                    <td style={S.td}>
+                      {f.required
+                        ? <Pill tone="warn">required</Pill>
+                        : <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>optional</span>}
+                    </td>
+                    <td style={{ ...S.td, color: "rgba(255,255,255,0.6)", fontSize: 12 }}>{f.desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {selectedVendorId && payoutQ.data && (
-        <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-          {[
-            { label: "Total hits", value: payoutQ.data.total_hits },
-            { label: "Accepted", value: payoutQ.data.accepted },
-            { label: "Rejected", value: payoutQ.data.rejected },
-          ].map(({ label, value }) => (
-            <div key={label} style={{ ...S.card, flex: 1, padding: "10px 14px" }}>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 2 }}>{label}</div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{value}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* ── Vendor inspect ── */}
+      <div style={S.card}>
+        <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 12 }}>
+          Inspect vendor activity
+        </h3>
 
-      {selectedVendorId && hitsQ.data && hitsQ.data.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead style={{ background: "rgba(0,0,0,0.2)" }}>
-              <tr>
-                <th style={S.th}>Status</th>
-                <th style={S.th}>Lead ID</th>
-                <th style={S.th}>IP</th>
-                <th style={S.th}>Reason</th>
-                <th style={S.th}>When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hitsQ.data.map((h) => (
-                <tr key={h.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-                  <td style={S.td}><Pill tone={h.status === "accepted" ? "good" : "bad"}>{h.status}</Pill></td>
-                  <td style={{ ...S.td, fontFamily: "monospace", fontSize: 11 }}>{h.lead_id ? h.lead_id.slice(0, 8) + "…" : "—"}</td>
-                  <td style={S.td}>{h.ip_address ?? "—"}</td>
-                  <td style={S.td}>{h.rejection_reason ?? "—"}</td>
-                  <td style={S.td}>{new Date(h.created_at).toLocaleString()}</td>
+        {vendors.isLoading ? (
+          <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>Loading vendors…</div>
+        ) : vendors.data?.length === 0 ? (
+          <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
+            No vendors configured yet — add one in the Integrations tab.
+          </div>
+        ) : (
+          <select
+            value={selectedVendorId}
+            onChange={(e) => setSelectedVendorId(e.target.value)}
+            style={{ ...S.inp, maxWidth: 320, marginBottom: 16 }}
+          >
+            <option value="">— Select a vendor to inspect —</option>
+            {(vendors.data ?? []).map((v) => (
+              <option key={v.id} value={v.id}>{v.name}{v.enabled ? "" : " (disabled)"}</option>
+            ))}
+          </select>
+        )}
+
+        {selectedVendorId && payoutQ.data && (
+          <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+            {([
+              { label: "Total hits", value: payoutQ.data.total_hits, color: "#a5b4fc" },
+              { label: "Accepted", value: payoutQ.data.accepted, color: "#6ee7b7" },
+              { label: "Rejected", value: payoutQ.data.rejected, color: "#fca5a5" },
+            ] as const).map(({ label, value, color }) => (
+              <div key={label} style={{
+                flex: 1, padding: "12px 16px", borderRadius: 10,
+                background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.06)",
+              }}>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>{label}</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: "Manrope, sans-serif" }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {selectedVendorId && hitsQ.isLoading && (
+          <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>Loading activity…</div>
+        )}
+
+        {selectedVendorId && !hitsQ.isLoading && hitsQ.data && hitsQ.data.length > 0 && (
+          <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead style={{ background: "rgba(0,0,0,0.2)" }}>
+                <tr>
+                  <th style={S.th}>Status</th>
+                  <th style={S.th}>Lead ID</th>
+                  <th style={S.th}>IP address</th>
+                  <th style={S.th}>Rejection reason</th>
+                  <th style={S.th}>Received</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {selectedVendorId && hitsQ.data?.length === 0 && (
-        <Empty title="No hits yet for this vendor" />
-      )}
-    </div>
+              </thead>
+              <tbody>
+                {hitsQ.data.map((h) => (
+                  <tr key={h.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                    <td style={S.td}>
+                      <Pill tone={h.status === "accepted" ? "good" : "bad"}>{h.status}</Pill>
+                    </td>
+                    <td style={{ ...S.td, fontFamily: "DM Mono, monospace", fontSize: 11, color: "#a5b4fc" }}>
+                      {h.lead_id ? h.lead_id.slice(0, 8) + "…" : "—"}
+                    </td>
+                    <td style={{ ...S.td, color: "rgba(255,255,255,0.45)", fontSize: 11 }}>{h.ip_address ?? "—"}</td>
+                    <td style={{ ...S.td, color: h.rejection_reason ? "#fca5a5" : "rgba(255,255,255,0.3)" }}>
+                      {h.rejection_reason ?? "—"}
+                    </td>
+                    <td style={{ ...S.td, color: "rgba(255,255,255,0.45)" }}>{new Date(h.created_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {selectedVendorId && !hitsQ.isLoading && hitsQ.data?.length === 0 && (
+          <Empty title="No activity recorded for this vendor yet" />
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1701,19 +1943,23 @@ function PendingLeadsSection() {
 
 function IngestionTab() {
   const qc = useQueryClient();
-  const [devOpen, setDevOpen] = useState(false);
+  const [filename, setFilename] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [parsedRows, setParsedRows] = useState<IngestionRowInput[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
   const stats = useQuery({
     queryKey: queryKeys.admin.ingestionStats,
     queryFn: getAdminIngestionStats,
+  });
+  const pendingLeads = useQuery({
+    queryKey: queryKeys.admin.pendingLeads,
+    queryFn: getAdminPendingLeads,
+    refetchInterval: 30_000,
   });
   const batches = useQuery({
     queryKey: queryKeys.admin.ingestionBatches,
     queryFn: () => getAdminIngestionBatches(25),
   });
-  const [filename, setFilename] = useState("");
-  const [vendor, setVendor] = useState("");
-  const [parsedRows, setParsedRows] = useState<IngestionRowInput[]>([]);
-  const [parseErrors, setParseErrors] = useState<string[]>([]);
 
   const upload = useMutation({
     mutationFn: () =>
@@ -1752,8 +1998,8 @@ function IngestionTab() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         <Stat
           label="Pending review"
-          value={String(stats.data?.pendingReview ?? "—")}
-          hint="Awaiting processing"
+          value={String(pendingLeads.data?.total ?? "—")}
+          hint="Awaiting admin approval"
           accent="linear-gradient(90deg,#f59e0b,#ef4444)"
         />
         <Stat
@@ -1927,40 +2173,7 @@ function IngestionTab() {
         )}
       </div>
 
-      {/* Developer / automation setup — collapsed by default */}
-      <div style={S.card}>
-        <button
-          type="button"
-          onClick={() => setDevOpen((v) => !v)}
-          style={{
-            width: "100%",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            background: "none",
-            border: "none",
-            color: "rgba(255,255,255,0.75)",
-            cursor: "pointer",
-            padding: 0,
-            fontFamily: "Manrope, sans-serif",
-            fontSize: 15,
-            fontWeight: 600,
-          }}
-        >
-          <span>Vendor webhook / API setup</span>
-          <span style={{ fontSize: 18, color: "rgba(255,255,255,0.4)" }}>{devOpen ? "▲" : "▼"}</span>
-        </button>
-        {!devOpen && (
-          <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, margin: "8px 0 0" }}>
-            Connect Google Sheets, landing pages, or call-center software to send leads automatically.
-          </p>
-        )}
-        {devOpen && (
-          <div style={{ marginTop: 16 }}>
-            <VendorWebhookPanel />
-          </div>
-        )}
-      </div>
+      <VendorWebhookPanel />
     </>
   );
 }

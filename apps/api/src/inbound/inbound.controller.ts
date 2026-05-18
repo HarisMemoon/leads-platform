@@ -40,15 +40,21 @@ export class InboundController {
 
     const rawPayload = { ...dto } as Record<string, unknown>;
     const vendor = await this.inboundService.authenticateVendor(apiKey);
-    const lead = await this.inboundService.createLead(vendor, dto, ip, rawPayload);
 
-    return {
-      success: true,
-      lead_id: lead.id,
-      market: lead.market,
-      lead_type: lead.lead_type,
-      status: lead.status,
-    };
+    try {
+      const lead = await this.inboundService.createLead(vendor, dto, ip, rawPayload);
+      return {
+        success: true,
+        lead_id: lead.id,
+        market: lead.market,
+        lead_type: lead.lead_type,
+        status: lead.status,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      await this.inboundService.logRejection(vendor.id, msg, ip, rawPayload);
+      throw err;
+    }
   }
 
   @Post('leads')

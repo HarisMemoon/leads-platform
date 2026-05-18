@@ -294,6 +294,9 @@ export class LeadsService {
 
     if (query.status) {
       qb.andWhere('lead.status = :status', { status: query.status });
+    } else {
+      // Exclude pending-review leads — they live in the ingestion approval queue
+      qb.andWhere('lead.status != :newStatus', { newStatus: LeadStatus.NEW });
     }
 
     if ((query as any).source) {
@@ -642,6 +645,7 @@ export class LeadsService {
       .createQueryBuilder('lead')
       .select('lead.status', 'status')
       .addSelect('COUNT(*)', 'count')
+      .where('lead.status != :newStatus', { newStatus: LeadStatus.NEW })
       .groupBy('lead.status')
       .getRawMany<{ status: LeadStatus; count: string }>();
 
