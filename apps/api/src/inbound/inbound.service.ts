@@ -11,7 +11,6 @@ import { LeadStatus } from '../../common/enums/lead-status.enum';
 import { ExclusivityLevel } from '../../common/enums/exclusivity-level.enum';
 import { hashApiKey } from '../common/utils/hash-api-key.util';
 import { InboundLeadDto } from './dto/inbound-lead.dto';
-import { OutboundPingService } from '../outbound/outbound-ping.service';
 
 @Injectable()
 export class InboundService {
@@ -22,7 +21,6 @@ export class InboundService {
     private readonly vendorRepo: Repository<VendorIntegration>,
     @InjectRepository(VendorWebhookHit)
     private readonly hitRepo: Repository<VendorWebhookHit>,
-    private readonly outboundPingService: OutboundPingService,
   ) {}
 
   async authenticateVendor(apiKey: string): Promise<VendorIntegration> {
@@ -72,9 +70,6 @@ export class InboundService {
         payload_snapshot: rawPayload,
       }),
     );
-
-    // Fire-and-forget: ping outbound buyers with non-PII data
-    void this.outboundPingService.pingAll(saved).catch(() => {/* logged internally */});
 
     return saved;
   }
