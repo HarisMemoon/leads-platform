@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { UseMutationResult } from "@tanstack/react-query";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LeadDetailResponse, LeadQuoteResponse, MarketplaceLeadRow } from "@/lib/leads-api";
@@ -432,11 +433,15 @@ export function LeadDetailModal({
     ) ?? detail?.lead_assignments?.[0];
 
   const exclusivePrice = listPreview?.exclusive_price_cents ?? listPreview?.current_price ?? "0";
-  const sharedCap = listPreview?.max_non_exclusive_buyers ?? 3;
+  const _leadTypeForCap = (listPreview as any)?.lead_type ?? "inbound";
+  const sharedCap = listPreview?.max_non_exclusive_buyers ?? (_leadTypeForCap === "outbound" ? 3 : 5);
   const sharedPrice = computeSharedDisplayCents(exclusivePrice, sharedCap);
   const rawPrice = exclusivityChoice === "exclusive" ? Number(exclusivePrice) : Number(sharedPrice);
   const isPro = quoteData?.is_pro ?? false;
+  const isSubscribed = quoteData?.is_subscribed ?? false;
+  const subscriptionRequiredForShared = quoteData?.subscription_required_for_shared ?? false;
   const canBuyNow = quoteData?.can_buy_now ?? true;
+  const sharedBlocked = exclusivityChoice === "non_exclusive" && subscriptionRequiredForShared;
   const effectivePrice = quoteData ? Number(quoteData.effective_price_cents) : rawPrice;
 
   const modalAnchorCents = modalLead?.list_price_anchor_cents
@@ -449,6 +454,7 @@ export function LeadDetailModal({
   const privateClass = shouldBlurPrivate ? " ldm-blur" : "";
 
   const sharedTaken = listPreview?.non_exclusive_buyers_count ?? 0;
+  const slotsLeft = sharedCap - sharedTaken;
   const earlyAccessUntil = listPreview?.early_access_until ?? null;
   const isInEarlyAccess = earlyAccessUntil != null && new Date(earlyAccessUntil) > new Date();
 
@@ -535,7 +541,7 @@ export function LeadDetailModal({
                 <>
                   {isInEarlyAccess && (
                     <div className="ldm-early-access">
-                      ⚡ Pro early access — this lead is not yet open to all buyers
+                      ⚡ Subscriber early access — this lead opens to all buyers soon
                     </div>
                   )}
 
@@ -548,24 +554,58 @@ export function LeadDetailModal({
                       onClick={() => setExclusivityChoice("exclusive")}
                     >
                       Exclusive — {fmtDollarsModal(exclusivePrice)}
-                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>1 buyer only</div>
+                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>1 buyer · sold once · available to all</div>
                     </button>
                     <button
                       type="button"
                       className={`ldm-seg-btn${exclusivityChoice === "non_exclusive" ? " active-shared" : ""}`}
                       onClick={() => setExclusivityChoice("non_exclusive")}
                     >
-                      Non Exclusive — {fmtDollarsModal(sharedPrice)}
+                      Non Exclusive — {isSubscribed ? fmtDollarsModal(sharedPrice) : "Subscribe"}
                       <div style={{ display: "flex", gap: 4, justifyContent: "center", marginTop: 4 }}>
                         {Array.from({ length: sharedCap }).map((_, i) => {
                           let bg = "rgba(255,255,255,0.18)";
-                          if (i < sharedTaken) bg = "#10b981";
-                          else if (i === sharedTaken && sharedTaken === sharedCap - 1) bg = "#f59e0b";
+                          if (i < sharedTaken) bg = i >= sharedCap - 1 ? "#f59e0b" : "#10b981";
                           return <span key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: bg, display: "inline-block" }} />;
                         })}
                       </div>
+                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 3 }}>
+                        {slotsLeft}/{sharedCap} slots · subscribers only
+                      </div>
                     </button>
                   </div>
+
+                  {/* Subscription required notice */}
+                  {sharedBlocked && (
+                    <div style={{
+                      padding: "14px 16px", borderRadius: 12, marginTop: 8,
+                      background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.22)",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+                        <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#c4b5fd", marginBottom: 3 }}>
+                            Subscription required for Non Exclusive
+                          </div>
+                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>
+                            Only active $99/month subscribers can purchase shared leads at the per-buyer price.
+                            Switch to <strong style={{ color: "rgba(255,255,255,0.7)" }}>Exclusive</strong> to buy now, or subscribe to unlock shared pricing.
+                          </div>
+                        </div>
+                      </div>
+                      <Link
+                        href="/subscriptions"
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                          padding: "9px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                          background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                          color: "#fff", textDecoration: "none",
+                        }}
+                      >
+                        Subscribe — $99/mo →
+                      </Link>
+                    </div>
+                  )}
                 </>
               )}
 
@@ -573,7 +613,9 @@ export function LeadDetailModal({
                 <div>
                   <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 4 }}>
                     {purchaseActions ? "Your price" : "Price"}
-                    {isPro && purchaseActions && <span style={{ fontSize: 11, color: "#a5b4fc", marginLeft: 6 }}>10% Pro discount applied</span>}
+                    {isSubscribed && purchaseActions && exclusivityChoice === "non_exclusive" && (
+                      <span style={{ fontSize: 11, color: "#86efac", marginLeft: 6 }}>Subscriber rate</span>
+                    )}
                   </div>
                   <div className="ldm-price-big">
                     {fmtDollarsModal(
@@ -657,7 +699,9 @@ export function LeadDetailModal({
               {purchaseActions && buyMutation?.isError && (
                 <div className="ldm-err">
                   {buyMutation.error instanceof ApiError && buyMutation.error.status === 403
-                    ? "This lead is in Pro early access — upgrade to Pro to purchase now"
+                    ? (buyMutation.error as ApiError).message.includes("subscription")
+                      ? "A $99/month subscription is required to purchase shared leads"
+                      : "This lead is in subscriber early access — subscribe to purchase now"
                     : buyMutation.error instanceof ApiError && buyMutation.error.status === 400
                       ? (buyMutation.error as ApiError).message.includes("wallet") ? "Insufficient wallet balance — top up your wallet" : (buyMutation.error as ApiError).message
                       : buyMutation.error instanceof ApiError && buyMutation.error.status === 409
@@ -683,14 +727,16 @@ export function LeadDetailModal({
                 <button
                   type="button"
                   className="ldm-buy"
-                  disabled={buyMutation.isPending || (!!reserveUntil && secondsLeft <= 0) || !canBuyNow}
+                  disabled={buyMutation.isPending || (!!reserveUntil && secondsLeft <= 0) || !canBuyNow || sharedBlocked}
                   onClick={() => leadId && buyMutation.mutate({ id: leadId, choice: exclusivityChoice })}
                 >
                   {!canBuyNow
-                    ? "Pro early access only"
-                    : buyMutation.isPending
-                      ? "Processing…"
-                      : `Confirm ${exclusivityChoice === "exclusive" ? "exclusive" : "non-exclusive"} purchase`}
+                    ? "Subscriber early access only"
+                    : sharedBlocked
+                      ? "Subscribe to buy shared"
+                      : buyMutation.isPending
+                        ? "Processing…"
+                        : `Confirm ${exclusivityChoice === "exclusive" ? "exclusive" : "non-exclusive"} purchase`}
                 </button>
               )}
 

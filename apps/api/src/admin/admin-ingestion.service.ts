@@ -99,7 +99,7 @@ export class AdminIngestionService {
       price_cents: String(row.price_cents),
       list_price_anchor_cents: String(row.price_cents),
       exclusive_price_cents: String(exclusivePriceCents),
-      max_non_exclusive_buyers: isExclusive ? 1 : 3,
+      max_non_exclusive_buyers: isExclusive ? 1 : (row.lead_type?.trim() === 'outbound' ? 3 : 5),
       metadata: {
         // contact
         seller_name: row.seller_name ?? null,

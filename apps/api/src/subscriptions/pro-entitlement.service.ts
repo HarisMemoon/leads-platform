@@ -6,14 +6,23 @@ import { PlanType } from '../../common/enums/plan-type.enum';
 import { SubscriptionStatus } from '../../common/enums/subscription-status.enum';
 
 /**
- * Encapsulates all Pro-tier entitlement checks so every consumer (leads,
- * distribution, notifications) consults one authoritative source.
+ * Subscription entitlement checks used by leads, distribution, and notifications.
  *
- * Entitlements for the Pro plan:
- *   - 10% discount on every lead purchase
- *   - Exclusive purchase access during the 60-min early-access window
- *   - Priority (immediate) market-alert notifications
+ * The $99/month subscription ("Pro" plan internally) unlocks:
+ *   - Shared lead purchases at flat subscription pricing
+ *     · Inbound leads: $30 each (up to 5 buyers)
+ *     · Outbound leads: $20 each (up to 3 buyers)
+ *   - Early-access window for new leads (60 min head start)
+ *   - Auto-buy distribution participation
+ *
+ * Non-subscribers may only purchase exclusive leads at the full exclusive price.
  */
+
+/** Flat subscription price for inbound shared leads: $30 */
+export const SUBSCRIPTION_PRICE_INBOUND_CENTS = 3000n;
+/** Flat subscription price for outbound shared leads: $20 */
+export const SUBSCRIPTION_PRICE_OUTBOUND_CENTS = 2000n;
+
 @Injectable()
 export class ProEntitlementService {
   constructor(
@@ -21,7 +30,7 @@ export class ProEntitlementService {
     private readonly subscriptionRepo: Repository<Subscription>,
   ) {}
 
-  /** Returns true when the user has an active Pro subscription. */
+  /** Returns true when the user has an active subscription. */
   async isPro(userId: string): Promise<boolean> {
     const row = await this.subscriptionRepo.findOne({
       where: {
@@ -33,25 +42,35 @@ export class ProEntitlementService {
     return row !== null;
   }
 
+  /** Alias for isPro — use when the context is about shared-lead access. */
+  async canBuySharedLead(userId: string): Promise<boolean> {
+    return this.isPro(userId);
+  }
+
   /**
-   * Returns the effective price after applying the Pro 10% discount.
-   * Non-Pro users receive the full price unchanged.
+   * Returns the flat subscription price for a shared lead based on lead_type.
+   * Inbound → $30, Outbound → $20.
+   */
+  getSharedLeadPrice(leadType: string): bigint {
+    return leadType === 'outbound'
+      ? SUBSCRIPTION_PRICE_OUTBOUND_CENTS
+      : SUBSCRIPTION_PRICE_INBOUND_CENTS;
+  }
+
+  /**
+   * Returns the price unchanged. Pricing is flat (set at lead creation) rather
+   * than a percentage discount — kept for call-site compatibility.
    */
   async discountedPriceCents(
-    userId: string,
+    _userId: string,
     priceCents: bigint,
   ): Promise<bigint> {
-    if (await this.isPro(userId)) {
-      return (priceCents * 9n) / 10n; // floor division — 10% off
-    }
     return priceCents;
   }
 
   /**
    * Returns true when the user is allowed to purchase (or auto-buy) a lead.
-   *
-   * During the early-access window (lead.early_access_until is in the future)
-   * only Pro subscribers may proceed.  Outside the window everyone may buy.
+   * During the early-access window only subscribers may proceed.
    */
   async canBuyDuringEarlyAccess(
     userId: string,
@@ -61,7 +80,7 @@ export class ProEntitlementService {
       !lead.early_access_until ||
       new Date() > new Date(lead.early_access_until)
     ) {
-      return true; // window has passed — open to all
+      return true;
     }
     return this.isPro(userId);
   }

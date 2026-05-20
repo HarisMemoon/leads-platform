@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   buyLead,
   getLeadDetail,
@@ -11,6 +12,7 @@ import {
   type MarketplaceLeadRow,
 } from "@/lib/leads-api";
 import { getWalletMe, centsToNumber } from "@/lib/wallet-api";
+import { getMySubscription } from "@/lib/subscriptions-api";
 import { queryKeys } from "@/lib/query-keys";
 import { ApiError } from "@/lib/api";
 import { LeadDetailModal, QualityBar } from "@/components/LeadDetailModal";
@@ -59,16 +61,21 @@ function toSafeCents(value: string | number | null | undefined): number {
 }
 
 /**
- * UX rule: show shared pricing as a fraction of exclusive price (1 / cap).
- * This keeps what users see aligned with the shared-cap model.
+ * Shared price comes from the API as a flat subscription rate:
+ *   Inbound  → $30 (3000 cents)
+ *   Outbound → $20 (2000 cents)
+ * The `shared_price_cents` field on the lead is now always populated by
+ * the backend, so this is just a safe accessor with a sensible fallback.
  */
-function computeSharedDisplayCents(
-  exclusivePriceCents: string | number,
-  sharedCap: number | null | undefined,
+function getSharedDisplayCents(
+  sharedPriceCents: string | number | null | undefined,
+  leadType: string,
 ) {
-  const exclusive = toSafeCents(exclusivePriceCents);
-  const cap = Math.max(1, Number(sharedCap ?? 3));
-  return Math.max(0, Math.floor(exclusive / cap));
+  if (sharedPriceCents != null) {
+    const n = toSafeCents(sharedPriceCents);
+    if (n > 0) return n;
+  }
+  return leadType === "outbound" ? 2000 : 3000;
 }
 
 function addressFromLead(lead: MarketplaceLeadRow) {
@@ -186,6 +193,12 @@ export default function MarketplacePage() {
     queryFn: getWalletMe,
   });
 
+  const { data: subscription } = useQuery({
+    queryKey: queryKeys.subscriptions.me,
+    queryFn: getMySubscription,
+  });
+  const isSubscribed = subscription?.status === "active";
+
   const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: queryKeys.leads.detail(selectedId ?? ""),
     queryFn: () => getLeadDetail(selectedId!),
@@ -234,7 +247,11 @@ export default function MarketplacePage() {
     onError: (err: unknown, vars) => {
       if (err instanceof ApiError) {
         if (err.status === 403) {
-          showToast("This lead is in Pro early access — upgrade to Pro to buy now", "error");
+          if (err.message.includes("subscription")) {
+            showToast("Subscribe to unlock shared lead pricing — $99/month", "error");
+          } else {
+            showToast("This lead is in early access — subscribers get first access", "error");
+          }
         } else if (err.status === 400) {
           showToast(err.message.includes("wallet") ? "Insufficient wallet balance — top up your wallet" : err.message, "error");
         } else if (err.status === 409) {
@@ -373,6 +390,26 @@ export default function MarketplacePage() {
         @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
         .was-price { font-size: 11px; color: rgba(255,255,255,0.3); text-decoration: line-through; }
+
+        /* lead-type badge */
+        .lead-type-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+        .lead-type-badge.inbound  { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; }
+        .lead-type-badge.outbound { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.22); color: #6ee7b7; }
+
+        /* slot progress */
+        .slot-bar { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+        .slot-pips { display: flex; gap: 3px; }
+        .slot-pip { width: 8px; height: 8px; border-radius: 50%; }
+        .slot-pip.taken { background: #10b981; }
+        .slot-pip.warn  { background: #f59e0b; }
+        .slot-pip.open  { background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.18); }
+        .slot-text { font-size: 10px; color: rgba(255,255,255,0.38); }
+
+        /* subscribe lock overlay */
+        .sub-lock { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 8px; border-radius: 10px; background: rgba(99,102,241,0.07); border: 1px dashed rgba(99,102,241,0.25); text-align: center; }
+        .sub-lock-label { font-size: 11px; font-weight: 600; color: rgba(196,181,253,0.8); }
+        .sub-lock-cta { font-size: 10px; color: #a5b4fc; text-decoration: none; font-weight: 700; }
+        .sub-lock-cta:hover { color: #c4b5fd; }
 
         @media (max-width: 960px) {
           .filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -570,12 +607,17 @@ export default function MarketplacePage() {
               )}
 
               {items.map((lead) => {
+                const leadType = (lead.lead_type ?? "inbound").toLowerCase();
                 const exclusivePrice = lead.exclusive_price_cents ?? lead.current_price;
                 const sharedTaken = lead.non_exclusive_buyers_count ?? 0;
-                const sharedCap = lead.max_non_exclusive_buyers ?? 3;
-                const sharedPrice = computeSharedDisplayCents(exclusivePrice, sharedCap);
+                const sharedCap = lead.max_non_exclusive_buyers ?? (leadType === "outbound" ? 3 : 5);
+                // Flat subscription price: $30 inbound / $20 outbound (from API)
+                const sharedPrice = getSharedDisplayCents(lead.shared_price_cents, leadType);
                 const sharedAvailable = sharedTaken < sharedCap;
                 const exclusiveAvailable = sharedTaken === 0;
+                // Partially claimed: some slots taken but still open
+                const isPartiallyClaimed = sharedTaken > 0 && sharedTaken < sharedCap;
+                const slotsLeft = sharedCap - sharedTaken;
 
                 const isInEarlyAccess =
                   lead.early_access_until != null &&
@@ -586,7 +628,10 @@ export default function MarketplacePage() {
 
                 return (
                   <div key={lead.id} className="lead-card" onClick={() => openModal(lead)}>
-                    {/* Title + location */}
+                    {/* Lead type + title */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                      <span className={`lead-type-badge ${leadType}`}>{leadType}</span>
+                    </div>
                     <div className="lead-title">{lead.title}</div>
                     <div className="lead-address">{addressFromLead(lead)}</div>
 
@@ -620,16 +665,17 @@ export default function MarketplacePage() {
                     {isInEarlyAccess && (
                       <div className="early-access-badge">
                         <span>⚡</span>
-                        <span>Pro early access{timeLeft ? ` — opens in ${timeLeft}` : ""}</span>
+                        <span>Subscribers only{timeLeft ? ` — opens to all in ${timeLeft}` : ""}</span>
                       </div>
                     )}
 
                     {/* Dual-price options */}
                     <div className="price-row" onClick={(e) => e.stopPropagation()}>
+                      {/* Exclusive */}
                       <div className={`price-option exclusive${!exclusiveAvailable ? " opacity-40" : ""}`}>
                         <div className="price-option-label">Exclusive</div>
                         <div className="price-option-amount">{fmtDollars(exclusivePrice)}</div>
-                        <div className="price-option-sub">1 buyer only</div>
+                        <div className="price-option-sub">1 buyer only · sold once</div>
                         {!isInEarlyAccess ? (
                           <button
                             type="button"
@@ -640,35 +686,62 @@ export default function MarketplacePage() {
                             {isBuying ? "…" : exclusiveAvailable ? "Buy" : "Locked"}
                           </button>
                         ) : (
-                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Pro only</div>
+                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Subscribers first</div>
                         )}
                       </div>
 
+                      {/* Shared / subscription */}
                       <div className={`price-option non-exclusive${!sharedAvailable ? " opacity-40" : ""}`}>
-                        <div className="price-option-label" style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <div className="price-option-label">
                           Non Exclusive
-                          {sharedTaken < sharedCap && (
-                            <span className={
-                              sharedTaken === 0 ? "slot-dot open"
-                              : sharedTaken < sharedCap - 1 ? "slot-dot taken"
-                              : "slot-dot warn"
-                            } />
+                          {isPartiallyClaimed && (
+                            <span style={{ marginLeft: 5, fontSize: 9, color: "#f59e0b", fontWeight: 700 }}>
+                              PARTIAL
+                            </span>
                           )}
                         </div>
-                        <div className="price-option-amount">{fmtDollars(sharedPrice)}</div>
-                        <div className="price-option-sub" style={{ marginBottom: 2 }}>Up to 3 buyers</div>
-                        {!isInEarlyAccess ? (
-                          <button
-                            type="button"
-                            className="price-option-btn non-exclusive"
-                            disabled={isBuying || !sharedAvailable}
-                            onClick={() => buyMutation.mutate({ id: lead.id, choice: "non_exclusive" })}
-                          >
-                            {isBuying ? "…" : sharedAvailable ? "Buy" : "Full"}
-                          </button>
-                        ) : (
-                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Pro only</div>
+                        <div className="price-option-amount">
+                          {isSubscribed ? fmtDollars(sharedPrice) : <span style={{ fontSize: 13 }}>Subscribe</span>}
+                        </div>
+                        {/* Slot pips */}
+                        {sharedAvailable && (
+                          <div className="slot-bar">
+                            <div className="slot-pips">
+                              {Array.from({ length: sharedCap }).map((_, i) => (
+                                <span key={i} className={`slot-pip ${
+                                  i < sharedTaken
+                                    ? sharedTaken >= sharedCap - 1 ? "warn" : "taken"
+                                    : "open"
+                                }`} />
+                              ))}
+                            </div>
+                            <span className="slot-text">{slotsLeft}/{sharedCap} left</span>
+                          </div>
                         )}
+                        {!sharedAvailable && (
+                          <div className="price-option-sub">All slots filled</div>
+                        )}
+                        {!isInEarlyAccess && sharedAvailable ? (
+                          isSubscribed ? (
+                            <button
+                              type="button"
+                              className="price-option-btn non-exclusive"
+                              disabled={isBuying}
+                              onClick={() => buyMutation.mutate({ id: lead.id, choice: "non_exclusive" })}
+                            >
+                              {isBuying ? "…" : "Buy"}
+                            </button>
+                          ) : (
+                            <div className="sub-lock">
+                              <span className="sub-lock-label">Subscribers only</span>
+                              <Link href="/subscriptions" className="sub-lock-cta" onClick={(e) => e.stopPropagation()}>
+                                Subscribe $99/mo →
+                              </Link>
+                            </div>
+                          )
+                        ) : isInEarlyAccess ? (
+                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Subscribers first</div>
+                        ) : null}
                       </div>
                     </div>
                   </div>

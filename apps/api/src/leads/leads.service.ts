@@ -32,7 +32,11 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ExclusivityLevel } from '../../common/enums/exclusivity-level.enum';
 import { redactLeadMetadata } from './lead-redaction.util';
 import { IntegrationsService } from '../integrations/integrations.service';
-import { ProEntitlementService } from '../subscriptions/pro-entitlement.service';
+import {
+  ProEntitlementService,
+  SUBSCRIPTION_PRICE_INBOUND_CENTS,
+  SUBSCRIPTION_PRICE_OUTBOUND_CENTS,
+} from '../subscriptions/pro-entitlement.service';
 import { DistributionRule } from '../entities/distribution-rule.entity';
 
 export type ExclusivityChoice = 'exclusive' | 'non_exclusive';
@@ -73,16 +77,23 @@ export class LeadsService {
   }
 
   /**
-   * Canonical shared-per-buyer pricing: shared = exclusive / cap.
-   * This is the single source used by quote + purchase charging.
+   * Flat subscription pricing per spec:
+   *   Inbound  → $30 (SUBSCRIPTION_PRICE_INBOUND_CENTS)
+   *   Outbound → $20 (SUBSCRIPTION_PRICE_OUTBOUND_CENTS)
+   *
+   * Falls back to stored shared_price_cents if explicitly set by admin
+   * (allows per-lead overrides without breaking the default model).
    */
   private getSharedPriceCents(
-    lead: Pick<Lead, 'exclusive_price_cents' | 'price_cents' | 'max_non_exclusive_buyers'>,
+    lead: Pick<Lead, 'lead_type' | 'exclusive_price_cents' | 'price_cents' | 'max_non_exclusive_buyers' | 'shared_price_cents'>,
   ): bigint {
-    const exclusive = this.getExclusivePriceCents(lead);
-    const cap = BigInt(this.getSharedCap(lead));
-    const computed = exclusive / cap;
-    return computed > 0n ? computed : 1n;
+    if (lead.shared_price_cents != null) {
+      const stored = BigInt(lead.shared_price_cents);
+      if (stored > 0n) return stored;
+    }
+    return lead.lead_type === 'outbound'
+      ? SUBSCRIPTION_PRICE_OUTBOUND_CENTS
+      : SUBSCRIPTION_PRICE_INBOUND_CENTS;
   }
 
   private normalizeContactValue(value: unknown): string | null {
@@ -135,15 +146,20 @@ export class LeadsService {
       Date.now() + earlyAccessMinutes * 60 * 1000,
     );
 
+    // Max shared buyers defaults based on lead type: inbound = 5, outbound = 3
+    const leadType = (rest as any).lead_type ?? 'inbound';
+    const defaultMaxBuyers = leadType === 'outbound' ? 3 : 5;
+
     const exclusivePriceCents =
       (dto as any).exclusive_price_cents != null
         ? String((dto as any).exclusive_price_cents)
         : dto.price_cents.toString();
 
+    // shared_price_cents is null by default — computed at query time as exclusive / cap
     const sharedPriceCents =
       (dto as any).shared_price_cents != null
         ? String((dto as any).shared_price_cents)
-        : dto.price_cents.toString();
+        : null;
 
     const lead = this.leadRepo.create({
       ...rest,
@@ -155,7 +171,7 @@ export class LeadsService {
       price_cents: dto.price_cents.toString(),
       exclusive_price_cents: exclusivePriceCents,
       shared_price_cents: sharedPriceCents,
-      max_non_exclusive_buyers: (dto as any).max_non_exclusive_buyers ?? 3,
+      max_non_exclusive_buyers: (dto as any).max_non_exclusive_buyers ?? defaultMaxBuyers,
       early_access_until: earlyAccessUntil,
     });
 
@@ -485,24 +501,35 @@ export class LeadsService {
     const [items, total] = await qb.getManyAndCount();
 
     return {
-      items: items.map((lead) => ({
-        id: lead.id,
-        title: lead.title,
-        market: lead.market,
-        type: lead.lead_type,
-        exclusivity: lead.exclusivity_level,
-        quality_score: lead.quality_score,
-        current_price: lead.price_cents,
-        list_price_anchor_cents: lead.list_price_anchor_cents,
-        marketplace_tier: lead.marketplace_tier,
-        exclusive_price_cents: lead.exclusive_price_cents,
-        shared_price_cents: lead.shared_price_cents,
-        max_non_exclusive_buyers: lead.max_non_exclusive_buyers,
-        non_exclusive_buyers_count: lead.non_exclusive_buyers_count,
-        early_access_until: lead.early_access_until,
-        metadata: redactLeadMetadata(lead.metadata ?? {}),
-        created_at: lead.created_at,
-      })),
+      items: items.map((lead) => {
+        // Compute flat subscription price: $30 inbound / $20 outbound.
+        // Admin-set shared_price_cents overrides if present.
+        const flatSharedPrice = this.getSharedPriceCents(lead as any).toString();
+        const exclusiveEligible = lead.non_exclusive_buyers_count === 0;
+        const subscriptionEligible =
+          lead.non_exclusive_buyers_count < lead.max_non_exclusive_buyers;
+        return {
+          id: lead.id,
+          title: lead.title,
+          market: lead.market,
+          type: lead.lead_type,
+          lead_type: lead.lead_type,
+          exclusivity: lead.exclusivity_level,
+          quality_score: lead.quality_score,
+          current_price: lead.price_cents,
+          list_price_anchor_cents: lead.list_price_anchor_cents,
+          marketplace_tier: lead.marketplace_tier,
+          exclusive_price_cents: lead.exclusive_price_cents,
+          shared_price_cents: flatSharedPrice,
+          max_non_exclusive_buyers: lead.max_non_exclusive_buyers,
+          non_exclusive_buyers_count: lead.non_exclusive_buyers_count,
+          early_access_until: lead.early_access_until,
+          exclusive_eligible: exclusiveEligible,
+          subscription_eligible: subscriptionEligible,
+          metadata: redactLeadMetadata(lead.metadata ?? {}),
+          created_at: lead.created_at,
+        };
+      }),
       pagination: {
         page,
         limit,
@@ -611,32 +638,34 @@ export class LeadsService {
     shared_price_cents: string;
     effective_price_cents: string;
     is_pro: boolean;
+    is_subscribed: boolean;
+    subscription_required_for_shared: boolean;
     early_access_until: Date | null;
     can_buy_now: boolean;
+    lead_type: string;
   }> {
     const lead = await this.findLeadOrThrow(leadId);
 
     const exclusiveRaw = this.getExclusivePriceCents(lead);
-    const sharedRaw = this.getSharedPriceCents(lead);
+    const sharedRaw = this.getSharedPriceCents(lead as any);
 
-    const [isPro, canBuyNow] = await Promise.all([
+    const [isSubscribed, canBuyNow] = await Promise.all([
       this.proEntitlementService.isPro(userId),
       this.proEntitlementService.canBuyDuringEarlyAccess(userId, lead),
     ]);
 
     const rawPrice = choice === 'exclusive' ? exclusiveRaw : sharedRaw;
-    const effectivePrice = await this.proEntitlementService.discountedPriceCents(
-      userId,
-      rawPrice,
-    );
 
     return {
       exclusive_price_cents: exclusiveRaw.toString(),
       shared_price_cents: sharedRaw.toString(),
-      effective_price_cents: effectivePrice.toString(),
-      is_pro: isPro,
+      effective_price_cents: rawPrice.toString(),
+      is_pro: isSubscribed,
+      is_subscribed: isSubscribed,
+      subscription_required_for_shared: !isSubscribed,
       early_access_until: lead.early_access_until,
       can_buy_now: canBuyNow,
+      lead_type: lead.lead_type,
     };
   }
 
@@ -1110,9 +1139,19 @@ export class LeadsService {
         throw new BadRequestException('Lead is not available');
       }
 
+      // ── Subscription gate for shared purchases ───────────────────────────
+      if (exclusivityChoice === 'non_exclusive') {
+        const isSubscribed = await this.proEntitlementService.canBuySharedLead(buyerId);
+        if (!isSubscribed) {
+          throw new ForbiddenException(
+            'An active $99/month subscription is required to purchase shared leads. Non-subscribers may only buy exclusive leads.',
+          );
+        }
+      }
+
       // ── Dual-price exclusivity lifecycle ─────────────────────────────────
       const rawExclusivePrice = this.getExclusivePriceCents(lead);
-      const rawSharedPrice = this.getSharedPriceCents(lead);
+      const rawSharedPrice = this.getSharedPriceCents(lead as any);
 
       if (exclusivityChoice === 'exclusive') {
         if (lead.non_exclusive_buyers_count > 0) {
@@ -1227,12 +1266,15 @@ export class LeadsService {
 
       // ── Update lead counters & status ───────────────────────────────────
       if (exclusivityChoice === 'exclusive') {
+        // Exclusively sold — one buyer, removed from marketplace
         lead.status = LeadStatus.SOLD;
       } else {
         lead.non_exclusive_buyers_count += 1;
         if (lead.non_exclusive_buyers_count >= lead.max_non_exclusive_buyers) {
-          lead.status = LeadStatus.SOLD;
+          // All shared slots filled — sold out
+          lead.status = LeadStatus.SOLD_OUT;
         }
+        // Partially claimed leads keep AVAILABLE so they remain in the marketplace
       }
       lead.reserved_until = null;
       lead.reserved_by_user = null;

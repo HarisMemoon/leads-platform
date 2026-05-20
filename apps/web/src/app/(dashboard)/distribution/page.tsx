@@ -178,8 +178,8 @@ function MultiSelect({
       </div>
 
       {selected.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {selected.map((v) => {
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+          {selected.slice(0, 3).map((v) => {
             const opt = options.find((o) => o.value === v);
             return (
               <span key={v} style={{
@@ -198,6 +198,23 @@ function MultiSelect({
               </span>
             );
           })}
+          {selected.length > 3 && (
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "3px 10px", borderRadius: 20,
+              background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)",
+              color: "rgba(196,181,253,0.7)", fontSize: 12, fontWeight: 600,
+            }}>
+              +{selected.length - 3} more
+            </span>
+          )}
+          <button type="button" onClick={() => onChange([])} style={{
+            background: "none", border: "none", cursor: "pointer",
+            padding: "2px 6px", fontSize: 11, color: "rgba(255,255,255,0.28)",
+            fontWeight: 500,
+          }}>
+            Clear all
+          </button>
         </div>
       )}
 
@@ -790,8 +807,8 @@ function PricingRulesPanel({
       stackAboveNeighbors
       accentColor="#22c55e"
       icon={<CircleDollarSign size={15} color="#86efac" aria-hidden />}
-      title="Ping pricing & bid rules"
-      subtitle="These rules tell the real-time ping engine what markets you buy and what you will pay."
+      title="Ping / Post — Pricing & Bid Rules"
+      subtitle="Each rule defines a market + lead type combination you want to receive via real-time vendor ping. Set a fixed price or max bid — the highest bidder wins the post."
     >
       {rules.length > 0 && (
         <div style={{ display: "grid", gap: 10, marginBottom: 18 }}>
@@ -1046,6 +1063,48 @@ export default function DistributionSettingsPage() {
                 walletBalanceCents={walletBalanceCents}
                 distributionLocked={Boolean(me?.distribution_locked)}
               />
+
+              {/* ── Ping / Post divider ── */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, margin: "36px 0 28px" }}>
+                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 7,
+                  padding: "7px 16px", borderRadius: 999,
+                  background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.2)",
+                  color: "#86efac", fontSize: 12, fontWeight: 700, letterSpacing: "0.04em",
+                }}>
+                  <Zap size={12} />
+                  PING / POST SYSTEM
+                </div>
+                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+              </div>
+
+              {/* ── Ping/Post context card ── */}
+              <div style={{
+                padding: "16px 20px", borderRadius: 14, marginBottom: 18,
+                background: "rgba(34,197,94,0.05)", border: "1px solid rgba(34,197,94,0.15)",
+              }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <div style={{
+                    width: 34, height: 34, borderRadius: 9, flexShrink: 0,
+                    background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.22)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <Zap size={16} color="#86efac" />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+                      What is Ping / Post?
+                    </div>
+                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.48)", lineHeight: 1.55 }}>
+                      Vendors ping this platform in real-time with a lead. Your pricing rules below tell the engine
+                      which markets you want, what you'll pay, and how to prioritize. If you win the bid, the full
+                      lead is posted to you instantly — separate from the auto-buy distribution engine above.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <PricingRulesPanel
                 rules={pricingRules}
                 distributionLocked={Boolean(me?.distribution_locked)}

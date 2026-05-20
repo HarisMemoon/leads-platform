@@ -33,17 +33,20 @@ export type MarketplaceLeadRow = {
   title: string;
   market: string;
   type: string;
+  lead_type: string; // "inbound" | "outbound"
   exclusivity: string;
   quality_score: number;
   current_price: string;
   list_price_anchor_cents: string | null;
   marketplace_tier: string | null;
-  // Dual-price fields (marketplace v2)
+  // Dual-price fields
   exclusive_price_cents: string | null;
-  shared_price_cents: string | null;
-  max_non_exclusive_buyers: number;
+  shared_price_cents: string | null; // flat subscription price: $30 inbound / $20 outbound
+  max_non_exclusive_buyers: number;  // 5 inbound / 3 outbound
   non_exclusive_buyers_count: number;
   early_access_until: string | null;
+  exclusive_eligible: boolean;
+  subscription_eligible: boolean;
   metadata: Record<string, unknown>;
   created_at: string;
 };
@@ -162,6 +165,9 @@ export type LeadQuoteResponse = {
   shared_price_cents: string;
   effective_price_cents: string;
   is_pro: boolean;
+  is_subscribed: boolean;
+  subscription_required_for_shared: boolean;
+  lead_type: string;
   early_access_until: string | null;
   can_buy_now: boolean;
 };

@@ -14,9 +14,6 @@ import {
   Mail,
   MessageSquare,
   PlugZap,
-  Route,
-  ToggleLeft,
-  ToggleRight,
   Wallet,
   XCircle,
   Zap,
@@ -65,10 +62,10 @@ const EXCLUSIVITY_OPTIONS: { value: ExclusivityPreference; label: string; desc: 
 ];
 
 const PRO_BULLETS = [
-  "$100 in monthly lead credits, every billing cycle",
-  "10% off all lead purchases, applied automatically",
-  "Early marketplace access before free-plan buyers",
-  "Priority routing and instant lead notifications",
+  "Shared inbound leads at $30/buyer (up to 5 buyers per lead)",
+  "Shared outbound leads at $20/buyer (up to 3 buyers per lead)",
+  "Early access — see new leads 60 min before non-subscribers",
+  "Cancel anytime via billing portal",
 ];
 
 const FREE_BULLETS = [
@@ -544,25 +541,6 @@ export default function SettingsPage() {
         }
         .alerts-empty-link:hover { background: rgba(245,158,11,0.14); }
 
-        /* ── Toggle button ── */
-        .toggle-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          padding: 9px 16px;
-          border-radius: 10px;
-          font-family: "Inter", sans-serif;
-          font-size: 13px;
-          font-weight: 700;
-          cursor: pointer;
-          transition: all 0.16s;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-        .toggle-on  { background: rgba(6,182,212,0.12); border: 1px solid rgba(6,182,212,0.28); color: #67e8f9; }
-        .toggle-off { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.45); }
-        .toggle-btn:hover:not(:disabled) { transform: translateY(-1px); }
-        .toggle-btn:disabled { opacity: 0.5; cursor: default; }
 
         /* ── CRM status badge ── */
         .crm-badge { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
@@ -696,8 +674,51 @@ export default function SettingsPage() {
         .feedback.err { background: rgba(239,68,68,0.09);  border: 1px solid rgba(239,68,68,0.2);  color: #fca5a5; }
 
         /* ── Body grid for auto-buy ── */
-        .dist-body { display: grid; gap: 26px; transition: opacity 0.2s; }
-        .dist-body.dimmed { opacity: 0.35; pointer-events: none; user-select: none; }
+        .dist-body { display: grid; gap: 26px; }
+
+        /* ── Auto-buy status banner ── */
+        .dist-status {
+          display: flex; align-items: center; gap: 10px;
+          padding: 12px 16px; border-radius: 12px;
+          font-size: 13px; font-weight: 500; line-height: 1.45;
+        }
+        .dist-status.paused {
+          background: rgba(245,158,11,0.07); border: 1px solid rgba(245,158,11,0.18);
+          color: rgba(255,255,255,0.55);
+        }
+        .dist-status.running {
+          background: rgba(6,182,212,0.07); border: 1px solid rgba(6,182,212,0.2);
+          color: rgba(255,255,255,0.6);
+        }
+        .dist-status-dot {
+          width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+        }
+        .dist-status.running .dist-status-dot { background: #06b6d4; box-shadow: 0 0 0 3px rgba(6,182,212,0.18); }
+        .dist-status.paused  .dist-status-dot { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,0.15); }
+
+        /* ── Toggle switch ── */
+        .toggle-switch {
+          position: relative; display: inline-flex; align-items: center;
+          gap: 10px; cursor: pointer; user-select: none;
+          font-size: 13px; font-weight: 600;
+        }
+        .toggle-track {
+          width: 44px; height: 24px; border-radius: 999px; flex-shrink: 0;
+          border: 1.5px solid rgba(255,255,255,0.1);
+          background: rgba(255,255,255,0.06);
+          transition: background 0.2s, border-color 0.2s;
+          position: relative;
+        }
+        .toggle-track.on { background: rgba(6,182,212,0.25); border-color: rgba(6,182,212,0.4); }
+        .toggle-thumb {
+          position: absolute; top: 3px; left: 3px;
+          width: 16px; height: 16px; border-radius: 50%;
+          background: rgba(255,255,255,0.35);
+          transition: transform 0.2s, background 0.2s;
+        }
+        .toggle-track.on .toggle-thumb { transform: translateX(20px); background: #67e8f9; }
+        .toggle-label-off { color: rgba(255,255,255,0.38); }
+        .toggle-label-on  { color: #67e8f9; }
 
         .spin { animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -743,8 +764,8 @@ export default function SettingsPage() {
           {!subLoading && !isPro && (
             <div className="upgrade-banner">
               <span>
-                <strong>Upgrade to Pro</strong> — $49/month includes $100 in monthly lead credits,
-                10% off every purchase, and early marketplace access.
+                <strong>Subscribe for $99/month</strong> — unlock shared lead pricing ($30 inbound / $20 outbound),
+                early access to new leads, and auto-buy distribution.
               </span>
               <Link href="/subscriptions" className="upgrade-link">
                 See plans <ArrowRight size={14} strokeWidth={2} />
@@ -873,7 +894,7 @@ export default function SettingsPage() {
                         ))}
                       </ul>
                       <Link href="/subscriptions" className="upgrade-plan-btn">
-                        Upgrade to Pro — $49/month
+                        Subscribe — $99/month
                         <ArrowRight size={14} strokeWidth={2} />
                       </Link>
                     </>
@@ -955,30 +976,51 @@ export default function SettingsPage() {
                 <div className="fs-icon"><Zap size={18} strokeWidth={1.8} /></div>
                 <div>
                   <div className="fs-title">Auto-buy rules</div>
-                  <p className="fs-desc">Automatically purchase matching leads when your wallet has sufficient funds</p>
+                  <p className="fs-desc">
+                    {distLoading
+                      ? "Loading…"
+                      : distEnabled
+                        ? `Active · ${distMarkets.length > 0 ? `${distMarkets.length} market${distMarkets.length > 1 ? "s" : ""}` : "all markets"} · ${distLeadTypes.length > 0 ? `${distLeadTypes.length} type${distLeadTypes.length > 1 ? "s" : ""}` : "all types"}${distMaxPrice ? ` · max $${distMaxPrice}` : ""}`
+                        : "Configure your rules, then enable to start auto-buying leads automatically"}
+                  </p>
                 </div>
               </div>
-              <button
-                type="button"
-                className={`toggle-btn ${distEnabled ? "toggle-on" : "toggle-off"}`}
-                onClick={() => setDistEnabled(v => !v)}
-                disabled={distLoading}
-              >
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                <Link href="/distribution" className="fs-link-btn">
+                  Full settings <ArrowRight size={14} strokeWidth={2} />
+                </Link>
                 {distLoading ? (
-                  <Loader2 size={15} className="spin" strokeWidth={2} />
-                ) : distEnabled ? (
-                  <ToggleRight size={18} strokeWidth={1.8} />
+                  <Loader2 size={15} className="spin" strokeWidth={2} style={{ color: "rgba(255,255,255,0.3)" }} />
                 ) : (
-                  <ToggleLeft size={18} strokeWidth={1.8} />
+                  <button
+                    type="button"
+                    className="toggle-switch"
+                    onClick={() => setDistEnabled(v => !v)}
+                    aria-label={distEnabled ? "Disable auto-buy" : "Enable auto-buy"}
+                  >
+                    <div className={`toggle-track${distEnabled ? " on" : ""}`}>
+                      <div className="toggle-thumb" />
+                    </div>
+                    <span className={distEnabled ? "toggle-label-on" : "toggle-label-off"}>
+                      {distEnabled ? "Enabled" : "Disabled"}
+                    </span>
+                  </button>
                 )}
-                {distLoading ? "Loading" : distEnabled ? "Enabled" : "Disabled"}
-              </button>
+              </div>
             </div>
 
-            <div className={`fs-body dist-body${!distEnabled ? " dimmed" : ""}`}>
+            <div className="fs-body dist-body">
+              {/* Status banner */}
+              <div className={`dist-status ${distEnabled ? "running" : "paused"}`}>
+                <span className="dist-status-dot" />
+                {distEnabled
+                  ? "Auto-buy is active — matching leads will be purchased automatically when your wallet balance is sufficient."
+                  : "Auto-buy is paused — configure your rules below, then enable to activate. Your settings are saved even while paused."}
+              </div>
+
               <div>
                 <label className="field-label">Markets to watch</label>
-                <p className="field-desc">Select the markets you want auto-buy to monitor. Leave empty to match all.</p>
+                <p className="field-desc">Select the markets you want auto-buy to monitor. Leave empty to match all markets.</p>
                 <div className="chips">
                   {MARKET_OPTIONS.map(m => (
                     <button
@@ -986,7 +1028,6 @@ export default function SettingsPage() {
                       type="button"
                       className={`chip${distMarkets.includes(m) ? " on" : ""}`}
                       onClick={() => toggleMarket(m)}
-                      disabled={!distEnabled}
                     >
                       {distMarkets.includes(m) && <Check size={11} strokeWidth={2.5} />}
                       {m}
@@ -997,7 +1038,7 @@ export default function SettingsPage() {
 
               <div>
                 <label className="field-label">Lead types</label>
-                <p className="field-desc">Only auto-buy leads of these types. Leave empty to match all types.</p>
+                <p className="field-desc">Only auto-buy leads matching these types. Leave empty to match all types.</p>
                 <div className="chips">
                   {LEAD_TYPE_OPTIONS.map(lt => (
                     <button
@@ -1005,7 +1046,6 @@ export default function SettingsPage() {
                       type="button"
                       className={`chip${distLeadTypes.includes(lt.value) ? " on" : ""}`}
                       onClick={() => toggleLeadType(lt.value)}
-                      disabled={!distEnabled}
                     >
                       {distLeadTypes.includes(lt.value) && <Check size={11} strokeWidth={2.5} />}
                       {lt.label}
@@ -1016,7 +1056,7 @@ export default function SettingsPage() {
 
               <div className="two-col">
                 <div className="input-field">
-                  <label htmlFor="dist-min-wallet">Min wallet balance</label>
+                  <label htmlFor="dist-min-wallet">Minimum wallet balance</label>
                   <div className="prefixed">
                     <span className="pfx">$</span>
                     <input
@@ -1025,10 +1065,9 @@ export default function SettingsPage() {
                       value={distMinWallet}
                       onChange={e => setDistMinWallet(e.target.value)}
                       placeholder="0"
-                      disabled={!distEnabled}
                     />
                   </div>
-                  <span className="field-hint">Keep this amount in your wallet before auto-buying</span>
+                  <span className="field-hint">Auto-buy pauses if wallet drops below this amount</span>
                 </div>
                 <div className="input-field">
                   <label htmlFor="dist-max-price">Max price per lead</label>
@@ -1040,15 +1079,14 @@ export default function SettingsPage() {
                       value={distMaxPrice}
                       onChange={e => setDistMaxPrice(e.target.value)}
                       placeholder="No limit"
-                      disabled={!distEnabled}
                     />
                   </div>
-                  <span className="field-hint">Skip leads priced above this amount</span>
+                  <span className="field-hint">Leads above this price are skipped</span>
                 </div>
               </div>
 
               <div>
-                <label className="field-label">Purchase type</label>
+                <label className="field-label">Purchase type preference</label>
                 <p className="field-desc">
                   Exclusive leads have one buyer. Non Exclusive allows up to 3 buyers at a lower per-buyer price.
                 </p>
@@ -1059,7 +1097,6 @@ export default function SettingsPage() {
                       type="button"
                       className={`excl-btn${distExclusivity === opt.value ? " sel" : ""}`}
                       onClick={() => setDistExclusivity(opt.value)}
-                      disabled={!distEnabled}
                     >
                       <div className="excl-circle">
                         {distExclusivity === opt.value && <Check size={11} strokeWidth={2.5} />}
@@ -1076,7 +1113,9 @@ export default function SettingsPage() {
 
             <div className="sec-foot">
               <span className="foot-hint">
-                {walletBalance !== null ? `Wallet balance: $${walletBalance}` : "Loading wallet…"}
+                {walletBalance !== null
+                  ? <>Wallet: <strong style={{ color: "rgba(255,255,255,0.7)" }}>${walletBalance}</strong>{" · "}Changes take effect immediately on save</>
+                  : "Loading wallet…"}
               </span>
               <div className="foot-right">
                 {distMsg && (
@@ -1094,7 +1133,7 @@ export default function SettingsPage() {
                   disabled={distMutation.isPending}
                 >
                   {distMutation.isPending && <Loader2 size={14} className="spin" strokeWidth={2} />}
-                  {distMutation.isPending ? "Saving…" : "Save preferences"}
+                  {distMutation.isPending ? "Saving…" : "Save rules"}
                 </button>
               </div>
             </div>

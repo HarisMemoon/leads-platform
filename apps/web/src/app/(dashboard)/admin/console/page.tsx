@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -19,6 +20,7 @@ import {
   getAdminLeads,
   getAdminMetricsBreakdown,
   getAdminMetricsIntake,
+  getAdminPing,
   getAdminPings,
   getAdminRefundRequests,
   getAdminResourceItems,
@@ -56,6 +58,7 @@ import {
   type AdminLeadRow,
   type AdminPlanFeatureBullet,
   type AdminPingRow,
+  type AdminPingDetail,
   type AdminRefundRequestRow,
   type AdminSubscriptionPlan,
   type VendorIntegrationDto,
@@ -390,6 +393,7 @@ function fmtCents(v: string | number | undefined | null): string {
 function statusTone(s: string): Tone {
   if (s === "available" || s === "active") return "good";
   if (s === "sold" || s === "distributed" || s === "assigned") return "info";
+  if (s === "sold_out") return "info";
   if (s === "duplicate" || s === "pending") return "warn";
   if (s === "rejected" || s === "refunded") return "bad";
   return "default";
@@ -1206,8 +1210,9 @@ function InventoryTab() {
                 <th style={S.th}>Market</th>
                 <th style={S.th}>Source</th>
                 <th style={S.th}>Status</th>
-                <th style={S.th}>Excl.</th>
-                <th style={S.th}>Non-excl.</th>
+                <th style={S.th}>Excl. Price</th>
+                <th style={S.th}>Sub. Price</th>
+                <th style={S.th}>Slots</th>
                 <th style={S.th}>Buyers</th>
                 <th style={S.th}>Created</th>
                 <th style={S.th}>Actions</th>
@@ -1222,7 +1227,26 @@ function InventoryTab() {
                   <td style={S.td}>{sourceChip(l.source)}</td>
                   <td style={S.td}><Pill tone={statusTone(l.status)}>{l.status}</Pill></td>
                   <td style={S.td}>{fmtPrice(l.exclusive_price_cents)}</td>
-                  <td style={S.td}>{fmtPrice(l.shared_price_cents)}</td>
+                  <td style={S.td}>
+                    {l.lead_type === "outbound"
+                      ? "$20"
+                      : "$30"}
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginLeft: 4 }}>
+                      {l.lead_type === "outbound" ? "outbound" : "inbound"}
+                    </span>
+                  </td>
+                  <td style={S.td}>
+                    <span style={{
+                      fontSize: 12,
+                      color: l.non_exclusive_buyers_count >= l.max_non_exclusive_buyers
+                        ? "#f87171"
+                        : l.non_exclusive_buyers_count > 0
+                          ? "#fbbf24"
+                          : "rgba(255,255,255,0.45)",
+                    }}>
+                      {l.non_exclusive_buyers_count}/{l.max_non_exclusive_buyers}
+                    </span>
+                  </td>
                   <td style={S.td}>
                     {l.buyers.length > 0
                       ? <span title={l.buyers.join(", ")} style={{ fontSize: 12, color: "#a5b4fc" }}>{l.buyers.length} buyer{l.buyers.length !== 1 ? "s" : ""}</span>
@@ -4852,11 +4876,66 @@ function OutboundBuyersSection() {
 
 // ---------- Vendor pings ----------
 
+function PingAuditRow({ pingId }: { pingId: string }) {
+  const detail = useQuery<AdminPingDetail>({
+    queryKey: ["admin", "ping-detail", pingId],
+    queryFn: () => getAdminPing(pingId),
+  });
+
+  if (detail.isLoading) {
+    return (
+      <tr>
+        <td colSpan={8} style={{ padding: "10px 18px", color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
+          Loading audit…
+        </td>
+      </tr>
+    );
+  }
+
+  const audit = detail.data?.audit ?? [];
+  if (audit.length === 0) {
+    return (
+      <tr>
+        <td colSpan={8} style={{ padding: "10px 18px", color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
+          No buyer audit records found.
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <>
+      {audit.map((a) => (
+        <tr key={a.id} style={{ background: "rgba(0,0,0,0.25)" }}>
+          <td colSpan={2} style={{ ...S.td, paddingLeft: 32, color: "rgba(255,255,255,0.5)", fontSize: 11 }}>
+            ↳ {a.buyer?.email ?? "unknown buyer"}
+          </td>
+          <td colSpan={2} style={{ ...S.td, fontSize: 11 }}>
+            <span style={{ color: a.eligible ? "#34d399" : "#f87171", fontWeight: 600 }}>
+              {a.eligible ? "eligible" : "rejected"}
+            </span>
+          </td>
+          <td colSpan={2} style={{ ...S.td, fontSize: 11, color: a.eligible ? "rgba(255,255,255,0.5)" : "#fca5a5" }}>
+            {a.rejection_reason ?? (a.eligible ? "—" : "unknown")}
+          </td>
+          <td style={{ ...S.td, fontSize: 11 }}>
+            {a.price_cents ? fmtCents(a.price_cents) : "—"}
+          </td>
+          <td style={{ ...S.td, fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+            {a.pricing_rule?.name ?? "—"}
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
 function VendorPingsTab() {
   const qc = useQueryClient();
   const vendors = useQuery({ queryKey: queryKeys.admin.vendors, queryFn: getAdminVendors });
   const pings = useQuery({ queryKey: queryKeys.admin.pings, queryFn: () => getAdminPings(75) });
   const [showAdd, setShowAdd] = useState(false);
+  const [expandedPingId, setExpandedPingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [sources, setSources] = useState("");
@@ -5058,29 +5137,43 @@ function VendorPingsTab() {
                 {pingList.map((row: AdminPingRow) => {
                   const isMatch = row.matched_buyer != null;
                   const isRejected = !!row.rejection_reason;
+                  const isExpanded = expandedPingId === row.id;
                   return (
-                    <tr key={row.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-                      <td style={S.td}>{fmtShortDate(row.created_at)}</td>
-                      <td style={S.td}>{row.vendor?.name ?? "—"}</td>
-                      <td style={S.td}>
-                        {row.market || [row.city, row.state].filter(Boolean).join(", ") || "—"}
-                      </td>
-                      <td style={S.td}>{row.lead_type}</td>
-                      <td style={S.td}>
-                        <Pill tone={isMatch ? "good" : isRejected ? "bad" : "default"}>
-                          {row.status}
-                        </Pill>
-                      </td>
-                      <td style={{ ...S.td, color: isMatch ? "#fff" : "rgba(255,255,255,0.3)" }}>
-                        {row.matched_buyer?.email ?? "—"}
-                      </td>
-                      <td style={S.td}>
-                        {row.matched_price_cents ? fmtCents(row.matched_price_cents) : "—"}
-                      </td>
-                      <td style={S.td}>
-                        {row.latency_ms != null ? `${row.latency_ms}ms` : "—"}
-                      </td>
-                    </tr>
+                    <React.Fragment key={row.id}>
+                      <tr
+                        style={{
+                          borderTop: "1px solid rgba(255,255,255,0.05)",
+                          cursor: "pointer",
+                          background: isExpanded ? "rgba(99,102,241,0.08)" : undefined,
+                        }}
+                        onClick={() => setExpandedPingId(isExpanded ? null : row.id)}
+                      >
+                        <td style={S.td}>{fmtShortDate(row.created_at)}</td>
+                        <td style={S.td}>{row.vendor?.name ?? "—"}</td>
+                        <td style={S.td}>
+                          {row.market || [row.city, row.state].filter(Boolean).join(", ") || "—"}
+                        </td>
+                        <td style={S.td}>{row.lead_type}</td>
+                        <td style={S.td}>
+                          <Pill tone={isMatch ? "good" : isRejected ? "bad" : "default"}>
+                            {row.status}
+                          </Pill>
+                        </td>
+                        <td style={{ ...S.td, color: isMatch ? "#fff" : "rgba(255,255,255,0.3)" }}>
+                          {row.matched_buyer?.email ?? "—"}
+                        </td>
+                        <td style={S.td}>
+                          {row.matched_price_cents ? fmtCents(row.matched_price_cents) : "—"}
+                        </td>
+                        <td style={{ ...S.td, color: "rgba(255,255,255,0.4)" }}>
+                          {row.latency_ms != null ? `${row.latency_ms}ms` : "—"}
+                          <span style={{ marginLeft: 6, fontSize: 10, color: "rgba(255,255,255,0.25)" }}>
+                            {isExpanded ? "▲" : "▼"}
+                          </span>
+                        </td>
+                      </tr>
+                      {isExpanded && <PingAuditRow pingId={row.id} />}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

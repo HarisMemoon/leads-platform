@@ -90,6 +90,10 @@ import {
     @Column({ type: 'timestamp with time zone', nullable: true })
     early_access_until!: Date | null
 
+    /** Optional hard expiry — lead removed from marketplace after this date. */
+    @Column({ type: 'timestamp with time zone', nullable: true })
+    expiration_date!: Date | null
+
     // ─────────────────────────────────────────────────────────────────────────
 
     @Column({ type: 'int', default: 0 })
