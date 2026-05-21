@@ -14,6 +14,7 @@ describe('PingService', () => {
     const matcher = { match: jest.fn() };
     const leadsService = { buyLead: jest.fn() };
     const leadPricingService = { applyTierToLead: jest.fn(async (lead) => lead) };
+    const outboundPingService = { pingAll: jest.fn().mockResolvedValue({ sold: false, attempts: 0 }) };
     const service = new PingService(
       vendorRepo as any,
       pricingRuleRepo as any,
@@ -25,6 +26,7 @@ describe('PingService', () => {
       matcher as any,
       leadsService as any,
       leadPricingService as any,
+      outboundPingService as any,
     );
 
     vendorRepo.findOne.mockResolvedValue({

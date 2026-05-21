@@ -12,6 +12,7 @@ import { VendorIntegration } from '../entities/vendor-integration.entity';
 import { VendorWebhookHit } from '../entities/vendor-webhook-hit.entity';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { LeadsModule } from '../leads/leads.module';
+import { OutboundModule } from '../outbound/outbound.module';
 import { PingAdminController } from './ping-admin.controller';
 import { PingEligibilityService } from './ping-eligibility.service';
 import { PingMatchingService } from './ping-matching.service';
@@ -34,6 +35,7 @@ import { VendorPingController } from './vendor-ping.controller';
       WalletAccount,
     ]),
     forwardRef(() => LeadsModule),
+    OutboundModule,
   ],
   controllers: [VendorPingController, PricingRulesController, PingAdminController],
   providers: [PingService, PingMatchingService, PingEligibilityService],

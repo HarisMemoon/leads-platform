@@ -21,6 +21,7 @@ import { User } from '../entities/user.entity';
 import { VendorIntegration } from '../entities/vendor-integration.entity';
 import { LeadsService } from '../leads/leads.service';
 import { LeadPricingService } from '../leads/lead-pricing.service';
+import { OutboundPingService } from '../outbound/outbound-ping.service';
 import {
   CreateVendorIntegrationDto,
   PatchVendorIntegrationDto,
@@ -49,6 +50,7 @@ export class PingService {
     private readonly matcher: PingMatchingService,
     private readonly leadsService: LeadsService,
     private readonly leadPricingService: LeadPricingService,
+    private readonly outboundPingService: OutboundPingService,
   ) {}
 
   async receivePing(apiKey: string | undefined, dto: VendorPingDto) {
@@ -164,7 +166,19 @@ export class PingService {
           payload: dto as Record<string, any>,
         }),
       );
-      return { accepted: false, post_id: rejected.id, status: 'rejected', error: 'duplicate_lead' };
+
+      // Still attempt outbound buyer pings for the existing duplicate lead
+      // so it can be offered to the highest external bidder
+      void this.outboundPingService.pingAll(duplicate).catch(() => {/* logged internally */});
+
+      return {
+        accepted: false,
+        post_id: rejected.id,
+        status: 'rejected',
+        error: 'duplicate_lead',
+        duplicate_lead_id: duplicate.id,
+        note: 'Lead already exists in platform. Forwarding to outbound buyers.',
+      };
     }
 
     const lead = await this.createPostedLead(ping, dto);
@@ -193,6 +207,11 @@ export class PingService {
       await this.postRepo.save(post);
       ping.status = 'posted';
       await this.pingRepo.save(ping);
+
+      // Fire outbound buyer pings — highest external bidder can also acquire
+      // this lead (e.g. non-exclusive or as an additional sale channel)
+      void this.outboundPingService.pingAll(lead).catch(() => {/* logged internally */});
+
       return {
         accepted: true,
         post_id: post.id,
