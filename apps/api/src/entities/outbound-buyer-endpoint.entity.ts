@@ -29,6 +29,12 @@ export class OutboundBuyerEndpoint {
   @Column({ type: 'jsonb', default: '{}' })
   field_map!: Record<string, string>;
 
+  /** Static fields merged into every ping and post payload for this buyer.
+   *  E.g. { "vendor": "Newleey", "source": "newleey-platform" }
+   */
+  @Column({ type: 'jsonb', default: '{}' })
+  static_fields!: Record<string, unknown>;
+
   @Column({ type: 'bigint', default: '0' })
   price_floor_cents!: string;
 

@@ -678,6 +678,7 @@ export type OutboundBuyerEndpointDto = {
   auth_header_name: string | null;
   auth_header_value: string | null;
   field_map: Record<string, string>;
+  static_fields: Record<string, unknown>;
   price_floor_cents: string;
   timeout_ms: number;
   is_active: boolean;
@@ -719,6 +720,7 @@ export function postAdminOutboundBuyer(body: {
   auth_header_name?: string | null;
   auth_header_value?: string | null;
   field_map?: Record<string, string>;
+  static_fields?: Record<string, unknown>;
   price_floor_cents?: number;
   timeout_ms?: number;
   is_active?: boolean;
@@ -735,6 +737,7 @@ export function patchAdminOutboundBuyer(
     auth_header_name: string | null;
     auth_header_value: string | null;
     field_map: Record<string, string>;
+    static_fields: Record<string, unknown>;
     price_floor_cents: number;
     timeout_ms: number;
     is_active: boolean;

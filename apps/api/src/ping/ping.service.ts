@@ -66,10 +66,10 @@ export class PingService {
     if (existing) return this.toPingResponse(existing);
 
     const duplicate = await this.findDuplicateLead({
-      phone: dto.metadata?.phone,
-      email: dto.metadata?.email,
-      address: dto.metadata?.address,
-      zip: dto.zip,
+      phone: dto.phone ?? dto.metadata?.phone,
+      email: dto.email ?? dto.metadata?.email,
+      address: dto.fulladdress ?? dto.address_1 ?? dto.metadata?.address,
+      zip: dto.zip ?? dto.Zip,
     });
 
     const ping = this.pingRepo.create({
@@ -79,10 +79,10 @@ export class PingService {
       market: this.marketFromDto(dto),
       city: this.clean(dto.city),
       state: this.clean(dto.state)?.toUpperCase() ?? null,
-      zip: this.clean(dto.zip),
+      zip: this.clean(dto.zip ?? dto.Zip),
       county: this.clean(dto.county),
-      property_type: this.clean(dto.property_type),
-      lead_type: dto.lead_type,
+      property_type: this.clean(dto.property_type ?? dto.Propertytype),
+      lead_type: dto.lead_type ?? 'motivated_seller',
       source: this.clean(dto.source),
       exclusivity_choice: dto.exclusivity_choice ?? 'exclusive',
       payload: dto as Record<string, any>,
@@ -148,8 +148,8 @@ export class PingService {
     const duplicate = await this.findDuplicateLead({
       phone: dto.phone,
       email: dto.email,
-      address: dto.address,
-      zip: ping.zip,
+      address: dto.address ?? dto.fulladdress ?? dto.address_1,
+      zip: dto.zip ?? dto.Zip ?? ping.zip,
     });
     if (duplicate) {
       const rejected = await this.postRepo.save(
@@ -334,27 +334,74 @@ export class PingService {
   }
 
   private async createPostedLead(ping: LeadPing, dto: VendorPostDto): Promise<Lead> {
+    // ── Derive canonical fields from vendor's various naming conventions ──────
+    const sellerName =
+      dto.seller_name?.trim() ||
+      [dto.first_name, dto.last_name].filter(Boolean).join(' ') ||
+      'Unknown';
+
+    const address =
+      dto.address?.trim() ||
+      dto.fulladdress?.trim() ||
+      [dto.address_1, dto.address_2].filter(Boolean).join(', ') ||
+      '';
+
+    // Post-level location overrides ping-level if provided
+    const city  = this.clean(dto.city)  ?? ping.city;
+    const state = (this.clean(dto.state)?.toUpperCase()) ?? ping.state;
+    const zip   = this.clean(dto.zip ?? dto.Zip) ?? ping.zip;
+    const propertyType = this.clean(dto.property_type ?? dto.Propertytype) ?? ping.property_type;
+
+    const market =
+      ping.market ??
+      this.marketFromParts(city, state, zip);
+
     const metadata = {
+      // base: whatever was in the ping payload
       ...(ping.payload ?? {}),
+      // extra metadata bag from vendor
       ...(dto.metadata ?? {}),
-      seller_name: dto.seller_name,
-      phone: dto.phone ?? null,
-      email: dto.email ?? null,
-      address: dto.address,
-      notes: dto.notes ?? null,
-      vendor_ping_id: ping.vendor_ping_id,
-      vendor_lead_id: dto.vendor_lead_id,
-      city: ping.city,
-      state: ping.state,
-      zip: ping.zip,
-      county: ping.county,
-      property_type: ping.property_type,
+
+      // ── Seller identity ────────────────────────────────────────────────────
+      seller_name:       sellerName,
+      first_name:        dto.first_name   ?? null,
+      last_name:         dto.last_name    ?? null,
+      phone:             dto.phone        ?? null,
+      email:             dto.email        ?? null,
+
+      // ── Property address ───────────────────────────────────────────────────
+      address,
+      address_1:         dto.address_1    ?? null,
+      address_2:         dto.address_2    ?? null,
+      fulladdress:       dto.fulladdress  ?? null,
+      city,
+      state,
+      zip,
+      county:            ping.county,
+
+      // ── Property details ───────────────────────────────────────────────────
+      property_type:     propertyType,
+      listed:            dto.listed          ?? null,
+      howsoontosell:     dto.howsoontosell   ?? null,
+      reasonforselling:  dto.reasonforselling ?? null,
+      property_condition: dto.property_condition ?? null,
+
+      // ── Attribution & compliance ───────────────────────────────────────────
+      vendor:            dto.vendor       ?? null,
+      referrer:          dto.referrer     ?? null,
+      IP_Address:        dto.IP_Address   ?? null,
+      TrustedForm:       dto.TrustedForm  ?? null,
+
+      // ── Notes & IDs ────────────────────────────────────────────────────────
+      notes:             dto.notes        ?? null,
+      vendor_ping_id:    ping.vendor_ping_id,
+      vendor_lead_id:    dto.vendor_lead_id,
     };
 
     const lead = this.leadRepo.create({
       external_id: dto.vendor_lead_id,
       source: ping.source ?? 'vendor_ping',
-      market: ping.market ?? this.marketFromParts(ping.city, ping.state, ping.zip),
+      market,
       lead_type: ping.lead_type,
       status: LeadStatus.AVAILABLE,
       exclusivity_level:
@@ -364,10 +411,10 @@ export class PingService {
       exclusive_price_cents: ping.matched_price_cents,
       shared_price_cents: ping.matched_price_cents,
       max_non_exclusive_buyers: ping.exclusivity_choice === 'exclusive' ? 1 : 3,
-      title: `${ping.lead_type} lead in ${ping.market ?? ping.zip ?? ping.state ?? 'matched market'}`,
+      title: `${ping.lead_type} lead in ${market}`,
       metadata,
       canonical_lead_source: ping.source ?? 'vendor_ping',
-      utm: {},
+      utm: dto.referrer ? { source: dto.referrer } : {},
       early_access_until: null,
     });
 
@@ -442,7 +489,7 @@ export class PingService {
 
   private marketFromDto(dto: VendorPingDto): string {
     if (dto.market?.trim()) return dto.market.trim();
-    return this.marketFromParts(dto.city, dto.state, dto.zip);
+    return this.marketFromParts(dto.city, dto.state, dto.zip ?? dto.Zip);
   }
 
   private marketFromParts(city?: string | null, state?: string | null, zip?: string | null): string {

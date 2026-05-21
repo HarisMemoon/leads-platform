@@ -36,6 +36,13 @@ export class CreateOutboundBuyerDto {
   @IsObject()
   field_map?: Record<string, string>;
 
+  /** Static key-value pairs merged into every request to this buyer.
+   *  E.g. { "vendor": "Newleey" }
+   */
+  @IsOptional()
+  @IsObject()
+  static_fields?: Record<string, unknown>;
+
   /** Minimum bid in cents (e.g. 2500 = $25.00) */
   @IsOptional()
   @IsNumber()
@@ -77,6 +84,10 @@ export class PatchOutboundBuyerDto {
   @IsOptional()
   @IsObject()
   field_map?: Record<string, string>;
+
+  @IsOptional()
+  @IsObject()
+  static_fields?: Record<string, unknown>;
 
   @IsOptional()
   @IsNumber()

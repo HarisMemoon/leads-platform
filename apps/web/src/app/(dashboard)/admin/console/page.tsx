@@ -4588,6 +4588,11 @@ function OutboundBuyerForm({
   const [fieldMapJson, setFieldMapJson] = useState(
     initial?.field_map ? JSON.stringify(initial.field_map, null, 2) : "{}",
   );
+  const [staticFieldsJson, setStaticFieldsJson] = useState(
+    initial?.static_fields && Object.keys(initial.static_fields).length > 0
+      ? JSON.stringify(initial.static_fields, null, 2)
+      : '{\n  "vendor": "Newleey"\n}',
+  );
   const [floor, setFloor] = useState(
     initial?.price_floor_cents ? String(Math.round(Number(initial.price_floor_cents) / 100)) : "0",
   );
@@ -4596,13 +4601,20 @@ function OutboundBuyerForm({
 
   function handleSave() {
     let fieldMap: Record<string, string> = {};
+    let staticFields: Record<string, unknown> = {};
     try {
       fieldMap = JSON.parse(fieldMapJson);
-      setJsonError(null);
     } catch {
       setJsonError("Field map is not valid JSON");
       return;
     }
+    try {
+      staticFields = JSON.parse(staticFieldsJson);
+    } catch {
+      setJsonError("Static fields is not valid JSON");
+      return;
+    }
+    setJsonError(null);
     onSave({
       name,
       ping_url: pingUrl,
@@ -4610,6 +4622,7 @@ function OutboundBuyerForm({
       auth_header_name: authName.trim() || null,
       auth_header_value: authValue.trim() || null,
       field_map: fieldMap,
+      static_fields: staticFields,
       price_floor_cents: Math.round(parseFloat(floor) * 100) || 0,
       timeout_ms: Number(timeout) || 3000,
       is_active: true,
@@ -4632,12 +4645,12 @@ function OutboundBuyerForm({
           <input style={S.inp} value={postUrl} onChange={(e) => setPostUrl(e.target.value)} placeholder="https://buyer.example.com/post" />
         </label>
         <label style={S.label}>
-          Auth header name (e.g. X-Api-Key)
-          <input style={S.inp} value={authName} onChange={(e) => setAuthName(e.target.value)} placeholder="X-Api-Key" />
+          Auth header name (e.g. Authorization)
+          <input style={S.inp} value={authName} onChange={(e) => setAuthName(e.target.value)} placeholder="Authorization" />
         </label>
         <label style={S.label}>
           Auth header value
-          <input style={S.inp} type="password" value={authValue} onChange={(e) => setAuthValue(e.target.value)} placeholder="secret" />
+          <input style={S.inp} type="password" value={authValue} onChange={(e) => setAuthValue(e.target.value)} placeholder="Basic dXNlcjpwYXNz" />
         </label>
         <label style={S.label}>
           Minimum bid floor ($)
@@ -4648,11 +4661,25 @@ function OutboundBuyerForm({
           <input style={S.inp} type="number" value={timeout} onChange={(e) => setTimeout_(e.target.value)} placeholder="3000" />
         </label>
         <label style={{ ...S.label, gridColumn: "1 / -1" }}>
-          Field mapping (JSON: <code style={{ fontSize: 11 }}>{`{"our_field":"their_field"}`}</code>)
+          Field mapping (JSON) — rename our fields to their field names
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 4, display: "block" }}>
+            {`{ "lead_type": "leadType", "address": "address_1", "zip_code": "zip" }`}
+          </span>
           <textarea
-            style={{ ...S.inp, minHeight: 80, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+            style={{ ...S.inp, minHeight: 72, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
             value={fieldMapJson}
             onChange={(e) => setFieldMapJson(e.target.value)}
+          />
+        </label>
+        <label style={{ ...S.label, gridColumn: "1 / -1" }}>
+          Static fields (JSON) — always merged into every ping &amp; post
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 4, display: "block" }}>
+            Set vendor name, source label, or any fixed value the buyer requires
+          </span>
+          <textarea
+            style={{ ...S.inp, minHeight: 72, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+            value={staticFieldsJson}
+            onChange={(e) => setStaticFieldsJson(e.target.value)}
           />
         </label>
       </div>
@@ -4671,7 +4698,8 @@ function OutboundBuyersSection() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { status: string; bid?: number | null; latency?: number; error?: string | null }>>({});
+  const [testResults, setTestResults] = useState<Record<string, { status: string; bid?: number | null; latency?: number; error?: string | null; response?: Record<string, unknown> | null }>>({});
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
   const buyers = useQuery({ queryKey: queryKeys.admin.outboundBuyers, queryFn: getAdminOutboundBuyers });
   const logs = useQuery({
@@ -4699,7 +4727,7 @@ function OutboundBuyersSection() {
     onSuccess: (result, id) => {
       setTestResults((prev) => ({
         ...prev,
-        [id]: { status: result.status, bid: result.bid_price_cents, latency: result.latency_ms, error: result.error },
+        [id]: { status: result.status, bid: result.bid_price_cents, latency: result.latency_ms, error: result.error, response: result.response },
       }));
       void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundLogs() });
     },
@@ -4781,14 +4809,33 @@ function OutboundBuyersSection() {
                   {buyer.auth_header_name ? ` · Auth: ${buyer.auth_header_name}` : ""}
                 </div>
                 {testResults[buyer.id] && (
-                  <div style={{ marginTop: 8, padding: "6px 10px", borderRadius: 6, background: "rgba(0,0,0,0.2)", fontSize: 12 }}>
-                    Last test: {" "}
-                    <span style={{ color: statusColor(testResults[buyer.id].status), fontWeight: 600 }}>
-                      {testResults[buyer.id].status}
-                    </span>
-                    {testResults[buyer.id].bid != null && ` · bid $${((testResults[buyer.id].bid ?? 0) / 100).toFixed(2)}`}
-                    {testResults[buyer.id].latency != null && ` · ${testResults[buyer.id].latency}ms`}
-                    {testResults[buyer.id].error && <span style={{ color: "#f87171" }}> · {testResults[buyer.id].error}</span>}
+                  <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 8, background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.07)", fontSize: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: testResults[buyer.id].response ? 8 : 0 }}>
+                      <span style={{ color: "rgba(255,255,255,0.45)" }}>Last test:</span>
+                      <span style={{ color: statusColor(testResults[buyer.id].status), fontWeight: 700 }}>
+                        {testResults[buyer.id].status}
+                      </span>
+                      {testResults[buyer.id].bid != null && (
+                        <span style={{ color: "#34d399" }}>· bid ${((testResults[buyer.id].bid ?? 0) / 100).toFixed(2)}</span>
+                      )}
+                      {testResults[buyer.id].latency != null && (
+                        <span style={{ color: "rgba(255,255,255,0.35)" }}>· {testResults[buyer.id].latency}ms</span>
+                      )}
+                      {testResults[buyer.id].error && (
+                        <span style={{ color: "#f87171" }}>· {testResults[buyer.id].error}</span>
+                      )}
+                    </div>
+                    {testResults[buyer.id].response && (
+                      <pre style={{
+                        margin: 0, padding: "8px 10px", borderRadius: 6,
+                        background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.06)",
+                        fontSize: 11, color: "rgba(255,255,255,0.7)",
+                        overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all",
+                        maxHeight: 200, overflowY: "auto",
+                      }}>
+                        {JSON.stringify(testResults[buyer.id].response, null, 2)}
+                      </pre>
+                    )}
                   </div>
                 )}
               </div>
@@ -4840,30 +4887,74 @@ function OutboundBuyersSection() {
             <tbody>
               {logs.data.map((l: OutboundPingLogRow) => {
                 const ep = (buyers.data ?? []).find((b) => b.id === l.buyer_endpoint_id);
+                const isExpanded = expandedLogId === l.id;
+                const hasDetail = !!(l.response_payload || l.error_message);
                 return (
-                  <tr key={l.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-                    <td style={S.td}>{new Date(l.created_at).toLocaleString()}</td>
-                    <td style={S.td}>{ep?.name ?? l.buyer_endpoint_id.slice(0, 8) + "…"}</td>
-                    <td style={S.td}>
-                      <Pill
-                        tone={
-                          l.status === "accepted" || l.status === "posted"
-                            ? "good"
-                            : l.status === "below_floor"
-                            ? "warn"
-                            : l.status === "timeout" || l.status === "error"
-                            ? "bad"
-                            : "default"
-                        }
-                      >
-                        {l.status}{l.is_test ? " (test)" : ""}
-                      </Pill>
-                    </td>
-                    <td style={S.td}>{l.bid_price_cents != null ? `$${(Number(l.bid_price_cents) / 100).toFixed(2)}` : "—"}</td>
-                    <td style={S.td}>${(Number(l.floor_price_cents) / 100).toFixed(2)}</td>
-                    <td style={S.td}>{l.latency_ms != null ? `${l.latency_ms}ms` : "—"}</td>
-                    <td style={{ ...S.td, color: "rgba(255,255,255,0.45)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.error_message ?? "—"}</td>
-                  </tr>
+                  <>
+                    <tr
+                      key={l.id}
+                      style={{
+                        borderTop: "1px solid rgba(255,255,255,0.05)",
+                        cursor: hasDetail ? "pointer" : "default",
+                        background: isExpanded ? "rgba(99,102,241,0.07)" : undefined,
+                      }}
+                      onClick={() => hasDetail && setExpandedLogId(isExpanded ? null : l.id)}
+                    >
+                      <td style={S.td}>{new Date(l.created_at).toLocaleString()}</td>
+                      <td style={S.td}>{ep?.name ?? l.buyer_endpoint_id.slice(0, 8) + "…"}</td>
+                      <td style={S.td}>
+                        <Pill
+                          tone={
+                            l.status === "accepted" || l.status === "posted"
+                              ? "good"
+                              : l.status === "below_floor"
+                              ? "warn"
+                              : l.status === "timeout" || l.status === "error"
+                              ? "bad"
+                              : "default"
+                          }
+                        >
+                          {l.status}{l.is_test ? " (test)" : ""}
+                        </Pill>
+                      </td>
+                      <td style={S.td}>{l.bid_price_cents != null ? `$${(Number(l.bid_price_cents) / 100).toFixed(2)}` : "—"}</td>
+                      <td style={S.td}>${(Number(l.floor_price_cents) / 100).toFixed(2)}</td>
+                      <td style={S.td}>{l.latency_ms != null ? `${l.latency_ms}ms` : "—"}</td>
+                      <td style={{ ...S.td, color: "rgba(255,255,255,0.45)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {l.error_message ?? "—"}
+                        {hasDetail && <span style={{ marginLeft: 6, opacity: 0.4, fontSize: 10 }}>{isExpanded ? "▲" : "▼"}</span>}
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr style={{ background: "rgba(0,0,0,0.3)" }}>
+                        <td colSpan={7} style={{ padding: "10px 18px" }}>
+                          {l.error_message && (
+                            <div style={{ marginBottom: 8, fontSize: 12, color: "#f87171", fontWeight: 600 }}>
+                              Error: {l.error_message}
+                            </div>
+                          )}
+                          {l.response_payload ? (
+                            <>
+                              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>
+                                Buyer response:
+                              </div>
+                              <pre style={{
+                                margin: 0, padding: "10px 12px", borderRadius: 8,
+                                background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.07)",
+                                fontSize: 11, color: "rgba(255,255,255,0.75)",
+                                overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all",
+                                maxHeight: 300, overflowY: "auto",
+                              }}>
+                                {JSON.stringify(l.response_payload, null, 2)}
+                              </pre>
+                            </>
+                          ) : (
+                            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>No response body received.</div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>

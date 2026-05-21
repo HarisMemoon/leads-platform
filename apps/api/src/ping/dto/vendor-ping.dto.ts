@@ -15,6 +15,7 @@ export class VendorPingDto {
   @IsNotEmpty()
   vendor_ping_id!: string;
 
+  // ── Location ─────────────────────────────────────────────────────────────────
   @IsOptional()
   @IsString()
   city?: string;
@@ -27,6 +28,11 @@ export class VendorPingDto {
   @IsString()
   zip?: string;
 
+  /** Accepts "Zip" (vendor PascalCase) as well as "zip" */
+  @IsOptional()
+  @IsString()
+  Zip?: string;
+
   @IsOptional()
   @IsString()
   county?: string;
@@ -35,13 +41,41 @@ export class VendorPingDto {
   @IsString()
   market?: string;
 
+  // ── Property details ─────────────────────────────────────────────────────────
   @IsOptional()
   @IsString()
   property_type?: string;
 
+  /** Vendor PascalCase variant — maps to property_type internally */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  lead_type!: string;
+  Propertytype?: string;
+
+  /** Whether the property is listed on MLS — "true" / "false" */
+  @IsOptional()
+  @IsString()
+  listed?: string;
+
+  /** Seller's timeline — e.g. "ASAP", "Within 3 Months" */
+  @IsOptional()
+  @IsString()
+  howsoontosell?: string;
+
+  /** Reason for selling — e.g. "Inherited", "Foreclosure" */
+  @IsOptional()
+  @IsString()
+  reasonforselling?: string;
+
+  /** Property condition */
+  @IsOptional()
+  @IsString()
+  property_condition?: string;
+
+  // ── Lead classification ───────────────────────────────────────────────────────
+  /** Lead type — e.g. "motivated_seller", "Outbound", "Inbound" */
+  @IsOptional()
+  @IsString()
+  lead_type?: string;
 
   @IsOptional()
   @IsString()
@@ -61,6 +95,52 @@ export class VendorPingDto {
   @IsArray()
   @IsString({ each: true })
   motivation_tags?: string[];
+
+  // ── Seller identity (pre-ping enrichment) ────────────────────────────────────
+  @IsOptional()
+  @IsString()
+  first_name?: string;
+
+  @IsOptional()
+  @IsString()
+  last_name?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  address_1?: string;
+
+  @IsOptional()
+  @IsString()
+  address_2?: string;
+
+  @IsOptional()
+  @IsString()
+  fulladdress?: string;
+
+  // ── Attribution & compliance ─────────────────────────────────────────────────
+  @IsOptional()
+  @IsString()
+  vendor?: string;
+
+  @IsOptional()
+  @IsString()
+  referrer?: string;
+
+  @IsOptional()
+  @IsString()
+  IP_Address?: string;
+
+  @IsOptional()
+  @IsString()
+  TrustedForm?: string;
 
   @IsOptional()
   @IsObject()
