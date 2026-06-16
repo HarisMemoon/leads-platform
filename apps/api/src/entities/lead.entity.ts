@@ -75,8 +75,8 @@ import {
     @Column({ type: 'bigint', nullable: true })
     shared_price_cents!: string | null
 
-    /** Maximum number of non-exclusive (shared) buyers allowed. Default 3. */
-    @Column({ type: 'int', default: 3 })
+    /** Maximum number of non-exclusive (shared) buyers allowed. Default 5. */
+    @Column({ type: 'int', default: 5 })
     max_non_exclusive_buyers!: number
 
     /** Running count of completed non-exclusive purchases. */
@@ -132,6 +132,33 @@ import {
     @Column({ type: 'timestamp with time zone', nullable: true })
     acquired_at!: Date | null
   
+    /** Set to true when CRM delivery has permanently failed after all retries.
+     *  The lead remains available to the buyer in their dashboard. */
+    @Column({ type: 'boolean', default: false })
+    crm_delivery_failed!: boolean
+
+    /* ── Internal cost tracking (admin-only) ──────────────────────────────── */
+
+    @Column({ type: 'bigint', nullable: true })
+    internal_cost_cents!: string | null
+
+    /** What Newleey paid via ping/post to acquire this lead from the vendor */
+    @Column({ type: 'bigint', nullable: true })
+    ping_post_cost_cents!: string | null
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    campaign_name!: string | null
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    ad_source!: string | null
+
+    @Column({ type: 'text', nullable: true })
+    cost_notes!: string | null
+
+    /** Whether this lead has been marked as bad quality by admin. */
+    @Column({ type: 'boolean', default: false })
+    is_bad_lead!: boolean
+
     /*
     Relations
     */

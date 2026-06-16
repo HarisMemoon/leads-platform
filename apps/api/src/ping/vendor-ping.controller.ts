@@ -1,5 +1,6 @@
 import { Body, Controller, Headers, Post } from '@nestjs/common';
 
+import { VendorDirectLeadDto } from './dto/vendor-direct-lead.dto';
 import { VendorPingDto } from './dto/vendor-ping.dto';
 import { VendorPostDto } from './dto/vendor-post.dto';
 import { PingService } from './ping.service';
@@ -22,5 +23,13 @@ export class VendorPingController {
     @Body() dto: VendorPostDto,
   ) {
     return this.pingService.receivePost(apiKey, dto);
+  }
+
+  @Post('lead')
+  lead(
+    @Headers('x-vendor-api-key') apiKey: string | undefined,
+    @Body() dto: VendorDirectLeadDto,
+  ) {
+    return this.pingService.receiveDirectLead(apiKey, dto);
   }
 }

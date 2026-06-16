@@ -23,6 +23,9 @@ import { PatchAssignmentLifecycleDto } from './dto/patch-assignment-lifecycle.dt
 import { CreateRefundRequestDto } from './dto/create-refund-request.dto';
 import { RefundRequestsService } from './refund-requests.service';
 import { Request } from 'express';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { LeadPricingConfig } from '../entities/lead-pricing-config.entity';
 
 class BuyLeadDto {
   @IsOptional()
@@ -41,7 +44,15 @@ export class MarketplaceController {
   constructor(
     private readonly leadsService: LeadsService,
     private readonly refundRequestsService: RefundRequestsService,
+    @InjectRepository(LeadPricingConfig)
+    private readonly pricingConfigRepo: Repository<LeadPricingConfig>,
   ) {}
+
+  /** Public pricing endpoint — returns current inbound/outbound pricing config */
+  @Get('pricing-config')
+  getPricingConfig() {
+    return this.pricingConfigRepo.find({ order: { lead_type: 'ASC' } });
+  }
 
   @Get('marketplace')
   listMarketplace(@Query() query: ListMarketplaceLeadsDto) {
@@ -141,6 +152,16 @@ export class MarketplaceController {
     @Query() query: ListMyLeadsDto,
   ) {
     return this.leadsService.getMyLeads(req.user.userId, query);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.BUYER)
+  @Patch(':id/exclusive-buyout')
+  exclusiveBuyout(
+    @Req() req: Request & { user: { userId: string } },
+    @Param('id', new ParseUUIDPipe()) id: string,
+  ) {
+    return this.leadsService.exclusiveBuyout(req.user.userId, id);
   }
 
   @UseGuards(JwtAuthGuard)

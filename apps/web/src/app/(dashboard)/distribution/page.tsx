@@ -21,7 +21,7 @@ import {
   Sliders,
   Tag,
   Wallet,
-  X,
+  X, 
   Zap,
 } from "lucide-react";
 import {
@@ -78,6 +78,24 @@ function nullableInt(v: string): number | null {
   if (isNaN(n) || v.trim() === "") return null;
   return n;
 }
+
+const PURCHASE_TYPE_OPTIONS = [
+  {
+    value: "exclusive_only" as const,
+    label: "Exclusive",
+    desc: "Sole buyer on each lead",
+  },
+  {
+    value: "non_exclusive_only" as const,
+    label: "Non Exclusive",
+    desc: "Up to 5 buyers Inbound and up to 3 buyers Outbound at lower price",
+  },
+  {
+    value: "both" as const,
+    label: "Either",
+    desc: "Auto-buy whichever qualifies",
+  },
+];
 
 /* ─── NumberField ────────────────────────────────────────────────────────── */
 
@@ -488,11 +506,20 @@ function DistributionForm({
   const [markets, setMarkets] = useState<string[]>(initial.market_filters ?? []);
   const [leadTypes, setLeadTypes] = useState<string[]>(initial.lead_type_filters ?? []);
   const [cooldown, setCooldown] = useState(String(initial.cooldown_minutes ?? 0));
+  const [exclusivity, setExclusivity] = useState<
+    "exclusive_only" | "non_exclusive_only" | "both"
+  >(
+    initial.exclusivity_preference === "exclusive_only" ||
+      initial.exclusivity_preference === "non_exclusive_only"
+      ? initial.exclusivity_preference
+      : "both",
+  );
 
   const liveRule: DistributionRuleDto = {
     ...initial,
     participation_enabled: participation,
     min_wallet_balance_cents: String(Math.round(parseFloat(minBalance || "0") * 100)),
+    exclusivity_preference: exclusivity,
   };
 
   const mutation = useMutation({
@@ -509,6 +536,7 @@ function DistributionForm({
         market_filters: markets,
         lead_type_filters: leadTypes,
         cooldown_minutes: parseInt(cooldown, 10) || 0,
+        exclusivity_preference: exclusivity,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.distribution.me });
@@ -681,6 +709,74 @@ function DistributionForm({
             {leadTypes.length > 0 && <><span style={{ color: "#67e8f9", fontWeight: 600 }}>{leadTypes.length} lead type{leadTypes.length !== 1 ? "s" : ""}</span></>}
           </div>
         )}
+      </SectionCard>
+
+      {/* ── Purchase type preference ── */}
+      <SectionCard
+        accentColor="#8b5cf6"
+        icon={<Zap size={15} color="#c4b5fd" aria-hidden />}
+        title="Purchase type preference"
+        subtitle="Choose whether Auto Purchase should target exclusive leads, non-exclusive leads, or either."
+      >
+        <div style={{ marginBottom: 12, fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6 }}>
+          Exclusive leads have one buyer. Non Exclusive allows up to 3 buyers at a lower per-buyer price.
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
+          {PURCHASE_TYPE_OPTIONS.map((opt) => {
+            const selected = exclusivity === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setExclusivity(opt.value)}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  padding: "15px 16px",
+                  borderRadius: 14,
+                  border: selected
+                    ? "1px solid rgba(139,92,246,0.45)"
+                    : "1px solid rgba(255,255,255,0.08)",
+                  background: selected
+                    ? "rgba(139,92,246,0.12)"
+                    : "rgba(255,255,255,0.025)",
+                  color: "#fff",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  transition: "border-color 0.15s, background 0.15s, transform 0.15s",
+                }}
+              >
+                <div
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    flexShrink: 0,
+                    marginTop: 1,
+                    border: selected
+                      ? "1px solid rgba(196,181,253,0.6)"
+                      : "1px solid rgba(255,255,255,0.18)",
+                    background: selected ? "rgba(139,92,246,0.95)" : "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {selected ? <CheckCircle2 size={11} color="#fff" /> : null}
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+                    {opt.label}
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.42)", lineHeight: 1.5 }}>
+                    {opt.desc}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </SectionCard>
 
       {/* ── Cooldown ── */}

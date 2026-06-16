@@ -13,6 +13,11 @@ export class SubscriptionsController {
     return this.subscriptionsService.getPlanCatalog();
   }
 
+  @Get('pricing')
+  pricing() {
+    return this.subscriptionsService.getPricing();
+  }
+
   @Post('checkout')
   checkout(
     @Req() req: { user: { userId: string } },

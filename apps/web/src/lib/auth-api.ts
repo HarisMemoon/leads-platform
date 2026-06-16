@@ -1,4 +1,4 @@
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 
 /** Response from GET /auth/me (user loaded from DB) */
 export type AuthMeDto = {
@@ -13,4 +13,18 @@ export type AuthMeDto = {
 
 export function getAuthMe() {
   return apiGet<AuthMeDto>("/auth/me");
+}
+
+export type TermsStatusDto = {
+  accepted: boolean;
+  terms_version: string;
+  accepted_at: string | null;
+};
+
+export function getTermsStatus() {
+  return apiGet<TermsStatusDto>("/terms/status");
+}
+
+export function acceptTerms() {
+  return apiPost<{ accepted: boolean; accepted_at: string }>("/terms/accept", {});
 }

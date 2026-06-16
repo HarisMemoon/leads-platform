@@ -65,6 +65,17 @@ export function cancelSubscription() {
   return apiPost<SubscriptionDto>('/subscriptions/cancel');
 }
 
+export type SubscriptionPricingDto = {
+  proMonthlyPriceCents: number;
+  proDisplayPrice: string;
+  sharedInboundPriceCents: number;
+  sharedOutboundPriceCents: number;
+};
+
+export function getSubscriptionPricing() {
+  return apiGet<SubscriptionPricingDto>('/subscriptions/pricing');
+}
+
 export function createCustomerPortal() {
   return apiPost<{ url: string }>('/stripe/customer-portal');
 }

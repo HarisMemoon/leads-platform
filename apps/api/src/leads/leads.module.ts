@@ -9,6 +9,8 @@ import { LeadRefundRequest } from '../entities/lead-refund-request.entity';
 import { Subscription } from '../entities/subscription.entity';
 import { DistributionEngineSettings } from '../entities/distribution-engine-settings.entity';
 import { DistributionRule } from '../entities/distribution-rule.entity';
+import { LeadPricingConfig } from '../entities/lead-pricing-config.entity';
+import { LeadPricingModule } from '../lead-pricing/lead-pricing.module';
 import { LeadsService } from './leads.service';
 import { LeadsController } from './leads.controller';
 import { WalletModule } from '../wallet/wallet.module';
@@ -34,12 +36,14 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
       Subscription,
       DistributionEngineSettings,
       DistributionRule,
+      LeadPricingConfig,
     ]),
     WalletModule,
     NotificationsModule,
     IntegrationsModule,
     forwardRef(() => DistributionModule),
     forwardRef(() => SubscriptionsModule),
+    LeadPricingModule,
   ],
   controllers: [LeadsController, MarketplaceController],
   providers: [
@@ -49,6 +53,6 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     LeadReservationReleaseWorker,
     RefundRequestsService,
   ],
-  exports: [LeadsService, LeadPricingService],
+  exports: [LeadsService, LeadPricingService, RefundRequestsService],
 })
 export class LeadsModule {}

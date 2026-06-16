@@ -3,7 +3,6 @@ import {
   IsArray,
   IsIn,
   IsInt,
-  IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
@@ -11,9 +10,10 @@ import {
 } from 'class-validator';
 
 export class VendorPingDto {
+  /** Vendor's own unique ping ID — if omitted, the platform generates one (Juiced-compatible) */
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  vendor_ping_id!: string;
+  vendor_ping_id?: string;
 
   // ── Location ─────────────────────────────────────────────────────────────────
   @IsOptional()
@@ -51,6 +51,11 @@ export class VendorPingDto {
   @IsString()
   Propertytype?: string;
 
+  /** Juiced camelCase variant — maps to property_type internally */
+  @IsOptional()
+  @IsString()
+  propertyType?: string;
+
   /** Whether the property is listed on MLS — "true" / "false" */
   @IsOptional()
   @IsString()
@@ -61,21 +66,41 @@ export class VendorPingDto {
   @IsString()
   howsoontosell?: string;
 
+  /** Juiced alias for howsoontosell */
+  @IsOptional()
+  @IsString()
+  timeline?: string;
+
   /** Reason for selling — e.g. "Inherited", "Foreclosure" */
   @IsOptional()
   @IsString()
   reasonforselling?: string;
+
+  /** Juiced alias for reasonforselling */
+  @IsOptional()
+  @IsString()
+  reason?: string;
 
   /** Property condition */
   @IsOptional()
   @IsString()
   property_condition?: string;
 
+  /** Juiced alias for property_condition */
+  @IsOptional()
+  @IsString()
+  condition?: string;
+
   // ── Lead classification ───────────────────────────────────────────────────────
   /** Lead type — e.g. "motivated_seller", "Outbound", "Inbound" */
   @IsOptional()
   @IsString()
   lead_type?: string;
+
+  /** Juiced camelCase alias for lead_type */
+  @IsOptional()
+  @IsString()
+  leadType?: string;
 
   @IsOptional()
   @IsString()
@@ -141,6 +166,16 @@ export class VendorPingDto {
   @IsOptional()
   @IsString()
   TrustedForm?: string;
+
+  /** Juiced alias for TrustedForm (ActiveProspect cert URL) */
+  @IsOptional()
+  @IsString()
+  xxTrustedFormCertUrl?: string;
+
+  /** Timestamp the vendor's form was submitted (ISO string) */
+  @IsOptional()
+  @IsString()
+  submitted_at?: string;
 
   @IsOptional()
   @IsObject()

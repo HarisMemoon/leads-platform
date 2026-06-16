@@ -18,6 +18,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../auth/guards/jwt.auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -27,12 +28,14 @@ import { AuditLogService } from './audit-log.service';
 import { AdminCreditWalletDto } from './dto/admin-credit-wallet.dto';
 import { UpdateDistributionEngineSettingsDto } from './dto/update-distribution-engine-settings.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { DistributionEngineSettings } from '../entities/distribution-engine-settings.entity';
 import { User } from '../entities/user.entity';
 import { ResourcesContent } from '../entities/resources-content.entity';
 import { Lead } from '../entities/lead.entity';
 import { VendorIntegration } from '../entities/vendor-integration.entity';
+import { LeadAssignment } from '../entities/lead-assignment.entity';
+import { DistributionRule } from '../entities/distribution-rule.entity';
 import { LeadStatus } from '../../common/enums/lead-status.enum';
 import { Request } from 'express';
 import { AdminDistributionLockDto } from './dto/admin-distribution-lock.dto';
@@ -51,8 +54,11 @@ import { GradingOverrideDto } from './dto/admin-grading.dto';
 import { PatchPlanDto } from './dto/admin-plan.dto';
 import { PlanType } from '../../common/enums/plan-type.enum';
 import { LeadsService } from '../leads/leads.service';
+import { RefundRequestsService } from '../leads/refund-requests.service';
 import { OutboundPingService } from '../outbound/outbound-ping.service';
 import { CreateOutboundBuyerDto, PatchOutboundBuyerDto } from '../outbound/dto/outbound-buyer.dto';
+import { LeadPricingConfig } from '../entities/lead-pricing-config.entity';
+import { LeadPricingService } from '../lead-pricing/lead-pricing.service';
 
 const ENGINE_SETTINGS_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -71,6 +77,7 @@ export class AdminController {
     private readonly plansService: AdminPlansService,
     private readonly leadsService: LeadsService,
     private readonly outboundPingService: OutboundPingService,
+    private readonly refundRequestsService: RefundRequestsService,
     @InjectRepository(DistributionEngineSettings)
     private readonly engineSettingsRepo: Repository<DistributionEngineSettings>,
     @InjectRepository(User)
@@ -81,6 +88,15 @@ export class AdminController {
     private readonly leadRepo: Repository<Lead>,
     @InjectRepository(VendorIntegration)
     private readonly vendorRepo: Repository<VendorIntegration>,
+    @InjectRepository(LeadPricingConfig)
+    private readonly leadPricingRepo: Repository<LeadPricingConfig>,
+    @InjectRepository(LeadAssignment)
+    private readonly assignmentRepo: Repository<LeadAssignment>,
+    @InjectRepository(DistributionRule)
+    private readonly distributionRuleRepo: Repository<DistributionRule>,
+    private readonly leadPricingService: LeadPricingService,
+    private readonly dataSource: DataSource,
+    private readonly config: ConfigService,
   ) {}
 
   @Get('metrics/breakdown')
@@ -119,7 +135,87 @@ export class AdminController {
     if (dateFrom) qb.andWhere('u.created_at >= :dateFrom', { dateFrom: new Date(dateFrom) });
     if (dateTo) qb.andWhere('u.created_at <= :dateTo', { dateTo: new Date(dateTo) });
     const [users, total] = await qb.skip(offset).take(limit).getManyAndCount();
-    return { users, total };
+
+    // Compute account_status for each user by joining subscription, wallet, distribution rule
+    const userIds = users.map((u) => u.id);
+    if (userIds.length === 0) return { users: [], total };
+
+    const statusRows = await this.dataSource.query<Array<{
+      user_id: string;
+      sub_status: string | null;
+      sub_period_end: string | null;
+      wallet_cents: string | null;
+      participation: boolean | null;
+      is_active_rule: boolean | null;
+      terms_accepted: boolean | null;
+      launched_at: string | null;
+      leads_used: string | null;
+      monthly_lead_limit: string | null;
+      has_crm: boolean | null;
+      refund_rate_pct: string | null;
+    }>>(`
+      SELECT
+        u.id AS user_id,
+        s.status AS sub_status,
+        s.current_period_end AS sub_period_end,
+        w.balance_cents AS wallet_cents,
+        dr.participation_enabled AS participation,
+        dr.is_active AS is_active_rule,
+        dr.launched_at AS launched_at,
+        sub2.leads_used_this_period AS leads_used,
+        sub2.monthly_lead_limit AS monthly_lead_limit,
+        (EXISTS (
+          SELECT 1 FROM terms_acceptances ta
+          WHERE ta.user_id = u.id AND ta.terms_version = $2
+        )) AS terms_accepted,
+        (EXISTS (
+          SELECT 1 FROM integrations i
+          WHERE i.user_id = u.id
+            AND i.config->>'webhookUrl' IS NOT NULL
+            AND i.config->>'webhookUrl' <> ''
+        )) AS has_crm,
+        (
+          SELECT CASE WHEN COUNT(la.id) > 0
+            THEN ROUND((COUNT(rr.id)::numeric / COUNT(la.id)::numeric) * 100)
+            ELSE 0 END
+          FROM lead_assignments la
+          LEFT JOIN lead_refund_requests rr ON rr.lead_assignment_id = la.id
+          WHERE la.buyer_id = u.id
+        ) AS refund_rate_pct
+      FROM users u
+      LEFT JOIN subscriptions s ON s.user_id = u.id AND s.plan_type = 'pro'
+        AND s.status IN ('active','past_due','cancelled')
+      LEFT JOIN subscriptions sub2 ON sub2.user_id = u.id AND sub2.plan_type = 'pro'
+        AND sub2.status IN ('active','past_due')
+      LEFT JOIN wallet_accounts w ON w.user_id = u.id
+      LEFT JOIN distribution_rules dr ON dr.user_id = u.id
+      WHERE u.id = ANY($1)
+    `, [userIds, this.config.get<string>('TERMS_VERSION') ?? '2025-01']);
+
+    const statusMap = new Map(statusRows.map((r) => [r.user_id, r]));
+
+    const usersWithStatus = users.map((u) => {
+      const s = statusMap.get(u.id);
+      let account_status = 'active';
+      if (!u.is_active) account_status = 'inactive';
+      else if (!s?.sub_status || (s.sub_status === 'cancelled' && (!s.sub_period_end || new Date(s.sub_period_end) <= new Date()))) account_status = 'subscription_canceled';
+      else if (s.sub_status === 'past_due') account_status = 'subscription_past_due';
+      else if (!s?.terms_accepted) account_status = 'terms_not_accepted';
+      else if (Number(s?.refund_rate_pct ?? 0) >= 25) account_status = 'refund_abuse_review';
+      else if (!s?.launched_at) account_status = 'setup_incomplete';
+      else if (s?.monthly_lead_limit != null && Number(s.leads_used ?? 0) >= Number(s.monthly_lead_limit)) account_status = 'lead_cap_reached';
+      else if (!s?.has_crm) account_status = 'crm_disconnected';
+      else if (!s?.participation) account_status = 'auto_delivery_off';
+      else if (!s?.is_active_rule) account_status = 'distribution_paused';
+      else {
+        const bal = Number(s?.wallet_cents ?? '0');
+        if (bal < 2500) account_status = 'wallet_empty';
+        else if (bal < 5000) account_status = 'wallet_low';
+      }
+      return { ...u, account_status };
+    });
+
+    return { users: usersWithStatus, total };
   }
 
   @Patch('users/:userId/active')
@@ -242,6 +338,38 @@ export class AdminController {
       ipAddress: ip,
     });
     return { ok: true, id, status: LeadStatus.ARCHIVED };
+  }
+
+  @Patch('leads/:id/internal-cost')
+  @HttpCode(HttpStatus.OK)
+  async patchLeadInternalCost(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: {
+      internal_cost_cents?: number | null;
+      ping_post_cost_cents?: number | null;
+      campaign_name?: string | null;
+      ad_source?: string | null;
+      cost_notes?: string | null;
+    },
+  ) {
+    const lead = await this.leadRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Lead not found');
+    if (body.internal_cost_cents !== undefined)
+      lead.internal_cost_cents = body.internal_cost_cents != null ? String(body.internal_cost_cents) : null;
+    if (body.campaign_name !== undefined) lead.campaign_name = body.campaign_name ?? null;
+    if (body.ad_source !== undefined) lead.ad_source = body.ad_source ?? null;
+    if (body.cost_notes !== undefined) lead.cost_notes = body.cost_notes ?? null;
+    if (body.ping_post_cost_cents !== undefined)
+      lead.ping_post_cost_cents = body.ping_post_cost_cents != null ? String(body.ping_post_cost_cents) : null;
+    const saved = await this.leadRepo.save(lead);
+    return {
+      id: saved.id,
+      internal_cost_cents: saved.internal_cost_cents,
+      ping_post_cost_cents: saved.ping_post_cost_cents,
+      campaign_name: saved.campaign_name,
+      ad_source: saved.ad_source,
+      cost_notes: saved.cost_notes,
+    };
   }
 
   @Post('leads/bulk-approve')
@@ -382,6 +510,49 @@ export class AdminController {
     return this.integrationsHealthService.getHealth();
   }
 
+  // ── Lead pricing config ─────────────────────────────────────────────────────
+
+  @Get('lead-pricing')
+  getLeadPricing() {
+    return this.leadPricingRepo.find({ order: { lead_type: 'ASC' } });
+  }
+
+  @Patch('lead-pricing/:type')
+  async patchLeadPricing(
+    @Param('type') type: string,
+    @Body() body: Partial<{
+      new_lead_price_cents: number;
+      shared_price_cents: number | null;
+      discount_after_days: number;
+      discount_amount_cents: number;
+      min_price_floor_cents: number | null;
+    }>,
+  ) {
+    const config = await this.leadPricingRepo.findOne({ where: { lead_type: type } });
+    if (!config) {
+      // Create if not exists (e.g. first run without migration seeding)
+      const newConfig = this.leadPricingRepo.create();
+      newConfig.lead_type = type;
+      newConfig.new_lead_price_cents = String(body.new_lead_price_cents ?? 15000);
+      newConfig.shared_price_cents = body.shared_price_cents != null ? String(body.shared_price_cents) : null;
+      newConfig.discount_after_days = body.discount_after_days ?? 7;
+      newConfig.discount_amount_cents = String(body.discount_amount_cents ?? 0);
+      newConfig.min_price_floor_cents = body.min_price_floor_cents != null ? String(body.min_price_floor_cents) : null;
+      return this.leadPricingRepo.save(newConfig);
+    }
+    if (body.new_lead_price_cents !== undefined) config.new_lead_price_cents = String(body.new_lead_price_cents);
+    if (body.shared_price_cents !== undefined) config.shared_price_cents = body.shared_price_cents != null ? String(body.shared_price_cents) : null;
+    if (body.discount_after_days !== undefined) config.discount_after_days = body.discount_after_days;
+    if (body.discount_amount_cents !== undefined) config.discount_amount_cents = String(body.discount_amount_cents);
+    if (body.min_price_floor_cents !== undefined) config.min_price_floor_cents = body.min_price_floor_cents != null ? String(body.min_price_floor_cents) : null;
+    const saved = await this.leadPricingRepo.save(config);
+    // Bust the in-memory cache so new leads immediately use the updated price
+    this.leadPricingService.invalidate(type);
+    return saved;
+  }
+
+  // ── Subscription plans ──────────────────────────────────────────────────────
+
   @Get('subscriptions/plans')
   listSubscriptionPlans() {
     return this.plansService.list();
@@ -404,6 +575,160 @@ export class AdminController {
       ipAddress: ip,
     });
     return updated;
+  }
+
+  // ── Vendor performance stats ─────────────────────────────────────────────
+
+  @Get('vendors/stats')
+  async getVendorStats(@Query('sort') sort?: string) {
+    const rows = await this.dataSource.query<Array<{
+      id: string;
+      name: string;
+      enabled: boolean;
+      created_at: string;
+      total_hits: string;
+      accepted_hits: string;
+      total_leads: string;
+      purchased_leads: string;
+      total_revenue_cents: string;
+    }>>(`
+      SELECT
+        v.id,
+        v.name,
+        v.enabled,
+        v.created_at,
+        COALESCE(hits.total_hits, 0)    AS total_hits,
+        COALESCE(hits.accepted_hits, 0) AS accepted_hits,
+        COALESCE(ld.total_leads, 0)     AS total_leads,
+        COALESCE(ld.purchased_leads, 0) AS purchased_leads,
+        COALESCE(ld.total_revenue_cents, 0) AS total_revenue_cents
+      FROM vendor_integrations v
+
+      LEFT JOIN (
+        SELECT
+          vendor_id,
+          COUNT(*) AS total_hits,
+          COUNT(*) FILTER (WHERE status = 'accepted') AS accepted_hits
+        FROM vendor_webhook_hits
+        GROUP BY vendor_id
+      ) hits ON hits.vendor_id = v.id
+
+      LEFT JOIN (
+        SELECT
+          l.canonical_lead_source AS vendor_id,
+          COUNT(DISTINCT l.id) AS total_leads,
+          COUNT(DISTINCT la.lead_id) AS purchased_leads,
+          COALESCE(SUM(la.amount_charged_cents::bigint), 0) AS total_revenue_cents
+        FROM leads l
+        LEFT JOIN lead_assignments la ON la.lead_id = l.id
+        WHERE l.source = 'inbound' AND l.canonical_lead_source IS NOT NULL
+        GROUP BY l.canonical_lead_source
+      ) ld ON ld.vendor_id = v.id::text
+
+      ORDER BY ${
+        sort === 'leads'    ? 'ld.total_leads DESC NULLS LAST' :
+        sort === 'sold'     ? 'ld.purchased_leads DESC NULLS LAST' :
+        sort === 'revenue'  ? 'ld.total_revenue_cents DESC NULLS LAST' :
+        sort === 'latest'   ? '(SELECT MAX(l2.created_at) FROM leads l2 WHERE l2.source = \'inbound\' AND l2.canonical_lead_source = v.id::text) DESC NULLS LAST' :
+        'v.created_at DESC'
+      }
+    `);
+
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      enabled: r.enabled,
+      created_at: r.created_at,
+      total_hits: Number(r.total_hits),
+      accepted_hits: Number(r.accepted_hits),
+      total_leads: Number(r.total_leads),
+      purchased_leads: Number(r.purchased_leads),
+      total_revenue_cents: Number(r.total_revenue_cents),
+      conversion_rate: Number(r.total_leads) > 0
+        ? Math.round((Number(r.purchased_leads) / Number(r.total_leads)) * 100)
+        : 0,
+    }));
+  }
+
+  @Get('vendors/:id/stats')
+  async getVendorDetail(@Param('id', ParseUUIDPipe) id: string) {
+    const vendor = await this.vendorRepo.findOne({ where: { id } });
+    if (!vendor) throw new NotFoundException('Vendor not found');
+
+    const [summary] = await this.dataSource.query<Array<{
+      total_leads: string;
+      purchased_leads: string;
+      total_revenue_cents: string;
+      avg_revenue_per_lead: string;
+    }>>(`
+      SELECT
+        COUNT(DISTINCT l.id) AS total_leads,
+        COUNT(DISTINCT la.lead_id) AS purchased_leads,
+        COALESCE(SUM(la.amount_charged_cents::bigint), 0) AS total_revenue_cents,
+        COALESCE(AVG(la.amount_charged_cents::bigint), 0) AS avg_revenue_per_lead
+      FROM leads l
+      LEFT JOIN lead_assignments la ON la.lead_id = l.id
+      WHERE l.source = 'inbound' AND l.canonical_lead_source = $1
+    `, [id]);
+
+    const recentLeads = await this.dataSource.query<Array<{
+      lead_id: string;
+      title: string;
+      market: string;
+      created_at: string;
+      purchase_count: string;
+      revenue_cents: string;
+    }>>(`
+      SELECT
+        l.id AS lead_id,
+        l.title,
+        l.market,
+        l.created_at,
+        COUNT(la.id) AS purchase_count,
+        COALESCE(SUM(la.amount_charged_cents::bigint), 0) AS revenue_cents
+      FROM leads l
+      LEFT JOIN lead_assignments la ON la.lead_id = l.id
+      WHERE l.source = 'inbound' AND l.canonical_lead_source = $1
+      GROUP BY l.id, l.title, l.market, l.created_at
+      ORDER BY l.created_at DESC
+      LIMIT 20
+    `, [id]);
+
+    const hitStats = await this.dataSource.query<Array<{
+      total: string; accepted: string; rejected: string;
+    }>>(`
+      SELECT
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status = 'accepted') AS accepted,
+        COUNT(*) FILTER (WHERE status = 'rejected') AS rejected
+      FROM vendor_webhook_hits WHERE vendor_id = $1
+    `, [id]);
+
+    return {
+      vendor,
+      summary: {
+        total_leads: Number(summary?.total_leads ?? 0),
+        purchased_leads: Number(summary?.purchased_leads ?? 0),
+        total_revenue_cents: Number(summary?.total_revenue_cents ?? 0),
+        avg_revenue_per_lead: Math.round(Number(summary?.avg_revenue_per_lead ?? 0)),
+        conversion_rate: Number(summary?.total_leads ?? 0) > 0
+          ? Math.round((Number(summary?.purchased_leads ?? 0) / Number(summary?.total_leads ?? 0)) * 100)
+          : 0,
+      },
+      webhook_hits: {
+        total: Number(hitStats[0]?.total ?? 0),
+        accepted: Number(hitStats[0]?.accepted ?? 0),
+        rejected: Number(hitStats[0]?.rejected ?? 0),
+      },
+      recent_leads: recentLeads.map((l) => ({
+        lead_id: l.lead_id,
+        title: l.title,
+        market: l.market,
+        created_at: l.created_at,
+        purchase_count: Number(l.purchase_count),
+        revenue_cents: Number(l.revenue_cents),
+      })),
+    };
   }
 
   // ── Outbound buyer endpoints ────────────────────────────────────────────
@@ -453,6 +778,86 @@ export class AdminController {
     return this.outboundPingService.pingAll(lead);
   }
 
+  @Post('leads/:id/assign')
+  @HttpCode(HttpStatus.OK)
+  async adminAssignLead(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body('user_id') userId: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    if (!userId) throw new NotFoundException('user_id is required');
+    const assignment = await this.leadsService.assignLeadAsAdmin(id, userId);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_lead_assign',
+      targetType: 'lead',
+      targetId: id,
+      metadata: { assigned_to: userId, assignment_id: assignment.id },
+      ipAddress: ip,
+    });
+    return assignment;
+  }
+
+  @Delete('assignments/:id')
+  @HttpCode(HttpStatus.OK)
+  async adminRevokeAssignment(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    const result = await this.leadsService.revokeAssignment(id);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_assignment_revoke',
+      targetType: 'lead_assignment',
+      targetId: id,
+      metadata: { refunded_cents: result.refunded_cents },
+      ipAddress: ip,
+    });
+    return result;
+  }
+
+  @Post('assignments/:id/replace')
+  @HttpCode(HttpStatus.OK)
+  async adminReplaceAssignment(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body('new_lead_id') newLeadId: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    if (!newLeadId) throw new NotFoundException('new_lead_id is required');
+    const result = await this.leadsService.replaceAssignment(id, newLeadId);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_assignment_replace',
+      targetType: 'lead_assignment',
+      targetId: id,
+      metadata: { new_lead_id: newLeadId, new_assignment_id: result.new_assignment?.id },
+      ipAddress: ip,
+    });
+    return result;
+  }
+
+  @Patch('leads/:id/mark-bad')
+  @HttpCode(HttpStatus.OK)
+  async adminMarkLeadBad(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    const lead = await this.leadsService.markLeadBad(id);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_lead_mark_bad',
+      targetType: 'lead',
+      targetId: id,
+      metadata: {},
+      ipAddress: ip,
+    });
+    return { ok: true, id: lead.id, status: lead.status, is_bad_lead: lead.is_bad_lead };
+  }
+
   @Post('wallet/credit')
   async creditWallet(
     @Req() req: Request & { user: { userId: string } },
@@ -483,6 +888,11 @@ export class AdminController {
     return { ok: true };
   }
 
+  @Get('users/:userId/refund-abuse-stats')
+  getRefundAbuseStats(@Param('userId', new ParseUUIDPipe()) userId: string) {
+    return this.refundRequestsService.getRefundAbuseStats(userId);
+  }
+
   @Patch('users/:userId/distribution-lock')
   async setDistributionLock(
     @Param('userId', new ParseUUIDPipe()) userId: string,
@@ -505,6 +915,157 @@ export class AdminController {
       ipAddress: ip,
     });
     return { ok: true, distribution_locked: user.distribution_locked };
+  }
+
+  // ── Mark lead for manual review ─────────────────────────────────────────
+
+  @Post('leads/:id/mark-review')
+  @HttpCode(HttpStatus.OK)
+  async markLeadForReview(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body('reason') reason: string | undefined,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    const lead = await this.leadRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Lead not found');
+    lead.status = LeadStatus.MANUAL_REVIEW;
+    lead.metadata = { ...(lead.metadata ?? {}), review_reason: reason ?? 'admin_flagged', review_at: new Date().toISOString() };
+    await this.leadRepo.save(lead);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_lead_mark_review',
+      targetType: 'lead',
+      targetId: id,
+      metadata: { reason: reason ?? 'admin_flagged' },
+      ipAddress: ip,
+    });
+    return { ok: true, id, status: LeadStatus.MANUAL_REVIEW };
+  }
+
+  // ── Admin delivery pause / resume ────────────────────────────────────────
+
+  @Post('users/:userId/pause-delivery')
+  @HttpCode(HttpStatus.OK)
+  async pauseDelivery(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    await this.distributionRuleRepo.update({ user: { id: userId } }, { is_active: false });
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_pause_delivery',
+      targetType: 'user',
+      targetId: userId,
+      metadata: {},
+      ipAddress: ip,
+    });
+    return { ok: true, userId, delivery_paused: true };
+  }
+
+  @Post('users/:userId/resume-delivery')
+  @HttpCode(HttpStatus.OK)
+  async resumeDelivery(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    await this.distributionRuleRepo.update({ user: { id: userId } }, { is_active: true });
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_resume_delivery',
+      targetType: 'user',
+      targetId: userId,
+      metadata: {},
+      ipAddress: ip,
+    });
+    return { ok: true, userId, delivery_paused: false };
+  }
+
+  // ── Manual lead assign / remove ───────────────────────────────────────────
+
+  @Post('leads/:leadId/assign')
+  @HttpCode(HttpStatus.OK)
+  async assignLeadToUser(
+    @Param('leadId', new ParseUUIDPipe()) leadId: string,
+    @Body('user_id') userId: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    const lead = await this.leadRepo.findOne({ where: { id: leadId } });
+    if (!lead) throw new NotFoundException('Lead not found');
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Create assignment directly without charging wallet (admin override)
+    const assignment = this.assignmentRepo.create({
+      lead: { id: leadId } as Lead,
+      buyer: { id: userId } as User,
+      purchase_type: 'manual' as any,
+      amount_charged_cents: '0',
+      exclusivity_choice: 'non_exclusive',
+    });
+    const saved = await this.assignmentRepo.save(assignment);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_lead_assign',
+      targetType: 'lead',
+      targetId: leadId,
+      metadata: { assigned_to: userId },
+      ipAddress: ip,
+    });
+    return { ok: true, assignment_id: saved.id, lead_id: leadId, user_id: userId };
+  }
+
+  @Delete('assignments/:id')
+  @HttpCode(HttpStatus.OK)
+  async removeAssignment(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    const assignment = await this.assignmentRepo.findOne({
+      where: { id },
+      relations: { lead: true, buyer: true },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+    await this.assignmentRepo.delete(id);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_remove_assignment',
+      targetType: 'assignment',
+      targetId: id,
+      metadata: { lead_id: assignment.lead?.id, buyer_id: assignment.buyer?.id },
+      ipAddress: ip,
+    });
+    return { ok: true, removed_assignment_id: id };
+  }
+
+  // ── Mark lead bad ─────────────────────────────────────────────────────────
+
+  @Post('leads/:id/mark-bad')
+  @HttpCode(HttpStatus.OK)
+  async markLeadBad(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body('reason') reason: string | undefined,
+    @Req() req: Request & { user: { userId: string } },
+    @Ip() ip: string,
+  ) {
+    const lead = await this.leadRepo.findOne({ where: { id } });
+    if (!lead) throw new NotFoundException('Lead not found');
+    lead.status = LeadStatus.ARCHIVED;
+    lead.metadata = { ...(lead.metadata ?? {}), bad_lead: true, bad_reason: reason ?? 'admin_marked_bad' };
+    await this.leadRepo.save(lead);
+    await this.auditLogService.append({
+      actorId: req.user.userId,
+      action: 'admin_lead_mark_bad',
+      targetType: 'lead',
+      targetId: id,
+      metadata: { reason: reason ?? 'admin_marked_bad' },
+      ipAddress: ip,
+    });
+    return { ok: true, id, status: LeadStatus.ARCHIVED };
   }
 
   @Get('resources/items')

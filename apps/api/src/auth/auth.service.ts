@@ -40,7 +40,7 @@ private signUser(user: User) {
 }
 
 async register(dto: RegisterDto) {
-  const { email, password, full_name, company_name } = dto
+  const { email, password, full_name, company_name, phone } = dto
 
 const existing = await this.userRepo.findOne({ where: { email } })
 if (existing) throw new ConflictException('Email already in use')
@@ -54,6 +54,7 @@ const user = manager.create(User,{
   password_hash: hash,
   full_name,
   company_name,
+  phone: phone ?? null,
   role: UserRole.BUYER,
   utm_source: dto.utm_source ?? null,
   utm_medium: dto.utm_medium ?? null,

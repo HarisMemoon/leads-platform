@@ -2,9 +2,12 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
+  Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -53,5 +56,20 @@ export class DistributionRulesController {
     @Body() dto: UpdateDistributionRuleDto,
   ) {
     return this.distributionRulesService.upsertMe(req.user.userId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.BUYER)
+  @Get('launch/checklist')
+  getLaunchChecklist(@Req() req: Request & { user: { userId: string } }) {
+    return this.distributionRulesService.getLaunchChecklist(req.user.userId);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.BUYER)
+  @Post('launch')
+  @HttpCode(HttpStatus.OK)
+  launch(@Req() req: Request & { user: { userId: string } }) {
+    return this.distributionRulesService.launchDistribution(req.user.userId);
   }
 }

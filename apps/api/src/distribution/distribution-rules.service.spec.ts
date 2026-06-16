@@ -11,8 +11,20 @@ describe('DistributionRulesService', () => {
   function createService() {
     const ruleRepo = createRepositoryMock<any>()
     const userRepo = createRepositoryMock<any>()
-    const service = new DistributionRulesService(ruleRepo as any, userRepo as any)
-    return { service, ruleRepo, userRepo }
+    const subscriptionRepo = createRepositoryMock<any>()
+    const walletRepo = createRepositoryMock<any>()
+    const termsRepo = createRepositoryMock<any>()
+    const config = { get: jest.fn().mockReturnValue('2025-01') }
+    subscriptionRepo.findOne.mockResolvedValue({ status: 'active', current_period_end: null })
+    const service = new DistributionRulesService(
+      ruleRepo as any,
+      userRepo as any,
+      subscriptionRepo as any,
+      walletRepo as any,
+      termsRepo as any,
+      config as any,
+    )
+    return { service, ruleRepo, userRepo, subscriptionRepo }
   }
 
   it('blocks updates when distribution settings are locked', async () => {
@@ -53,6 +65,16 @@ describe('DistributionRulesService', () => {
         max_spend_per_day_cents: '2000',
       }),
     )
+  })
+
+  it('blocks enabling Auto Purchase for non-Pro buyers', async () => {
+    const { service, userRepo, subscriptionRepo } = createService()
+    userRepo.findOne.mockResolvedValue(buildUser({ distribution_locked: false }))
+    subscriptionRepo.findOne.mockResolvedValue(null)
+
+    await expect(
+      service.upsertMe('user-1', { participation_enabled: true }),
+    ).rejects.toThrow(ForbiddenException)
   })
 
   it('prevents buyers from updating rules they do not own', async () => {

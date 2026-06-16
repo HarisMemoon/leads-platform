@@ -1,7 +1,14 @@
 "use client";
 
 import type { ComponentType } from "react";
-import { Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
+import {
+  Suspense,
+  useState,
+  useEffect,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,6 +16,7 @@ import {
   BookOpen,
   Bot,
   Check,
+  CheckCircle,
   ChevronDown,
   CircleHelp,
   CreditCard,
@@ -30,26 +38,46 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { US_STATES, COUNTIES_BY_STATE, countiesForStateCode } from "@/data/us-markets-geo";
+import {
+  US_STATES,
+  COUNTIES_BY_STATE,
+  countiesForStateCode,
+} from "@/data/us-markets-geo";
 import {
   getOnboardingMe,
   patchOnboardingMe,
   type UpdateOnboardingPayload,
 } from "@/lib/onboarding-api";
 import { queryKeys } from "@/lib/query-keys";
-import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
+import {
+  CardElement,
+  Elements,
+  useElements,
+  useStripe,
+} from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
-import { confirmStripeWalletTopUp, createStripePaymentIntent } from "@/lib/wallet-api";
+import {
+  confirmStripeWalletTopUp,
+  createStripePaymentIntent,
+} from "@/lib/wallet-api";
 import {
   checkoutSubscription,
+  getMySubscription,
   getSubscriptionPlans,
   type SubscriptionDto,
 } from "@/lib/subscriptions-api";
-import { patchWebhookIntegration, testWebhookIntegration } from "@/lib/integrations-api";
+import {
+  patchWebhookIntegration,
+  testWebhookIntegration,
+} from "@/lib/integrations-api";
 
-type ObIcon = ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
+type ObIcon = ComponentType<{
+  size?: number;
+  strokeWidth?: number;
+  className?: string;
+}>;
 
-const TOTAL_STEPS = 9;
+const TOTAL_STEPS = 8;
 
 function buildMarketsFromGeo(d: Record<string, unknown>): string[] {
   if (d.nationwide) {
@@ -57,25 +85,62 @@ function buildMarketsFromGeo(d: Record<string, unknown>): string[] {
       (COUNTIES_BY_STATE[s.code] ?? []).map((c) => `${s.code}:${c}`),
     );
   }
+  // Support both legacy single-state and new multi-state formats
+  const counties = (d.selected_counties as string[]) ?? [];
+  // New format: counties already stored as "STATECODE:County Name"
+  if (counties.length > 0 && counties[0].includes(":")) return counties;
+  // Legacy single-state format
   const st = String(d.selected_state ?? "");
   if (!st) return [];
-  const counties = (d.selected_counties as string[]) ?? [];
   return counties.map((c) => `${st}:${c}`);
 }
 
 const WALLET_FUND_AMOUNTS = [250, 500, 1000, 2500];
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "");
+const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "",
+);
 
 const STEP_META: ReadonlyArray<{ Icon: ObIcon; title: string; sub: string }> = [
-  { Icon: Handshake, title: "Welcome to Newleey", sub: "Resume setup any time and keep the platform focused on buying and managing leads." },
-  { Icon: Zap, title: "How lead buying works", sub: "Understand premium vs exclusive inventory before you spend a dollar." },
-  { Icon: Package, title: "Choose your plan", sub: "Basic and Pro go straight to Stripe. Exclusive buyers fund their wallet and start shopping." },
-  { Icon: CreditCard, title: "Fund your wallet", sub: "Add cash with Stripe now or come back later from Settings." },
-  { Icon: Bot, title: "Auto-buy settings", sub: "Optional automation once your wallet is funded." },
-  { Icon: MapPin, title: "Markets", sub: "Choose by state, county, search, or a nationwide toggle." },
-  { Icon: Link2, title: "CRM webhook", sub: "Connect Lead Connector, Zapier, GoHighLevel, or any HTTPS webhook." },
-  { Icon: BookOpen, title: "Resources & guides", sub: "Skool community, tutorials, FAQs, and setup help live here." },
-  { Icon: PartyPopper, title: "You're all set!", sub: "Jump into the marketplace and start buying or tracking leads." },
+  {
+    Icon: Handshake,
+    title: "Welcome to Newleey",
+    sub: "Resume setup any time and keep the platform focused on buying and managing leads.",
+  },
+  {
+    Icon: Package,
+    title: "Choose your plan",
+    sub: "Choose Free or Pro first so the rest of setup follows the right path.",
+  },
+  {
+    Icon: CreditCard,
+    title: "Fund your wallet",
+    sub: "Add cash with Stripe now or come back later from Settings.",
+  },
+  {
+    Icon: MapPin,
+    title: "Markets",
+    sub: "Choose by state, county, search, or a nationwide toggle.",
+  },
+  {
+    Icon: Bot,
+    title: "Auto-buy settings",
+    sub: "Available for Pro buyers after you choose the markets you want to target.",
+  },
+  {
+    Icon: Link2,
+    title: "CRM webhook",
+    sub: "Connect Lead Connector, Zapier, GoHighLevel, or any HTTPS webhook.",
+  },
+  {
+    Icon: BookOpen,
+    title: "Resources & guides",
+    sub: "Skool community, tutorials, FAQs, and setup help live here.",
+  },
+  {
+    Icon: CheckCircle,
+    title: "You're all set",
+    sub: "Jump into the marketplace and start buying or tracking leads.",
+  },
 ];
 
 // ── Stripe wallet-funding form used inside step 4 ────────────────────────────
@@ -112,13 +177,16 @@ function WalletFundForm({
       const result = await stripe.confirmCardPayment(clientSecret, {
         payment_method: { card },
       });
-      if (result.error) throw new Error(result.error.message ?? "Payment failed");
+      if (result.error)
+        throw new Error(result.error.message ?? "Payment failed");
       const pi = result.paymentIntent;
       if (!pi?.id) throw new Error("Missing payment intent from Stripe.");
       await confirmStripeWalletTopUp(pi.id);
       onSuccess(amount);
     } catch (e) {
-      setPayError(e instanceof Error ? e.message : "Payment failed — please try again.");
+      setPayError(
+        e instanceof Error ? e.message : "Payment failed — please try again.",
+      );
     } finally {
       setIsPaying(false);
     }
@@ -145,11 +213,13 @@ function WalletFundForm({
             alignItems: "flex-start",
           }}
         >
-          <AlertTriangle size={16} style={{ color: "#fde047", marginTop: 2, flexShrink: 0 }} />
+          <AlertTriangle
+            size={16}
+            style={{ color: "#fde047", marginTop: 2, flexShrink: 0 }}
+          />
           <span>
-            Without wallet funds, <strong style={{ color: "#fde047" }}>auto-buy won&apos;t work</strong> and
-            you won&apos;t be able to purchase leads until you add funds. You can top up any time from the
-            Wallet page.
+            Without wallet funds, and you won&apos;t be able to purchase leads
+            until you add funds. You can top up any time from the Wallet page.
           </span>
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -164,11 +234,21 @@ function WalletFundForm({
           <button
             type="button"
             className="btn-next"
-            style={{ flex: 1, justifyContent: "center", opacity: isSaving ? 0.5 : 1 }}
+            style={{
+              flex: 1,
+              justifyContent: "center",
+              opacity: isSaving ? 0.5 : 1,
+            }}
             disabled={isSaving}
             onClick={onSkip}
           >
-            {isSaving ? <><span className="spinner" /> Saving…</> : "Continue without funds →"}
+            {isSaving ? (
+              <>
+                <span className="spinner" /> Saving…
+              </>
+            ) : (
+              "Continue without funds →"
+            )}
           </button>
         </div>
       </div>
@@ -241,30 +321,46 @@ function WalletFundForm({
         onClick={() => void handlePay()}
       >
         {isPaying ? (
-          <><span className="spinner" /> Processing…</>
+          <>
+            <span className="spinner" /> Processing…
+          </>
         ) : (
           <>Add ${amount} to wallet &amp; continue →</>
         )}
       </button>
 
-      {/* Skip link */}
-      <div style={{ textAlign: "center" }}>
-        <button
-          type="button"
-          onClick={() => setSkipConfirm(true)}
-          style={{
-            background: "none",
-            border: "none",
-            color: "rgba(255,255,255,0.3)",
-            fontSize: 13,
-            cursor: "pointer",
-            textDecoration: "underline",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
-        >
-          I&apos;ll fund my wallet later
-        </button>
-      </div>
+      {/* Skip — visible secondary button */}
+      <button
+        type="button"
+        onClick={() => setSkipConfirm(true)}
+        style={{
+          width: "100%",
+          padding: "12px 20px",
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.12)",
+          background: "rgba(255,255,255,0.04)",
+          color: "rgba(255,255,255,0.5)",
+          fontSize: 14,
+          fontWeight: 500,
+          cursor: "pointer",
+          fontFamily: "'DM Sans', sans-serif",
+          transition: "background 0.15s, color 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background =
+            "rgba(255,255,255,0.08)";
+          (e.currentTarget as HTMLButtonElement).style.color =
+            "rgba(255,255,255,0.7)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background =
+            "rgba(255,255,255,0.04)";
+          (e.currentTarget as HTMLButtonElement).style.color =
+            "rgba(255,255,255,0.5)";
+        }}
+      >
+        Skip for now — I&apos;ll fund my wallet later
+      </button>
     </>
   );
 }
@@ -285,6 +381,7 @@ function OnboardingPageContent() {
     min_balance: 500,
     purchase_path: null as null | "subscription" | "exclusive",
     selected_state: "",
+    selected_states: [] as string[],
     selected_counties: [] as string[],
     nationwide: false,
     webhook_url: "",
@@ -294,19 +391,20 @@ function OnboardingPageContent() {
   const [stateQuery, setStateQuery] = useState("");
   const stateDropdownRef = useRef<HTMLDivElement>(null);
   const [hookMsg, setHookMsg] = useState<string | null>(null);
-  const [infoModal, setInfoModal] = useState<{ 
-    open: boolean; 
-    title: string; 
+  const [infoModal, setInfoModal] = useState<{
+    open: boolean;
+    title: string;
     content: string;
     icon: ObIcon;
-  }>({ 
-    open: false, 
-    title: "", 
+  }>({
+    open: false,
+    title: "",
     content: "",
     icon: CircleHelp,
   });
-  const [selectedSubscriptionPlan, setSelectedSubscriptionPlan] =
-    useState<SubscriptionDto["plan_type"] | null>(null);
+  const [selectedSubscriptionPlan, setSelectedSubscriptionPlan] = useState<
+    SubscriptionDto["plan_type"] | null
+  >(null);
 
   const {
     data: row,
@@ -322,22 +420,29 @@ function OnboardingPageContent() {
   const resumeRequested = searchParams.get("resume") === "1";
   const skippedFlag = Boolean(
     row?.data &&
-      typeof row.data === "object" &&
-      (row.data as { skipped?: boolean }).skipped === true,
+    typeof row.data === "object" &&
+    (row.data as { skipped?: boolean }).skipped === true,
   );
 
   /** Finished onboarding (not skipped) → dashboard. Skipped without ?resume=1 → dashboard. */
   useEffect(() => {
     if (onboardingLoading) return;
     if (!row?.completed_at) return;
+    if (row.current_step < TOTAL_STEPS) return;
     if (skippedFlag && resumeRequested) return;
     router.replace("/marketplace");
-  }, [onboardingLoading, row?.completed_at, skippedFlag, resumeRequested, router]);
+  }, [
+    onboardingLoading,
+    row?.completed_at,
+    row?.current_step,
+    skippedFlag,
+    resumeRequested,
+    router,
+  ]);
 
   const resumeMutation = useMutation({
     mutationFn: () => {
-      if (!row)
-        return Promise.reject(new Error("No onboarding row"));
+      if (!row) return Promise.reject(new Error("No onboarding row"));
       return patchOnboardingMe({
         completed_at: null,
         data: {
@@ -347,7 +452,9 @@ function OnboardingPageContent() {
       });
     },
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.onboarding.me });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.onboarding.me,
+      });
       router.replace("/onboarding");
       resumeStartedRef.current = false;
     },
@@ -375,10 +482,13 @@ function OnboardingPageContent() {
   }, [row]);
 
   const saveMutation = useMutation({
-    mutationFn: (payload: UpdateOnboardingPayload) => patchOnboardingMe(payload),
+    mutationFn: (payload: UpdateOnboardingPayload) =>
+      patchOnboardingMe(payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.onboarding.me });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.dashboard.summary,
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.wallet.transactions({ limit: 50, offset: 0 }),
@@ -389,6 +499,10 @@ function OnboardingPageContent() {
   const { data: subscriptionPlans = [] } = useQuery({
     queryKey: queryKeys.subscriptions.plans,
     queryFn: getSubscriptionPlans,
+  });
+  const { data: currentSubscription } = useQuery({
+    queryKey: queryKeys.subscriptions.me,
+    queryFn: getMySubscription,
   });
 
   const subscriptionCheckoutMutation = useMutation({
@@ -401,35 +515,80 @@ function OnboardingPageContent() {
   const hasWalletFunding =
     Number(data.wallet_amount ?? 0) > 0 ||
     data.stripe_onboarding_funded === true;
+  const hasProAutoPurchaseAccess =
+    currentSubscription?.plan_type === "pro" &&
+    (currentSubscription.status === "active" ||
+      (currentSubscription.status === "cancelled" &&
+        new Date(currentSubscription.current_period_end).getTime() >
+          Date.now()));
 
-  const toggleCounty = useCallback((val: string) => {
+  // Multi-state: county keys are "STATECODE:County Name"
+  const toggleCounty = useCallback((key: string) => {
     setData((d) => {
       const arr: string[] = d.selected_counties || [];
       return {
         ...d,
-        selected_counties: arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val],
+        selected_counties: arr.includes(key)
+          ? arr.filter((x) => x !== key)
+          : [...arr, key],
       };
     });
   }, []);
 
-  const countiesForState = useMemo(
-    () => countiesForStateCode(String(data.selected_state || "")),
-    [data.selected_state],
+  const toggleState = useCallback((code: string) => {
+    setData((d) => {
+      const states: string[] = d.selected_states || [];
+      const removing = states.includes(code);
+      const newStates = removing
+        ? states.filter((s) => s !== code)
+        : [...states, code];
+      // Remove counties belonging to this state when deselecting
+      const newCounties = removing
+        ? ((d.selected_counties as string[]) || []).filter(
+            (c) => !c.startsWith(`${code}:`),
+          )
+        : (d.selected_counties as string[]) || [];
+      return {
+        ...d,
+        selected_states: newStates,
+        selected_counties: newCounties,
+        nationwide: false,
+      };
+    });
+  }, []);
+
+  const selectedStates: string[] = data.selected_states || [];
+
+  // All counties across all selected states, as "STATECODE:County Name" entries
+  const countiesForSelectedStates = useMemo(
+    () =>
+      selectedStates.flatMap((code) =>
+        countiesForStateCode(code).map((c) => ({
+          key: `${code}:${c}`,
+          label: c,
+          stateCode: code,
+        })),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedStates.join(",")],
   );
 
   const filteredCounties = useMemo(() => {
     const q = countySearch.trim().toLowerCase();
-    if (!q) return countiesForState;
-    return countiesForState.filter((c) => c.toLowerCase().includes(q));
-  }, [countiesForState, countySearch]);
+    if (!q) return countiesForSelectedStates;
+    return countiesForSelectedStates.filter(
+      (c) =>
+        c.label.toLowerCase().includes(q) ||
+        c.stateCode.toLowerCase().includes(q),
+    );
+  }, [countiesForSelectedStates, countySearch]);
 
   const filteredStates = useMemo(() => {
     const q = stateQuery.trim().toLowerCase();
     if (!q) return [...US_STATES];
     return US_STATES.filter(
       (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.code.toLowerCase().includes(q),
+        s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q),
     );
   }, [stateQuery]);
 
@@ -446,13 +605,13 @@ function OnboardingPageContent() {
   async function saveStep(nextStep: number) {
     try {
       const payloadData =
-        step === 6
+        step === 4
           ? {
               ...data,
               markets: buildMarketsFromGeo(data),
             }
           : data;
-      if (step === 7 && String(data.webhook_url ?? "").trim()) {
+      if (step === 6 && String(data.webhook_url ?? "").trim()) {
         try {
           await patchWebhookIntegration(String(data.webhook_url).trim());
         } catch {
@@ -465,7 +624,9 @@ function OnboardingPageContent() {
         data: payloadData,
       });
       if (nextStep > TOTAL_STEPS) {
-        await saveMutation.mutateAsync({ completed_at: new Date().toISOString() });
+        await saveMutation.mutateAsync({
+          completed_at: new Date().toISOString(),
+        });
         router.push("/marketplace");
       } else {
         setStep(nextStep);
@@ -547,7 +708,12 @@ function OnboardingPageContent() {
     );
   }
 
-  if (resumeRequested && skippedFlag && row?.completed_at && resumeMutation.isPending) {
+  if (
+    resumeRequested &&
+    skippedFlag &&
+    row?.completed_at &&
+    resumeMutation.isPending
+  ) {
     return (
       <div
         style={{
@@ -568,7 +734,7 @@ function OnboardingPageContent() {
 
   return (
     <>
-         <style>{`
+      <style>{`
 
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap');
 
@@ -1223,7 +1389,7 @@ function OnboardingPageContent() {
 
 
 
-.plan-name { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+.plan-name { font-family: 'Syne', sans-serif; font-size: 17px; font-weight: 700; color: #fff; margin-bottom: 4px; margin-top: 10px; }
 
 .plan-price { font-size: 13px; color: #10b981; margin-bottom: 10px; }
 
@@ -1658,87 +1824,115 @@ input[type=range]::-webkit-slider-thumb {
 `}</style>
 
       {/* Info Modal */}
-      {infoModal.open && (() => {
-        const Icon = infoModal.icon;
-        return (
-          <div
-            onClick={() => setInfoModal({ ...infoModal, open: false })}
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 200,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "20px",
-              background: "rgba(4,6,12,0.82)",
-              backdropFilter: "blur(10px)",
-            }}
-          >
+      {infoModal.open &&
+        (() => {
+          const Icon = infoModal.icon;
+          return (
             <div
-              onClick={(e) => e.stopPropagation()}
+              onClick={() => setInfoModal({ ...infoModal, open: false })}
               style={{
-                width: "100%",
-                maxWidth: 560,
-                borderRadius: 22,
-                border: "1px solid rgba(255,255,255,0.11)",
-                background:
-                  "radial-gradient(120% 140% at 0% 0%, rgba(99,102,241,0.2), transparent 45%), #070a12",
-                boxShadow: "0 28px 80px rgba(0,0,0,0.55)",
-                padding: "28px 28px 24px",
+                position: "fixed",
+                inset: 0,
+                zIndex: 200,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "20px",
+                background: "rgba(4,6,12,0.82)",
+                backdropFilter: "blur(10px)",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: "100%",
+                  maxWidth: 560,
+                  borderRadius: 22,
+                  border: "1px solid rgba(255,255,255,0.11)",
+                  background:
+                    "radial-gradient(120% 140% at 0% 0%, rgba(99,102,241,0.2), transparent 45%), #070a12",
+                  boxShadow: "0 28px 80px rgba(0,0,0,0.55)",
+                  padding: "28px 28px 24px",
+                }}
+              >
                 <div
                   style={{
-                    width: 46,
-                    height: 46,
-                    borderRadius: 12,
                     display: "flex",
+                    justifyContent: "space-between",
                     alignItems: "center",
-                    justifyContent: "center",
-                    background: "linear-gradient(135deg, rgba(99,102,241,0.28), rgba(16,185,129,0.22))",
-                    border: "1px solid rgba(129,140,248,0.35)",
+                    marginBottom: 18,
                   }}
                 >
-                  <Icon size={22} strokeWidth={1.9} className="text-indigo-100" aria-hidden />
+                  <div
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background:
+                        "linear-gradient(135deg, rgba(99,102,241,0.28), rgba(16,185,129,0.22))",
+                      border: "1px solid rgba(129,140,248,0.35)",
+                    }}
+                  >
+                    <Icon
+                      size={22}
+                      strokeWidth={1.9}
+                      className="text-indigo-100"
+                      aria-hidden
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setInfoModal({ ...infoModal, open: false })}
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      background: "rgba(255,255,255,0.04)",
+                      color: "rgba(255,255,255,0.68)",
+                      display: "grid",
+                      placeItems: "center",
+                      cursor: "pointer",
+                    }}
+                    aria-label="Close details"
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setInfoModal({ ...infoModal, open: false })}
+                <h3
                   style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 10,
-                    border: "1px solid rgba(255,255,255,0.14)",
-                    background: "rgba(255,255,255,0.04)",
-                    color: "rgba(255,255,255,0.68)",
-                    display: "grid",
-                    placeItems: "center",
-                    cursor: "pointer",
+                    fontFamily: "'Syne', sans-serif",
+                    fontSize: 28,
+                    letterSpacing: -0.7,
+                    marginBottom: 10,
                   }}
-                  aria-label="Close details"
                 >
-                  <X size={16} />
+                  {infoModal.title}
+                </h3>
+                <p
+                  style={{
+                    color: "rgba(255,255,255,0.68)",
+                    lineHeight: 1.75,
+                    fontSize: 14,
+                    marginBottom: 22,
+                  }}
+                >
+                  {infoModal.content}
+                </p>
+                <button
+                  className="btn-next"
+                  style={{ width: "100%", justifyContent: "center" }}
+                  onClick={() => setInfoModal({ ...infoModal, open: false })}
+                >
+                  Close
                 </button>
               </div>
-              <h3 style={{ fontFamily: "'Syne', sans-serif", fontSize: 28, letterSpacing: -0.7, marginBottom: 10 }}>
-                {infoModal.title}
-              </h3>
-              <p style={{ color: "rgba(255,255,255,0.68)", lineHeight: 1.75, fontSize: 14, marginBottom: 22 }}>
-                {infoModal.content}
-              </p>
-              <button
-                className="btn-next"
-                style={{ width: "100%", justifyContent: "center" }}
-                onClick={() => setInfoModal({ ...infoModal, open: false })}
-              >
-                Close
-              </button>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
       <div className="ob-root">
         {onboardingIsError && (
           <div
@@ -1757,7 +1951,9 @@ input[type=range]::-webkit-slider-thumb {
             }}
           >
             <span>
-              {onboardingError instanceof Error ? onboardingError.message : "Could not load onboarding"}
+              {onboardingError instanceof Error
+                ? onboardingError.message
+                : "Could not load onboarding"}
             </span>
             <button
               type="button"
@@ -1781,7 +1977,12 @@ input[type=range]::-webkit-slider-thumb {
         <aside className="sidebar">
           <div className="brand">
             <div className="brand-icon">
-              <Zap size={16} strokeWidth={2} style={{ color: "#fff" }} aria-hidden />
+              <Zap
+                size={16}
+                strokeWidth={2}
+                style={{ color: "#fff" }}
+                aria-hidden
+              />
             </div>
             <span className="brand-name">Newleey</span>
           </div>
@@ -1789,13 +1990,16 @@ input[type=range]::-webkit-slider-thumb {
           <nav className="steps-nav">
             {STEP_META.map((s, i) => {
               const n = i + 1;
-              const state = n < step ? "done" : n === step ? "active" : "upcoming";
+              const state =
+                n < step ? "done" : n === step ? "active" : "upcoming";
               return (
                 <div key={n} className={`step-item ${state}`}>
                   <div className={`step-num ${state}`}>
                     {state === "done" ? (
                       <Check size={12} strokeWidth={3} aria-hidden />
-                    ) : n}
+                    ) : (
+                      n
+                    )}
                   </div>
                   <span className="step-label">{s.title}</span>
                 </div>
@@ -1807,7 +2011,10 @@ input[type=range]::-webkit-slider-thumb {
         {/* Main */}
         <main className="main">
           <div className="progress-bar-wrap">
-            <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
+            <div
+              className="progress-bar-fill"
+              style={{ width: `${progress}%` }}
+            />
           </div>
 
           <div className="content-area">
@@ -1830,25 +2037,46 @@ input[type=range]::-webkit-slider-thumb {
               {step === 1 && (
                 <div className="how-grid">
                   {[
-                    { Icon: Wallet, t: "Fund your wallet", d: "Add cash through Stripe so exclusive leads and auto-buy are ready when you are." },
-                    { Icon: Search, t: "Browse the marketplace", d: "Check premium and exclusive inventory in your preferred markets." },
-                    { Icon: Link2, t: "Set up your CRM", d: "Send leads straight to your webhook, Zap, Lead Connector, or GoHighLevel workflow." },
-                    { Icon: ShoppingBag, t: "Scale your business", d: "Buy your first lead, track contract progress, and keep everything in one place." },
+                    {
+                      Icon: Search,
+                      t: "Find Leads",
+                      d: "Browse thousands of motivated seller leads — inherited, foreclosure, divorce, and more — from markets across the country.",
+                    },
+                    {
+                      Icon: MapPin,
+                      t: "Choose Your Market",
+                      d: "Target the exact cities, counties, or states where you buy. Get leads from all markets or narrow it down to your backyard.",
+                    },
+                    {
+                      Icon: Link2,
+                      t: "Set Up Your CRM",
+                      d: "Send leads straight to GoHighLevel, Zapier, Lead Connector, or any webhook — automated on every purchase.",
+                    },
+                    {
+                      Icon: ShoppingBag,
+                      t: "Scale Your Business",
+                      d: "Buy your first lead, track deal progress, and manage your entire pipeline in one place.",
+                    },
                   ].map((c) => {
                     const I = c.Icon;
                     return (
-                    <div key={c.t} className="how-card">
-                      <div className="how-icon"><I size={24} strokeWidth={2} /></div>
-                      <div className="how-title">{c.t}</div>
-                      <div className="how-desc">{c.d}</div>
-                    </div>
+                      <div key={c.t} className="how-card">
+                        <div className="how-icon">
+                          <I size={24} strokeWidth={2} />
+                        </div>
+                        <div className="how-title">{c.t}</div>
+                        <div className="how-desc">{c.d}</div>
+                      </div>
                     );
                   })}
                 </div>
               )}
 
-              {step === 2 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              {/* Step 2 — hidden for now, kept for future use */}
+              {false && step === 2 && (
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 20 }}
+                >
                   <div
                     style={{
                       padding: "16px 18px",
@@ -1857,36 +2085,79 @@ input[type=range]::-webkit-slider-thumb {
                       background: "rgba(255,255,255,0.03)",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        marginBottom: 8,
+                      }}
+                    >
                       <Video size={18} color="#a5b4fc" />
-                      <strong style={{ fontSize: 14, color: "#fff" }}>Understand the platform before you spend a dollar</strong>
+                      <strong style={{ fontSize: 14, color: "#fff" }}>
+                        Understand the platform before you spend a dollar
+                      </strong>
                     </div>
-                    <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.65 }}>
-                      Watch the walkthrough below, then choose the inventory model that fits your buying style.
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "rgba(255,255,255,0.55)",
+                        lineHeight: 1.65,
+                      }}
+                    >
+                      Watch the walkthrough below, then choose the inventory
+                      model that fits your buying style.
                     </p>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(260px, 1fr))",
+                      gap: 16,
+                    }}
+                  >
                     <div className="how-card" style={{ minHeight: 160 }}>
-                      <div className="how-icon"><Star size={24} strokeWidth={2} /></div>
+                      <div className="how-icon">
+                        <Star size={24} strokeWidth={2} />
+                      </div>
                       <div className="how-title">Premium Leads</div>
                       <div className="how-desc">
-                        For subscribers only: pre-vetted cold call leads with monthly premium credits on Basic or Pro.
+                        For subscribers only: pre-vetted cold call leads with
+                        monthly premium credits on Basic or Pro.
                       </div>
                     </div>
                     <div className="how-card" style={{ minHeight: 160 }}>
-                      <div className="how-icon"><Target size={24} strokeWidth={2} /></div>
+                      <div className="how-icon">
+                        <Target size={24} strokeWidth={2} />
+                      </div>
                       <div className="how-title">Exclusive Leads</div>
                       <div className="how-desc">
-                        Inbound leads qualified via SMS and purchased directly from your wallet.
+                        Inbound leads qualified via SMS and purchased directly
+                        from your wallet.
                       </div>
                     </div>
                   </div>
                   {process.env.NEXT_PUBLIC_ONBOARDING_VIDEO_URL ? (
-                    <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}>
+                    <div
+                      style={{
+                        position: "relative",
+                        paddingBottom: "56.25%",
+                        height: 0,
+                        borderRadius: 14,
+                        overflow: "hidden",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                      }}
+                    >
                       <iframe
                         title="How lead buying works"
                         src={process.env.NEXT_PUBLIC_ONBOARDING_VIDEO_URL}
-                        style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          width: "100%",
+                          height: "100%",
+                        }}
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         allowFullScreen
                       />
@@ -1902,55 +2173,150 @@ input[type=range]::-webkit-slider-thumb {
                         fontSize: 13,
                       }}
                     >
-                      Set <code style={{ color: "#a5b4fc" }}>NEXT_PUBLIC_ONBOARDING_VIDEO_URL</code> to embed your walkthrough video.
+                      Set{" "}
+                      <code style={{ color: "#a5b4fc" }}>
+                        NEXT_PUBLIC_ONBOARDING_VIDEO_URL
+                      </code>{" "}
+                      to embed your walkthrough video.
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Step 3 — Basic / Pro (Stripe) vs Exclusive (wallet) */}
-              {step === 3 && (
+              {/* Step 2 — Pro Plan vs Free Plan */}
+              {step === 2 && (
                 <>
-                  <div className="plan-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+                  <div
+                    className="plan-grid"
+                    style={{
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(260px, 1fr))",
+                      gap: 16,
+                    }}
+                  >
+                    {/* Pro Plan */}
                     {subscriptionPlans
-                      .filter((p) => p.planType === "basic" || p.planType === "pro")
+                      .filter((p) => p.planType === "pro")
                       .map((plan) => (
                         <div
                           key={plan.planType}
                           role="button"
                           tabIndex={0}
-                          className={`plan-card ${
-                            data.purchase_path === "subscription" &&
-                            selectedSubscriptionPlan === plan.planType
-                              ? "selected"
-                              : ""
-                          }`}
+                          className={`plan-card ${data.purchase_path === "subscription" && selectedSubscriptionPlan === "pro" ? "selected" : ""}`}
                           onClick={() => {
-                            setData((d) => ({ ...d, purchase_path: "subscription", model: "subscription" }));
-                            setSelectedSubscriptionPlan(plan.planType);
+                            setData((d) => ({
+                              ...d,
+                              purchase_path: "subscription",
+                              model: "subscription",
+                            }));
+                            setSelectedSubscriptionPlan("pro");
                           }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" || e.key === " ") {
                               e.preventDefault();
-                              setData((d) => ({ ...d, purchase_path: "subscription", model: "subscription" }));
-                              setSelectedSubscriptionPlan(plan.planType);
+                              setData((d) => ({
+                                ...d,
+                                purchase_path: "subscription",
+                                model: "subscription",
+                              }));
+                              setSelectedSubscriptionPlan("pro");
                             }
                           }}
+                          style={{ position: "relative" }}
                         >
-                          <div className="plan-name">{plan.name}</div>
-                          <div className="plan-price">{plan.displayPrice}</div>
-                          <div className="plan-desc">
-                            {plan.planType === "basic"
-                              ? "25 premium leads + $50 cash in your wallet every month."
-                              : "40 premium leads + $100 cash in your wallet every month."}
+                          {/* First-month discount badge */}
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: -1,
+                              right: -1,
+                              background:
+                                "linear-gradient(135deg, #f59e0b, #d97706)",
+                              color: "#000",
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: "4px 10px",
+                              borderRadius: "0 12px 0 10px",
+                              letterSpacing: "0.02em",
+                            }}
+                          >
+                            Exclusive Discounted prices in just $49
                           </div>
-                          <div className="plan-desc" style={{ marginTop: 8, fontSize: 11, opacity: 0.75 }}>
-                            {plan.planType === "basic"
-                              ? "Selecting Basic goes directly to Stripe checkout."
-                              : "Selecting Pro goes directly to Stripe checkout."}
+                          <div className="plan-name">Pro Plan</div>
+                          {/* <div
+                            className="plan-price"
+                            style={{
+                              display: "flex",
+                              alignItems: "baseline",
+                              gap: 6,
+                            }}
+                          >
+                            $49
+                            <span
+                              style={{
+                                fontSize: 14,
+                                color: "rgba(255,255,255,0.45)",
+                                fontWeight: 400,
+                              }}
+                            >
+                              /month
+                            </span>
+                          </div> */}
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "rgba(255,255,255,0.35)",
+                              marginBottom: 8,
+                              marginTop: -4,
+                            }}
+                          >
+                            Membership is $49/month · cancel anytime
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 8,
+                            }}
+                          >
+                            {[
+                              "Shared inbound leads — $25 each (up to 5 buyers)",
+                              "Exclusive leads — $150 each",
+                              "60-min early access to new listings",
+                              "Auto-delivery of fresh matching leads",
+                            ].map((f) => (
+                              <div
+                                key={f}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  fontSize: 13,
+                                  color: "rgba(255,255,255,0.75)",
+                                }}
+                              >
+                                <Check
+                                  size={14}
+                                  strokeWidth={2.5}
+                                  style={{ color: "#10b981", flexShrink: 0 }}
+                                />
+                                {f}
+                              </div>
+                            ))}
+                          </div>
+                          <div
+                            style={{
+                              marginTop: 16,
+                              fontSize: 11,
+                              color: "rgba(255,255,255,0.35)",
+                            }}
+                          >
+                            Proceeds to Stripe checkout →
                           </div>
                         </div>
                       ))}
+
+                    {/* Free Plan */}
                     <div
                       role="button"
                       tabIndex={0}
@@ -1975,23 +2341,118 @@ input[type=range]::-webkit-slider-thumb {
                         }
                       }}
                     >
-                      <div className="plan-name">Exclusive</div>
-                      <div className="plan-price">Charge your wallet</div>
-                      <div className="plan-desc">
-                        Start talking to sellers who raised their hand today. Continue to wallet funding next.
+                      <div className="plan-name">Free Plan</div>
+                      <div
+                        className="plan-price"
+                        style={{
+                          display: "flex",
+                          alignItems: "baseline",
+                          gap: 6,
+                        }}
+                      >
+                        $0
+                        <span
+                          style={{
+                            fontSize: 14,
+                            color: "rgba(255,255,255,0.45)",
+                            fontWeight: 400,
+                          }}
+                        >
+                          /month
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "rgba(255,255,255,0.4)",
+                          marginBottom: 14,
+                          marginTop: -4,
+                        }}
+                      >
+                        No subscription required
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                        }}
+                      >
+                        {[
+                          "Fund your wallet and buy from the marketplace",
+                          "Full access to all available leads",
+                          "Pay only for what you buy",
+                        ].map((f) => (
+                          <div
+                            key={f}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              fontSize: 13,
+                              color: "rgba(255,255,255,0.75)",
+                            }}
+                          >
+                            <Check
+                              size={14}
+                              strokeWidth={2.5}
+                              style={{ color: "#6366f1", flexShrink: 0 }}
+                            />
+                            {f}
+                          </div>
+                        ))}
+                      </div>
+                      <div
+                        style={{
+                          marginTop: 16,
+                          fontSize: 11,
+                          color: "rgba(255,255,255,0.35)",
+                        }}
+                      >
+                        Continue to wallet funding →
                       </div>
                     </div>
                   </div>
+
                   {data.purchase_path === "subscription" && (
                     <div style={{ marginTop: 12 }}>
-                      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", display: "flex", gap: 8, alignItems: "center" }}>
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: "rgba(255,255,255,0.55)",
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
                         <Sparkles size={14} color="#c4b5fd" />
-                        Continue opens Stripe checkout. You can finish geography & webhook after you return.
+                        Continue opens Stripe checkout. You can finish geography
+                        &amp; webhook after you return.
+                      </p>
+                    </div>
+                  )}
+                  {data.purchase_path === "exclusive" && (
+                    <div style={{ marginTop: 12 }}>
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: "rgba(255,255,255,0.55)",
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                        }}
+                      >
+                        <Sparkles size={14} color="#818cf8" />
+                        Free Plan confirmed. Continue to wallet funding if you
+                        want buying power now, or add funds later from Wallet.
+                        Auto Purchase is available only with Pro.
                       </p>
                     </div>
                   )}
                   {subscriptionCheckoutMutation.isError ? (
-                    <p style={{ color: "#fca5a5", fontSize: 12, marginTop: 10 }}>
+                    <p
+                      style={{ color: "#fca5a5", fontSize: 12, marginTop: 10 }}
+                    >
                       {subscriptionCheckoutMutation.error instanceof Error
                         ? subscriptionCheckoutMutation.error.message
                         : "Could not start subscription checkout."}
@@ -2001,13 +2462,13 @@ input[type=range]::-webkit-slider-thumb {
               )}
 
               {/* Step 4 - Wallet (real Stripe payment) */}
-              {step === 4 && (
+              {step === 3 && (
                 <Elements stripe={stripePromise}>
                   <WalletFundForm
                     onSuccess={async (fundedDollars) => {
                       await saveMutation.mutateAsync({
-                        current_step: 5,
-                        completed_steps: [4],
+                        current_step: 4,
+                        completed_steps: [3],
                         data: {
                           ...data,
                           wallet_amount: String(fundedDollars),
@@ -2021,9 +2482,9 @@ input[type=range]::-webkit-slider-thumb {
                         initial_funding_applied: true,
                         stripe_onboarding_funded: true,
                       }));
-                      setStep(5);
+                      setStep(4);
                     }}
-                    onSkip={() => void saveStep(5)}
+                    onSkip={() => void saveStep(4)}
                     isSaving={saveMutation.isPending}
                   />
                 </Elements>
@@ -2034,23 +2495,69 @@ input[type=range]::-webkit-slider-thumb {
                 <>
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <div className="toggle-title">Enable Auto-Buy</div>
-                      <div className="toggle-desc">Platform automatically purchases matching leads from your wallet</div>
+                      <div className="toggle-title">Enable Auto Purchase</div>
+                      <div className="toggle-desc">
+                        Choose your target markets first, then turn this on if
+                        you are subscribed to Pro.
+                      </div>
                     </div>
-                    {hasWalletFunding ? (
+                    {hasProAutoPurchaseAccess ? (
                       <button
                         className={`toggle ${data.auto_buy ? "on" : ""}`}
-                        onClick={() => setData((d) => ({ ...d, auto_buy: !d.auto_buy }))}
+                        onClick={() =>
+                          setData((d) => ({ ...d, auto_buy: !d.auto_buy }))
+                        }
                       >
                         <div className="toggle-thumb" />
                       </button>
                     ) : (
-                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                        Wallet funding required
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(255,255,255,0.32)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        Pro subscription required
                       </span>
                     )}
                   </div>
-                  {!hasWalletFunding ? (
+                  {!hasProAutoPurchaseAccess ? (
+                    <div
+                      style={{
+                        background: "rgba(99,102,241,0.08)",
+                        border: "1px solid rgba(99,102,241,0.22)",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                        marginBottom: 14,
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      <AlertTriangle
+                        size={16}
+                        style={{
+                          color: "#a5b4fc",
+                          marginTop: 1,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: "rgba(255,255,255,0.72)",
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        Auto Purchase is tied to Pro. Free Plan buyers can
+                        continue setup, fund the wallet when ready, and buy
+                        manually from marketplace.
+                      </p>
+                    </div>
+                  ) : null}
+                  {hasProAutoPurchaseAccess && !hasWalletFunding ? (
                     <div
                       style={{
                         background: "rgba(245,158,11,0.08)",
@@ -2063,111 +2570,75 @@ input[type=range]::-webkit-slider-thumb {
                         alignItems: "flex-start",
                       }}
                     >
-                      <AlertTriangle size={16} style={{ color: "#facc15", marginTop: 1, flexShrink: 0 }} />
-                      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.72)", lineHeight: 1.6 }}>
-                        Auto-buy is locked because wallet funding was skipped. You can continue onboarding now and enable
-                        auto-buy later from Wallet settings after adding funds.
+                      <AlertTriangle
+                        size={16}
+                        style={{
+                          color: "#facc15",
+                          marginTop: 1,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: "rgba(255,255,255,0.72)",
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        Auto Purchase can be configured now, but purchases will
+                        wait until wallet funds are available.
                       </p>
                     </div>
                   ) : null}
 
-                  {hasWalletFunding && data.auto_buy && (
+                  {hasProAutoPurchaseAccess && data.auto_buy && (
                     <>
                       <div className="range-field">
                         <div className="range-label">
                           <span>Max leads per day</span>
                           <span>{data.max_per_day}</span>
                         </div>
-                        <input type="range" min={1} max={20} value={data.max_per_day}
-                          onChange={(e) => setData((d) => ({ ...d, max_per_day: +e.target.value }))} />
+                        <input
+                          type="range"
+                          min={1}
+                          max={20}
+                          value={data.max_per_day}
+                          onChange={(e) =>
+                            setData((d) => ({
+                              ...d,
+                              max_per_day: +e.target.value,
+                            }))
+                          }
+                        />
                       </div>
                       <div className="range-field">
                         <div className="range-label">
                           <span>Minimum wallet balance</span>
                           <span>${data.min_balance}</span>
                         </div>
-                        <input type="range" min={100} max={2000} step={100} value={data.min_balance}
-                          onChange={(e) => setData((d) => ({ ...d, min_balance: +e.target.value }))} />
+                        <input
+                          type="range"
+                          min={100}
+                          max={2000}
+                          step={100}
+                          value={data.min_balance}
+                          onChange={(e) =>
+                            setData((d) => ({
+                              ...d,
+                              min_balance: +e.target.value,
+                            }))
+                          }
+                        />
                       </div>
                     </>
                   )}
                 </>
               )}
 
-              {/* Step 6 - State / counties / nationwide */}
-              {step === 6 && (
+              {/* Step 4 - Multi-state / counties / nationwide */}
+              {step === 4 && (
                 <div className="geo-panel">
-                  <div>
-                    <span className="geo-field-label">State</span>
-                    <div
-                      className={`geo-state-wrap ${stateMenuOpen ? "open" : ""}`}
-                      ref={stateDropdownRef}
-                    >
-                      <button
-                        type="button"
-                        className="geo-state-trigger"
-                        aria-expanded={stateMenuOpen}
-                        aria-haspopup="listbox"
-                        onClick={() => {
-                          setStateMenuOpen((o) => !o);
-                          if (!stateMenuOpen) setStateQuery("");
-                        }}
-                      >
-                        <span className={data.selected_state ? "" : "muted"}>
-                          {data.selected_state
-                            ? US_STATES.find((s) => s.code === data.selected_state)?.name ?? data.selected_state
-                            : "Select a state…"}
-                        </span>
-                        <ChevronDown className="geo-chevron" aria-hidden />
-                      </button>
-                      {stateMenuOpen && (
-                        <div className="geo-dropdown" role="listbox">
-                          <div className="geo-state-search-wrap">
-                            <Search size={16} strokeWidth={2} aria-hidden />
-                            <input
-                              type="search"
-                              className="geo-state-search"
-                              placeholder="Search by name or code…"
-                              value={stateQuery}
-                              onChange={(e) => setStateQuery(e.target.value)}
-                              autoFocus
-                              aria-label="Search states"
-                            />
-                          </div>
-                          <div className="geo-state-list">
-                            {filteredStates.length === 0 ? (
-                              <div className="geo-empty">No states match your search.</div>
-                            ) : (
-                              filteredStates.map((s) => (
-                                <button
-                                  key={s.code}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={data.selected_state === s.code}
-                                  className={`geo-state-option ${data.selected_state === s.code ? "on" : ""}`}
-                                  onClick={() => {
-                                    setData((d) => ({
-                                      ...d,
-                                      selected_state: s.code,
-                                      selected_counties: [],
-                                      nationwide: false,
-                                    }));
-                                    setStateMenuOpen(false);
-                                    setStateQuery("");
-                                    setCountySearch("");
-                                  }}
-                                >
-                                  <span>{s.name}</span>
-                                  <span className="geo-state-code">{s.code}</span>
-                                </button>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
+                  {/* Nationwide toggle */}
                   <div className="geo-switch-row">
                     <button
                       type="button"
@@ -2178,33 +2649,218 @@ input[type=range]::-webkit-slider-thumb {
                         setData((d) => ({
                           ...d,
                           nationwide: !d.nationwide,
-                          selected_counties: !d.nationwide ? [] : d.selected_counties,
+                          selected_states: [],
+                          selected_counties: [],
                         }))
                       }
                     >
                       <span className="geo-switch-thumb" />
                     </button>
                     <div className="geo-switch-label">
-                      <div className="geo-switch-title">Nationwide coverage</div>
+                      <div className="geo-switch-title">
+                        Nationwide coverage
+                      </div>
                       <div className="geo-switch-desc">
-                        Target every supported county across all states. You can refine markets later in Settings →
-                        Distribution.
+                        Target every supported county across all states. You can
+                        refine markets later in Settings → Distribution.
                       </div>
                     </div>
                   </div>
 
                   {!data.nationwide && (
-                    <div>
-                      <span className="geo-field-label">Counties</span>
-                      <p className="geo-hint">
-                        Select one or more counties in your state. Use search to jump to a name.
-                      </p>
-                      {!data.selected_state ? (
-                        <div className="geo-empty" style={{ borderRadius: 14, marginTop: 10 }}>
-                          Choose a state above to load counties.
+                    <>
+                      {/* State checkbox list */}
+                      <div>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            marginBottom: 8,
+                          }}
+                        >
+                          <span
+                            className="geo-field-label"
+                            style={{ marginBottom: 0 }}
+                          >
+                            States
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allCodes = filteredStates.map(
+                                (s) => s.code,
+                              );
+                              const allSelected = allCodes.every((c) =>
+                                selectedStates.includes(c),
+                              );
+                              if (allSelected) {
+                                setData((d) => ({
+                                  ...d,
+                                  selected_states: [],
+                                  selected_counties: [],
+                                }));
+                              } else {
+                                setData((d) => ({
+                                  ...d,
+                                  selected_states: [
+                                    ...new Set([
+                                      ...d.selected_states,
+                                      ...allCodes,
+                                    ]),
+                                  ],
+                                  nationwide: false,
+                                }));
+                              }
+                            }}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#a5b4fc",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              padding: 0,
+                            }}
+                          >
+                            {filteredStates.every((s) =>
+                              selectedStates.includes(s.code),
+                            )
+                              ? "Deselect all"
+                              : "Select all"}
+                          </button>
                         </div>
-                      ) : (
-                        <>
+                        <div
+                          className="geo-state-search-wrap"
+                          style={{ marginBottom: 8 }}
+                        >
+                          <Search size={16} strokeWidth={2} aria-hidden />
+                          <input
+                            type="search"
+                            className="geo-state-search"
+                            placeholder="Search states…"
+                            value={stateQuery}
+                            onChange={(e) => setStateQuery(e.target.value)}
+                            aria-label="Search states"
+                          />
+                        </div>
+                        <div className="geo-county-panel">
+                          <div className="geo-county-scroll">
+                            {filteredStates.length === 0 ? (
+                              <div className="geo-empty">
+                                No states match your search.
+                              </div>
+                            ) : (
+                              filteredStates.map((s) => {
+                                const isOn = selectedStates.includes(s.code);
+                                return (
+                                  <button
+                                    key={s.code}
+                                    type="button"
+                                    className={`geo-county-row ${isOn ? "on" : ""}`}
+                                    onClick={() => {
+                                      toggleState(s.code);
+                                      setCountySearch("");
+                                    }}
+                                  >
+                                    <span
+                                      className={`geo-check ${isOn ? "on" : ""}`}
+                                      aria-hidden
+                                    >
+                                      {isOn ? (
+                                        <Check size={14} strokeWidth={3} />
+                                      ) : null}
+                                    </span>
+                                    <span className="geo-county-name">
+                                      {s.name}
+                                    </span>
+                                    <span
+                                      style={{
+                                        marginLeft: "auto",
+                                        fontSize: 11,
+                                        color: "rgba(255,255,255,0.3)",
+                                        paddingRight: 4,
+                                      }}
+                                    >
+                                      {s.code}
+                                    </span>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                        {selectedStates.length > 0 && (
+                          <p className="geo-hint" style={{ marginTop: 8 }}>
+                            {selectedStates.length}{" "}
+                            {selectedStates.length === 1 ? "state" : "states"}{" "}
+                            selected
+                          </p>
+                        )}
+                      </div>
+
+                      {/* County checkbox list */}
+                      {selectedStates.length > 0 && (
+                        <div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              marginBottom: 8,
+                            }}
+                          >
+                            <span
+                              className="geo-field-label"
+                              style={{ marginBottom: 0 }}
+                            >
+                              Counties
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const allKeys = filteredCounties.map(
+                                  (c) => c.key,
+                                );
+                                const allSelected = allKeys.every((k) =>
+                                  (data.selected_counties || []).includes(k),
+                                );
+                                if (allSelected) {
+                                  setData((d) => ({
+                                    ...d,
+                                    selected_counties: (
+                                      d.selected_counties || []
+                                    ).filter(
+                                      (c: string) => !allKeys.includes(c),
+                                    ),
+                                  }));
+                                } else {
+                                  setData((d) => ({
+                                    ...d,
+                                    selected_counties: [
+                                      ...new Set([
+                                        ...(d.selected_counties || []),
+                                        ...allKeys,
+                                      ]),
+                                    ],
+                                  }));
+                                }
+                              }}
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "#a5b4fc",
+                                fontSize: 12,
+                                cursor: "pointer",
+                                padding: 0,
+                              }}
+                            >
+                              {filteredCounties.every((c) =>
+                                (data.selected_counties || []).includes(c.key),
+                              )
+                                ? "Deselect all"
+                                : "Select all"}
+                            </button>
+                          </div>
                           <div className="geo-county-search-wrap">
                             <Search size={16} strokeWidth={2} aria-hidden />
                             <input
@@ -2220,156 +2876,598 @@ input[type=range]::-webkit-slider-thumb {
                             <div className="geo-county-scroll">
                               {filteredCounties.length === 0 ? (
                                 <div className="geo-empty">
-                                  {countiesForState.length === 0
-                                    ? "No county list for this selection yet."
-                                    : `No counties match “${countySearch.trim()}”. Try a different search.`}
+                                  {countiesForSelectedStates.length === 0
+                                    ? "No county list available for selected states yet."
+                                    : `No counties match "${countySearch.trim()}".`}
                                 </div>
                               ) : (
-                                filteredCounties.map((c) => {
-                                  const on = (data.selected_counties || []).includes(c);
-                                  return (
-                                    <button
-                                      key={c}
-                                      type="button"
-                                      className={`geo-county-row ${on ? "on" : ""}`}
-                                      onClick={() => toggleCounty(c)}
-                                    >
-                                      <span className={`geo-check ${on ? "on" : ""}`} aria-hidden>
-                                        {on ? <Check size={14} strokeWidth={3} /> : null}
-                                      </span>
-                                      <span className="geo-county-name">{c}</span>
-                                    </button>
-                                  );
-                                })
+                                filteredCounties.map(
+                                  ({ key, label, stateCode }) => {
+                                    const on = (
+                                      data.selected_counties || []
+                                    ).includes(key);
+                                    return (
+                                      <button
+                                        key={key}
+                                        type="button"
+                                        className={`geo-county-row ${on ? "on" : ""}`}
+                                        onClick={() => toggleCounty(key)}
+                                      >
+                                        <span
+                                          className={`geo-check ${on ? "on" : ""}`}
+                                          aria-hidden
+                                        >
+                                          {on ? (
+                                            <Check size={14} strokeWidth={3} />
+                                          ) : null}
+                                        </span>
+                                        <span className="geo-county-name">
+                                          {label}
+                                        </span>
+                                        {selectedStates.length > 1 && (
+                                          <span
+                                            style={{
+                                              marginLeft: "auto",
+                                              fontSize: 10,
+                                              color: "rgba(255,255,255,0.3)",
+                                              paddingRight: 4,
+                                            }}
+                                          >
+                                            {stateCode}
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  },
+                                )
                               )}
                             </div>
                           </div>
-                          {(data.selected_counties || []).length > 0 ? (
+                          {(data.selected_counties || []).length > 0 && (
                             <p className="geo-hint" style={{ marginTop: 10 }}>
-                              {(data.selected_counties || []).length} selected
+                              {(data.selected_counties || []).length}{" "}
+                              {(data.selected_counties || []).length === 1
+                                ? "county"
+                                : "counties"}{" "}
+                              selected
                             </p>
-                          ) : null}
-                        </>
+                          )}
+                        </div>
                       )}
-                    </div>
+                    </>
                   )}
                 </div>
               )}
 
               {/* Step 7 - Webhook CRM */}
-              {step === 7 && (
-                <>
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 14, lineHeight: 1.6 }}>
-                    Paste a webhook URL from Zapier, Lead Connector, GoHighLevel, or any HTTPS endpoint. We POST JSON payloads when leads sync (you can refine in Settings).
-                  </p>
-                  <input
-                    type="url"
-                    className="filter-input"
-                    placeholder="https://hooks.zapier.com/…"
-                    value={data.webhook_url || ""}
-                    onChange={(e) => setData((d) => ({ ...d, webhook_url: e.target.value }))}
-                    style={{ maxWidth: 520, marginBottom: 12 }}
-                  />
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
-                    <button
-                      type="button"
-                      className="btn-next"
-                      style={{ padding: "10px 18px", fontSize: 13 }}
-                      onClick={() => void patchWebhookIntegration(String(data.webhook_url || "").trim()).then(() => setHookMsg("Webhook URL saved.")).catch((e: Error) => setHookMsg(e.message || "Save failed"))}
+              {step === 6 && (
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 18 }}
+                >
+                  {/* What is a webhook */}
+                  <div
+                    style={{
+                      padding: "16px 18px",
+                      borderRadius: 14,
+                      background: "rgba(99,102,241,0.08)",
+                      border: "1px solid rgba(99,102,241,0.2)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: 6,
+                      }}
                     >
-                      Save webhook
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-back"
-                      style={{ padding: "10px 18px", fontSize: 13 }}
-                      onClick={() =>
-                        void testWebhookIntegration()
-                          .then((r) => setHookMsg(`Test sent — HTTP ${r.status}`))
-                          .catch((e: Error) => setHookMsg(e.message || "Test failed"))
-                      }
+                      <Zap size={16} color="#a5b4fc" />
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: "#a5b4fc",
+                        }}
+                      >
+                        What is a webhook?
+                      </span>
+                    </div>
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "rgba(255,255,255,0.6)",
+                        lineHeight: 1.65,
+                        margin: 0,
+                      }}
                     >
-                      Test webhook
-                    </button>
+                      Think of it as an automatic delivery address for your
+                      leads. Every time you buy a lead on Newleey, the full lead
+                      details — name, phone, email, address — get sent instantly
+                      to your CRM so you can follow up without any copy-pasting.
+                    </p>
                   </div>
-                  {hookMsg ? (
-                    <p style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginBottom: 12 }}>{hookMsg}</p>
-                  ) : null}
-                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
-                    You can update this anytime under Settings → Integrations.
-                  </p>
-                </>
+
+                  {/* CRM quick instructions */}
+                  <div>
+                    <p
+                      style={{
+                        fontSize: 12,
+                        color: "rgba(255,255,255,0.6)",
+                        letterSpacing: "0.06em",
+                        marginBottom: 10,
+                      }}
+                    >
+                      How to get your webhook URL
+                    </p>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                      }}
+                    >
+                      {[
+                        {
+                          name: "GoHighLevel / Lead Connector",
+                          icon: "🔗",
+                          steps:
+                            "Settings → Integrations → Webhooks → Create New → copy the endpoint URL",
+                        },
+                        {
+                          name: "Zapier",
+                          icon: "⚡",
+                          steps:
+                            "Create a Zap → Trigger: Webhooks by Zapier → Catch Hook → copy the webhook URL",
+                        },
+                        {
+                          name: "Any other CRM",
+                          icon: "🔌",
+                          steps:
+                            "Look for 'Inbound Webhook', 'HTTP Trigger', or 'API Endpoint' in your CRM's automation or integrations settings",
+                        },
+                      ].map((crm) => (
+                        <div
+                          key={crm.name}
+                          style={{
+                            display: "flex",
+                            gap: 12,
+                            padding: "12px 14px",
+                            borderRadius: 10,
+                            background: "rgba(255,255,255,0.03)",
+                            border: "1px solid rgba(255,255,255,0.07)",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 18,
+                              flexShrink: 0,
+                              marginTop: 1,
+                            }}
+                          >
+                            {crm.icon}
+                          </span>
+                          <div>
+                            <div
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: "rgba(255,255,255,0.85)",
+                                marginBottom: 3,
+                              }}
+                            >
+                              {crm.name}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: "rgba(255,255,255,0.45)",
+                                lineHeight: 1.55,
+                              }}
+                            >
+                              {crm.steps}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* URL input */}
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: 13,
+                        color: "rgba(255,255,255,0.5)",
+                        marginBottom: 8,
+                      }}
+                    >
+                      Paste your webhook URL here
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://hooks.zapier.com/…"
+                      value={data.webhook_url || ""}
+                      onChange={(e) =>
+                        setData((d) => ({ ...d, webhook_url: e.target.value }))
+                      }
+                      style={{
+                        width: "100%",
+                        maxWidth: 520,
+                        marginBottom: 10,
+                        background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderRadius: 10,
+                        padding: "12px 14px",
+                        color: "#fff",
+                        fontSize: 14,
+                        outline: "none",
+                        fontFamily: "inherit",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="btn-next"
+                        style={{ padding: "10px 18px", fontSize: 13 }}
+                        onClick={() =>
+                          void patchWebhookIntegration(
+                            String(data.webhook_url || "").trim(),
+                          )
+                            .then(() => setHookMsg("✓ Webhook URL saved."))
+                            .catch((e: Error) =>
+                              setHookMsg(e.message || "Save failed"),
+                            )
+                        }
+                      >
+                        Save webhook
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-back"
+                        style={{ padding: "10px 18px", fontSize: 13 }}
+                        onClick={() =>
+                          void testWebhookIntegration()
+                            .then((r) =>
+                              setHookMsg(`✓ Test sent — HTTP ${r.status}`),
+                            )
+                            .catch((e: Error) =>
+                              setHookMsg(e.message || "Test failed"),
+                            )
+                        }
+                      >
+                        Send test lead
+                      </button>
+                    </div>
+                    {hookMsg && (
+                      <p
+                        style={{
+                          fontSize: 12,
+                          color: hookMsg.startsWith("✓")
+                            ? "#34d399"
+                            : "#fca5a5",
+                          marginTop: 10,
+                        }}
+                      >
+                        {hookMsg}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* What happens note */}
+                  <div
+                    style={{
+                      padding: "12px 16px",
+                      borderRadius: 10,
+                      background: "rgba(16,185,129,0.07)",
+                      border: "1px solid rgba(16,185,129,0.15)",
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontSize: 12,
+                        color: "rgba(255,255,255,0.5)",
+                        lineHeight: 1.65,
+                        margin: 0,
+                      }}
+                    >
+                      <span style={{ color: "#34d399", fontWeight: 600 }}>
+                        What happens next:{" "}
+                      </span>
+                      Every lead you purchase will be delivered to this URL
+                      instantly — name, phone, email, address, and property
+                      details sent straight to your CRM. You can update this
+                      anytime in Settings → Integrations.
+                    </p>
+                  </div>
+                </div>
               )}
 
               {/* Step 8 - Resources */}
-              {step === 8 && (
+              {step === 7 && (
                 <div className="resource-grid">
                   {[
-                    { Icon: MessageCircle, t: "Skool community", d: "Access community support, updates, and best-practice walkthroughs." },
-                    { Icon: Video, t: "GHL setup tutorial", d: "Connect GoHighLevel or Lead Connector and confirm delivery." },
-                    { Icon: Link2, t: "Zap / webhook setup", d: "Map lead fields and test your webhook before you go live." },
-                    { Icon: CircleHelp, t: "FAQs", d: "Get quick answers about plans, wallet funding, refunds, and lead delivery." },
-                    { Icon: Sparkles, t: "Win free leads & cash", d: "Submit contracts, leave reviews, and participate in reward campaigns." },
-                    { Icon: Map, t: "Resources tab", d: "Everything here is also available later from the Resources section." },
+                    {
+                      Icon: MessageCircle,
+                      t: "Skool community",
+                      d: "Access community support, updates, and best-practice walkthroughs.",
+                    },
+                    {
+                      Icon: Video,
+                      t: "GHL setup tutorial",
+                      d: "Connect GoHighLevel or Lead Connector and confirm delivery.",
+                    },
+                    {
+                      Icon: Link2,
+                      t: "Zap / webhook setup",
+                      d: "Map lead fields and test your webhook before you go live.",
+                    },
+                    {
+                      Icon: CircleHelp,
+                      t: "FAQs",
+                      d: "Get quick answers about plans, wallet funding, refunds, and lead delivery.",
+                    },
+                    {
+                      Icon: Sparkles,
+                      t: "Win free leads & cash",
+                      d: "Submit contracts, leave reviews, and participate in reward campaigns.",
+                    },
+                    {
+                      Icon: Map,
+                      t: "Resources tab",
+                      d: "Everything here is also available later from the Resources section.",
+                    },
                   ].map((r) => {
                     const I = r.Icon;
                     return (
-                    <div key={r.t} className="resource-card">
-                      <div className="resource-icon"><I size={22} strokeWidth={2} /></div>
-                      <div className="resource-title">{r.t}</div>
-                      <div className="resource-desc">{r.d}</div>
-                    </div>
+                      <div key={r.t} className="resource-card">
+                        <div className="resource-icon">
+                          <I size={22} strokeWidth={2} />
+                        </div>
+                        <div className="resource-title">{r.t}</div>
+                        <div className="resource-desc">{r.d}</div>
+                      </div>
                     );
                   })}
                 </div>
               )}
 
               {/* Step 9 - Done */}
-              {step === 9 && (
-                <div className="success-wrap">
-                  <div className="success-icon">
-                    <PartyPopper size={40} strokeWidth={1.5} aria-hidden />
-                  </div>
-                  <p style={{ fontSize: 16, color: "rgba(255,255,255,0.55)", marginBottom: 8 }}>
-                    Your account is configured. Here's what's ready:
-                  </p>
-                  <div className="checklist">
-                    {(() => {
-                      const geoCount =
-                        Array.isArray(data.markets) && data.markets.length > 0
-                          ? data.markets.length
-                          : buildMarketsFromGeo(data).length;
-                      return [
-                      "Account ready",
-                      data.purchase_path === "subscription"
-                        ? "Subscription: Basic or Pro (complete checkout from Plans if you skipped)"
-                        : data.purchase_path === "exclusive"
-                          ? "Exclusive path — fund wallet to buy"
-                          : "Plan: finish in Settings → Plan",
-                      `${geoCount} geo target${geoCount === 1 ? "" : "s"}`,
-                      `Auto-buy ${data.auto_buy ? "enabled" : "disabled"}`,
-                      data.webhook_url
-                        ? "Webhook URL on file"
-                        : "Webhook: optional — add in Settings",
-                    ];
-                    })().map((item) => (
-                      <div key={item} className="check-item">
-                        <Check size={16} strokeWidth={2.5} style={{ color: "#10b981", flexShrink: 0 }} aria-hidden />
-                        <span>{item}</span>
+              {step === 8 &&
+                (() => {
+                  const geoCount =
+                    Array.isArray(data.markets) && data.markets.length > 0
+                      ? data.markets.length
+                      : buildMarketsFromGeo(data).length;
+                  const planLabel =
+                    data.purchase_path === "subscription"
+                      ? "Pro Plan"
+                      : data.purchase_path === "exclusive"
+                        ? "Free Plan"
+                        : "Not selected";
+                  const planSub =
+                    data.purchase_path === "subscription"
+                      ? "Complete Stripe checkout from Plans if needed"
+                      : data.purchase_path === "exclusive"
+                        ? "Fund your wallet to start buying leads"
+                        : "Finish setup in Settings → Plan";
+                  const summaryCards = [
+                    {
+                      Icon: CreditCard,
+                      label: "Plan",
+                      value: planLabel,
+                      sub: planSub,
+                      ok: !!data.purchase_path,
+                    },
+                    {
+                      Icon: MapPin,
+                      label: "Markets",
+                      value: data.nationwide
+                        ? "Nationwide"
+                        : geoCount > 0
+                          ? `${geoCount} ${geoCount === 1 ? "county" : "counties"} selected`
+                          : "Not set",
+                      sub: data.nationwide
+                        ? "All supported markets"
+                        : geoCount > 0
+                          ? `Across ${(data.selected_states || []).length || 1} state${((data.selected_states || []).length || 1) > 1 ? "s" : ""}`
+                          : "Add markets in Settings",
+                      ok: data.nationwide || geoCount > 0,
+                    },
+                    {
+                      Icon: Bot,
+                      label: "Auto-buy",
+                      value: data.auto_buy ? "Enabled" : "Disabled",
+                      sub: data.auto_buy
+                        ? `Up to ${data.max_per_day ?? 3} leads/day`
+                        : "Turn on in Settings → Distribution",
+                      ok: data.auto_buy,
+                    },
+                    {
+                      Icon: Link2,
+                      label: "CRM Webhook",
+                      value: data.webhook_url ? "Connected" : "Not connected",
+                      sub: data.webhook_url
+                        ? "Leads will be delivered automatically"
+                        : "Optional — add anytime in Settings",
+                      ok: !!data.webhook_url,
+                    },
+                  ];
+                  return (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 24,
+                      }}
+                    >
+                      {/* Header */}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 14,
+                          textAlign: "center",
+                          paddingTop: 8,
+                        }}
+                      >
+                        {/* <div
+                          style={{
+                            width: 72,
+                            height: 72,
+                            borderRadius: "50%",
+                            background:
+                              "linear-gradient(135deg, #6366f1, #10b981)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            boxShadow: "0 0 40px rgba(99,102,241,0.35)",
+                          }}
+                        >
+                          <CheckCircle
+                            size={36}
+                            strokeWidth={1.75}
+                            color="#fff"
+                            aria-hidden
+                          />
+                        </div> */}
+                        {/* <div>
+                          <h2
+                            style={{
+                              fontSize: 22,
+                              fontWeight: 700,
+                              color: "#fff",
+                              margin: 0,
+                              lineHeight: 1.2,
+                            }}
+                          >
+                            You&apos;re all set.
+                          </h2>
+                          <p
+                            style={{
+                              fontSize: 14,
+                              color: "rgba(255,255,255,0.45)",
+                              marginTop: 6,
+                              marginBottom: 0,
+                            }}
+                          >
+                            Your account is ready. Here&apos;s a summary of your
+                            setup.
+                          </p>
+                        </div> */}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+
+                      {/* Summary cards grid */}
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit, minmax(220px, 1fr))",
+                          gap: 12,
+                        }}
+                      >
+                        {summaryCards.map(({ Icon, label, value, sub, ok }) => (
+                          <div
+                            key={label}
+                            style={{
+                              padding: "16px 18px",
+                              borderRadius: 14,
+                              background: ok
+                                ? "rgba(16,185,129,0.06)"
+                                : "rgba(255,255,255,0.03)",
+                              border: `1px solid ${ok ? "rgba(16,185,129,0.2)" : "rgba(255,255,255,0.07)"}`,
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 6,
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 7,
+                                }}
+                              >
+                                <Icon
+                                  size={15}
+                                  style={{
+                                    color: ok
+                                      ? "#10b981"
+                                      : "rgba(255,255,255,0.3)",
+                                  }}
+                                />
+                                <span
+                                  style={{
+                                    fontSize: 11,
+                                    color: "rgba(255,255,255,0.35)",
+                                    textTransform: "uppercase",
+                                    letterSpacing: "0.06em",
+                                  }}
+                                >
+                                  {label}
+                                </span>
+                              </div>
+                              <div
+                                style={{
+                                  width: 7,
+                                  height: 7,
+                                  borderRadius: "50%",
+                                  background: ok
+                                    ? "#10b981"
+                                    : "rgba(255,255,255,0.15)",
+                                }}
+                              />
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 15,
+                                fontWeight: 600,
+                                color: ok ? "#fff" : "rgba(255,255,255,0.5)",
+                              }}
+                            >
+                              {value}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "rgba(255,255,255,0.35)",
+                                lineHeight: 1.5,
+                              }}
+                            >
+                              {sub}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
             </div>
           </div>
 
           {/* Footer nav */}
           <div className="footer-nav">
-            <span className="step-counter">Step {step} of {TOTAL_STEPS}</span>
+            <span className="step-counter">
+              Step {step} of {TOTAL_STEPS}
+            </span>
             <div className="nav-btns">
               {step > 1 && (
-                <button type="button" className="btn-back" onClick={() => setStep(step - 1)}>← Back</button>
+                <button
+                  type="button"
+                  className="btn-back"
+                  onClick={() => setStep(step - 1)}
+                >
+                  ← Back
+                </button>
               )}
               <button
                 type="button"
@@ -2379,40 +3477,47 @@ input[type=range]::-webkit-slider-thumb {
               >
                 Skip for now
               </button>
-              {/* Step 4 drives its own navigation via WalletFundForm — no global Continue button */}
-              {step !== 4 && (
+              {/* Step 3 drives its own navigation via WalletFundForm — no global Continue button */}
+              {step !== 3 && (
                 <button
                   type="button"
                   className="btn-next"
                   disabled={
                     saveMutation.isPending ||
                     subscriptionCheckoutMutation.isPending ||
-                    (step === 3 &&
+                    (step === 2 &&
                       (!data.purchase_path ||
                         (data.purchase_path === "subscription" &&
                           !selectedSubscriptionPlan))) ||
-                    (step === 6 &&
+                    (step === 5 &&
                       !data.nationwide &&
-                      (!data.selected_state || !(data.selected_counties || []).length))
+                      (!(data.selected_states || []).length ||
+                        !(data.selected_counties || []).length))
                   }
                   onClick={() => {
-                    if (step === 3 && data.purchase_path === "subscription") {
+                    if (step === 2 && data.purchase_path === "subscription") {
                       if (!selectedSubscriptionPlan) return;
-                      void subscriptionCheckoutMutation.mutateAsync(selectedSubscriptionPlan);
+                      void subscriptionCheckoutMutation.mutateAsync(
+                        selectedSubscriptionPlan,
+                      );
                       return;
                     }
-                    if (step === 3 && data.purchase_path === "exclusive") {
-                      void saveStep(4);
+                    if (step === 2 && data.purchase_path === "exclusive") {
+                      void saveStep(3);
                       return;
                     }
                     void saveStep(step + 1);
                   }}
                 >
                   {subscriptionCheckoutMutation.isPending ? (
-                    <><span className="spinner" /> Redirecting to Stripe…</>
+                    <>
+                      <span className="spinner" /> Redirecting to Stripe…
+                    </>
                   ) : saveMutation.isPending ? (
-                    <><span className="spinner" /> Saving…</>
-                  ) : step === 3 && data.purchase_path === "subscription" ? (
+                    <>
+                      <span className="spinner" /> Saving…
+                    </>
+                  ) : step === 2 && data.purchase_path === "subscription" ? (
                     "Continue to Stripe checkout →"
                   ) : step === TOTAL_STEPS ? (
                     "Go to marketplace →"

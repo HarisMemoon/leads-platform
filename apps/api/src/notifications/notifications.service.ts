@@ -501,4 +501,92 @@ export class NotificationsService {
       take: limit,
     });
   }
+
+  // ── Wallet notifications ────────────────────────────────────────────────────
+
+  async notifyWalletLow(userId: string, remainingLeads: number, leadPriceCents: number) {
+    const leadPrice = (leadPriceCents / 100).toFixed(0);
+    const title = 'Your Newleey wallet is running low';
+    const body = `You have enough funds for about ${remainingLeads} more ${remainingLeads === 1 ? 'lead' : 'leads'}. Add funds now to keep receiving matching leads without interruption.`;
+    await this.sendUserEvent({
+      userId,
+      type: 'wallet_low',
+      title,
+      body,
+      channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL, NotificationChannel.SMS],
+      emailSubject: title,
+      emailHtml: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;line-height:1.6">
+        <h2 style="color:#f59e0b">⚠️ Wallet Running Low</h2>
+        <p>You have enough funds for about <strong>${remainingLeads} more ${remainingLeads === 1 ? 'lead' : 'leads'}</strong> at $${leadPrice} each.</p>
+        <p>Add funds now to keep receiving matching leads without interruption.</p>
+        <a href="${process.env.APP_BASE_URL ?? ''}/wallet" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">Add Funds →</a>
+      </div>`,
+      smsBody: `Newleey: Wallet low — about ${remainingLeads} more leads at $${leadPrice} each. Add funds: ${process.env.APP_BASE_URL ?? ''}/wallet`,
+    });
+  }
+
+  async notifyDeliveryPaused(userId: string, balanceCents: number, leadPriceCents: number) {
+    const leadPrice = (leadPriceCents / 100).toFixed(0);
+    const balance = (balanceCents / 100).toFixed(2);
+    const title = 'Lead delivery is paused';
+    const body = `Your wallet balance ($${balance}) is too low to receive more leads at $${leadPrice} each. Add funds to restart lead delivery.`;
+    await this.sendUserEvent({
+      userId,
+      type: 'delivery_paused',
+      title,
+      body,
+      channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL, NotificationChannel.SMS],
+      emailSubject: title,
+      emailHtml: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;line-height:1.6">
+        <h2 style="color:#ef4444">🚫 Lead Delivery Paused</h2>
+        <p>Your wallet balance of <strong>$${balance}</strong> is below the lead price of <strong>$${leadPrice}</strong>.</p>
+        <p>Auto delivery has paused. Add funds to restart receiving matching leads.</p>
+        <a href="${process.env.APP_BASE_URL ?? ''}/wallet" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">Add Funds →</a>
+      </div>`,
+      smsBody: `Newleey: Lead delivery paused — wallet balance $${balance} is below lead price $${leadPrice}. Add funds: ${process.env.APP_BASE_URL ?? ''}/wallet`,
+    });
+  }
+
+  async notifyAutoRefillSuccess(userId: string, amountCents: number, newBalanceCents: number) {
+    const amount = (amountCents / 100).toFixed(0);
+    const newBalance = (newBalanceCents / 100).toFixed(2);
+    const title = 'Your Newleey wallet was refilled';
+    const body = `Your wallet was automatically refilled with $${amount}. New balance: $${newBalance}. Lead delivery will continue as normal.`;
+    await this.sendUserEvent({
+      userId,
+      type: 'auto_refill_success',
+      title,
+      body,
+      channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
+      emailSubject: title,
+      emailHtml: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;line-height:1.6">
+        <h2 style="color:#10b981">✅ Wallet Auto-Refilled</h2>
+        <p>Your wallet was automatically refilled with <strong>$${amount}</strong>.</p>
+        <p>New balance: <strong>$${newBalance}</strong></p>
+        <p>Lead delivery will continue as normal based on your filters and daily limit.</p>
+        <a href="${process.env.APP_BASE_URL ?? ''}/wallet" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">View Wallet</a>
+      </div>`,
+    });
+  }
+
+  async notifyAutoRefillFailed(userId: string, amountCents: number) {
+    const amount = (amountCents / 100).toFixed(0);
+    const title = 'Your Newleey wallet refill failed';
+    const body = `We tried to automatically refill your wallet with $${amount}, but the payment did not go through. Please update your payment method or add funds manually to keep receiving leads.`;
+    await this.sendUserEvent({
+      userId,
+      type: 'auto_refill_failed',
+      title,
+      body,
+      channels: [NotificationChannel.IN_APP, NotificationChannel.EMAIL, NotificationChannel.SMS],
+      emailSubject: title,
+      emailHtml: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;line-height:1.6">
+        <h2 style="color:#ef4444">❌ Wallet Refill Failed</h2>
+        <p>We tried to refill your wallet with <strong>$${amount}</strong>, but the payment did not go through.</p>
+        <p>Please update your payment method or add funds manually to avoid lead delivery pausing.</p>
+        <a href="${process.env.APP_BASE_URL ?? ''}/wallet" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">Update Payment Method →</a>
+      </div>`,
+      smsBody: `Newleey: Wallet refill of $${amount} failed. Update payment or add funds: ${process.env.APP_BASE_URL ?? ''}/wallet`,
+    });
+  }
 }

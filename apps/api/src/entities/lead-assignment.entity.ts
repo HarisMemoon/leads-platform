@@ -66,6 +66,18 @@ import {
     })
     crm_sync_status!: CrmSyncStatus
   
+    /** Number of CRM delivery retry attempts made so far (0 = not yet tried) */
+    @Column({ type: 'int', default: 0 })
+    crm_retry_count!: number
+
+    /** Timestamp of the next scheduled CRM retry attempt (null = no retry pending) */
+    @Column({ type: 'timestamp with time zone', nullable: true })
+    crm_next_retry_at!: Date | null
+
+    /** Last error message from a failed CRM delivery attempt */
+    @Column({ type: 'text', nullable: true })
+    crm_last_error!: string | null
+
     @Column({ type: 'varchar',nullable: true })
     disposition!: string | null
 

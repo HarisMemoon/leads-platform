@@ -64,12 +64,18 @@ describe('StripeService', () => {
     const walletRepo = createRepositoryMock<any>()
     const subscriptionRepo = createRepositoryMock<any>()
 
+    const subscriptionPlanRepo = createRepositoryMock<any>()
+    const distributionRuleRepo = createRepositoryMock<any>()
+    const notificationsService = { sendUserEvent: jest.fn().mockResolvedValue(undefined) }
     const service = new StripeService(
       config,
       userRepo as any,
       walletRepo as any,
       subscriptionRepo as any,
+      subscriptionPlanRepo as any,
+      distributionRuleRepo as any,
       walletService as any,
+      notificationsService as any,
     )
 
     return { service, config, userRepo, walletRepo, subscriptionRepo }

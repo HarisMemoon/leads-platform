@@ -1,6 +1,6 @@
 import { apiDelete, apiGet, apiPatch } from '@/lib/api';
 
-export type ExclusivityPreference = 'exclusive' | 'non_exclusive' | 'both';
+export type ExclusivityPreference = 'exclusive_only' | 'non_exclusive_only' | 'both';
 
 export type DistributionRuleDto = {
   id: string;

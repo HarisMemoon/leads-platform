@@ -20,6 +20,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { ResourcesModule } from './resources/resources.module';
 import { PingModule } from './ping/ping.module';
 import { InboundModule } from './inbound/inbound.module';
+import { TermsModule } from './terms/terms.module';
 
 @Module({
   imports: [
@@ -121,6 +122,7 @@ import { InboundModule } from './inbound/inbound.module';
     ResourcesModule,
     PingModule,
     InboundModule,
+    TermsModule,
   ],
 
   controllers: [AppController],

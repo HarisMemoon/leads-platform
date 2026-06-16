@@ -34,6 +34,8 @@ import {
   dollarsInputToCents,
 } from "@/lib/wallet-api";
 import { queryKeys } from "@/lib/query-keys";
+import { getMySubscription } from "@/lib/subscriptions-api";
+import { getPricingConfig, type PricingConfigEntry } from "@/lib/leads-api";
 
 const TOP_UP_AMOUNTS = [50, 100, 250, 500, 1000, 2500];
 const TX_PAGE_SIZE = 10;
@@ -297,6 +299,19 @@ export default function WalletPage() {
     enabled: !!wallet?.stripe_payment_method_id,
   });
 
+  const { data: subscription } = useQuery({
+    queryKey: queryKeys.subscriptions.me,
+    queryFn: getMySubscription,
+  });
+
+  const { data: pricingConfigs } = useQuery({
+    queryKey: ["pricing-config"],
+    queryFn: getPricingConfig,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const isPro = subscription != null && ["active", "past_due"].includes(subscription.status ?? "");
+
   const loading = walletLoading || txsLoading;
   const loadError =
     walletIsError || txsIsError
@@ -318,6 +333,19 @@ export default function WalletPage() {
 
   const balanceCents = wallet?.balance_cents ?? "0";
   const balanceNum = centsToNumber(balanceCents);
+
+  // Dynamic pricing from config — fall back to defaults if not yet loaded
+  const inboundConfig = pricingConfigs?.find((c) => c.lead_type === "inbound");
+  const sharedPriceCents = inboundConfig?.shared_price_cents != null
+    ? Number(inboundConfig.shared_price_cents) : 2500;
+  const exclusivePriceCents = inboundConfig?.new_lead_price_cents != null
+    ? Number(inboundConfig.new_lead_price_cents) : 15000;
+
+  // Non-subscribers can only buy exclusive leads — use exclusive price for capacity
+  const effectiveLeadPriceCents = isPro ? sharedPriceCents : exclusivePriceCents;
+  const leadsCanAfford = Math.floor(balanceNum / effectiveLeadPriceCents);
+  const isWalletLow = balanceNum <= effectiveLeadPriceCents * 2 && balanceNum >= effectiveLeadPriceCents;
+  const isDeliveryPaused = balanceNum < effectiveLeadPriceCents;
 
   /** Server sets this only after "Save this card for auto-reload" on a completed top-up */
   const autoReloadOptIn = Boolean(wallet?.auto_reload_opt_in);
@@ -1166,8 +1194,14 @@ export default function WalletPage() {
                     <div className="hero-stat-label">Total spent</div>
                   </div>
                   <div className="hero-stat">
-                    <div className="hero-stat-val">{lifetimeTxCount}</div>
-                    <div className="hero-stat-label">Transactions</div>
+                    <div className="hero-stat-val" style={{ color: isDeliveryPaused ? "#ef4444" : isWalletLow ? "#f59e0b" : undefined }}>
+                      {leadsCanAfford}
+                    </div>
+                    <div className="hero-stat-label">Leads you can afford</div>
+                  </div>
+                  <div className="hero-stat">
+                    <div className="hero-stat-val">${(effectiveLeadPriceCents / 100).toFixed(0)}</div>
+                    <div className="hero-stat-label">{isPro ? "Shared lead price" : "Exclusive lead price"}</div>
                   </div>
                   <div className="hero-stat">
                     <div className="hero-stat-val">
@@ -1180,6 +1214,81 @@ export default function WalletPage() {
                 </div>
               </div>
             </div>
+
+            {/* Low wallet warning banner */}
+            {isDeliveryPaused && (
+              <div style={{
+                padding: "14px 18px", borderRadius: 12,
+                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 18 }}>🚫</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5" }}>Lead delivery paused</div>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>
+                      Your balance is below the ${(effectiveLeadPriceCents / 100).toFixed(0)} {isPro ? "shared" : "exclusive"} lead price. Add funds to restart delivery.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn-add-funds"
+                  onClick={() => setSelectedAmount(100)}
+                  style={{ padding: "8px 16px", borderRadius: 8, background: "#ef4444", color: "#fff", border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Add Funds
+                </button>
+              </div>
+            )}
+            {isWalletLow && !isDeliveryPaused && (
+              <div style={{
+                padding: "14px 18px", borderRadius: 12,
+                background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 18 }}>⚠️</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fde68a" }}>Wallet running low</div>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>
+                      You can afford about {leadsCanAfford} more {leadsCanAfford === 1 ? "lead" : "leads"}. Add funds to avoid delivery pausing.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedAmount(100)}
+                  style={{ padding: "8px 16px", borderRadius: 8, background: "#f59e0b", color: "#000", border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Add Funds
+                </button>
+              </div>
+            )}
+
+            {/* Cancelled subscription — exclusive-only notice */}
+            {subscription?.status === "cancelled" && balanceNum > 0 && (
+              <div style={{
+                padding: "14px 18px", borderRadius: 12,
+                background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.28)",
+                display: "flex", alignItems: "flex-start", gap: 12,
+              }}>
+                <span style={{ fontSize: 20, flexShrink: 0 }}>💡</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#a5b4fc", marginBottom: 4 }}>
+                    Your wallet balance is still usable
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.55 }}>
+                    Your Pro subscription has expired, but your remaining ${(balanceNum / 100).toFixed(2)} can still be used
+                    to purchase <strong style={{ color: "#fff" }}>exclusive leads</strong> from the marketplace.
+                    Shared (non-exclusive) lead purchases require an active subscription.
+                    <a href="/subscriptions" style={{ color: "#a5b4fc", marginLeft: 6, textDecoration: "underline" }}>
+                      Reactivate to unlock shared leads →
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Transaction history */}
             <div className="card">

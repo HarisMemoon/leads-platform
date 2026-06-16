@@ -1,5 +1,5 @@
 import { BullModule } from '@nestjs/bull';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { forwardRef, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
@@ -10,16 +10,19 @@ import { WalletAccount } from '../entities/wallet-account.entity';
 import { LeadAssignment } from '../entities/lead-assignment.entity';
 import { DistributionEngineSettings } from '../entities/distribution-engine-settings.entity';
 import { User } from '../entities/user.entity';
+import { TermsAcceptance } from '../entities/terms-acceptance.entity';
 import { DistributionService } from './distribution.service';
 import { LeadDistributionProcessor } from './lead-distribution.processor';
 import { LeadsModule } from '../leads/leads.module';
 import { AutoReloadWorker } from './auto-reload.worker';
+import { MonthlyCapResetWorker } from './monthly-cap-reset.worker';
 import { StripeModule } from '../stripe/stripe.module';
 import { DistributionRulesController } from './distribution-rules.controller';
 import { DistributionRulesService } from './distribution-rules.service';
 import { CrmGhlSyncWorker } from './crm-ghl-sync.worker';
 import { normalizeEnvConnectionString } from '../utils/normalize-env-connection-string';
 import { IntegrationsModule } from '../integrations/integrations.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -59,17 +62,21 @@ import { IntegrationsModule } from '../integrations/integrations.module';
       LeadAssignment,
       DistributionEngineSettings,
       User,
+      TermsAcceptance,
     ]),
+    ConfigModule,
     forwardRef(() => LeadsModule),
     forwardRef(() => SubscriptionsModule),
     StripeModule,
     IntegrationsModule,
+    forwardRef(() => NotificationsModule),
   ],
   controllers: [DistributionRulesController],
   providers: [
     DistributionService,
     LeadDistributionProcessor,
     AutoReloadWorker,
+    MonthlyCapResetWorker,
     DistributionRulesService,
     CrmGhlSyncWorker,
   ],

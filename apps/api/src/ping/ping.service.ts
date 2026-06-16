@@ -5,7 +5,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 
@@ -19,14 +19,18 @@ import { LeadPost } from '../entities/lead-post.entity';
 import { PingMatchAudit } from '../entities/ping-match-audit.entity';
 import { User } from '../entities/user.entity';
 import { VendorIntegration } from '../entities/vendor-integration.entity';
+import { VendorWebhookHit } from '../entities/vendor-webhook-hit.entity';
 import { LeadsService } from '../leads/leads.service';
 import { LeadPricingService } from '../leads/lead-pricing.service';
+import { LeadPricingService as LeadPricingConfigService } from '../lead-pricing/lead-pricing.service';
 import { OutboundPingService } from '../outbound/outbound-ping.service';
+import { DistributionService } from '../distribution/distribution.service';
 import {
   CreateVendorIntegrationDto,
   PatchVendorIntegrationDto,
 } from './dto/admin-vendor-integration.dto';
 import { UpsertBuyerPricingRuleDto } from './dto/buyer-pricing-rule.dto';
+import { VendorDirectLeadDto } from './dto/vendor-direct-lead.dto';
 import { VendorPingDto } from './dto/vendor-ping.dto';
 import { VendorPostDto } from './dto/vendor-post.dto';
 import { PingMatchingService } from './ping-matching.service';
@@ -46,11 +50,15 @@ export class PingService {
     private readonly auditRepo: Repository<PingMatchAudit>,
     @InjectRepository(Lead)
     private readonly leadRepo: Repository<Lead>,
+    @InjectRepository(VendorWebhookHit)
+    private readonly hitRepo: Repository<VendorWebhookHit>,
     private readonly dataSource: DataSource,
     private readonly matcher: PingMatchingService,
     private readonly leadsService: LeadsService,
     private readonly leadPricingService: LeadPricingService,
     private readonly outboundPingService: OutboundPingService,
+    private readonly leadPricingConfigService: LeadPricingConfigService,
+    private readonly distributionService: DistributionService,
   ) {}
 
   async receivePing(apiKey: string | undefined, dto: VendorPingDto) {
@@ -58,10 +66,13 @@ export class PingService {
     const vendor = await this.authenticateVendor(apiKey);
     this.assertAllowedSource(vendor, dto.source);
 
+    // Juiced and similar vendors don't send their own ping ID — generate one
+    const vendorPingId = dto.vendor_ping_id?.trim() || randomUUID();
+
     const existing = await this.pingRepo.findOne({
       where: {
         vendor: { id: vendor.id },
-        vendor_ping_id: dto.vendor_ping_id,
+        vendor_ping_id: vendorPingId,
       },
       relations: { matched_buyer: true },
     });
@@ -76,15 +87,15 @@ export class PingService {
 
     const ping = this.pingRepo.create({
       vendor,
-      vendor_ping_id: dto.vendor_ping_id,
+      vendor_ping_id: vendorPingId,
       status: 'pending',
       market: this.marketFromDto(dto),
       city: this.clean(dto.city),
       state: this.clean(dto.state)?.toUpperCase() ?? null,
       zip: this.clean(dto.zip ?? dto.Zip),
       county: this.clean(dto.county),
-      property_type: this.clean(dto.property_type ?? dto.Propertytype),
-      lead_type: dto.lead_type ?? 'motivated_seller',
+      property_type: this.clean(dto.property_type ?? dto.Propertytype ?? dto.propertyType),
+      lead_type: dto.lead_type ?? dto.leadType ?? 'motivated_seller',
       source: this.clean(dto.source),
       exclusivity_choice: dto.exclusivity_choice ?? 'exclusive',
       payload: dto as Record<string, any>,
@@ -229,6 +240,161 @@ export class PingService {
       await this.leadRepo.save(lead);
       throw error;
     }
+  }
+
+  /**
+   * Single-call lead submission (Juiced-compatible). Skips the ping → post
+   * round trip: validates like a ping, then creates the lead directly in
+   * the marketplace (status AVAILABLE) and runs auto-distribution +
+   * outbound buyer pings. No wallet charge happens here.
+   */
+  async receiveDirectLead(apiKey: string | undefined, dto: VendorDirectLeadDto) {
+    const vendor = await this.authenticateVendor(apiKey);
+    this.assertAllowedSource(vendor, dto.source);
+
+    const vendorLeadId = dto.vendor_lead_id?.trim() || dto.vendor_ping_id?.trim() || randomUUID();
+
+    const duplicate = await this.findDuplicateLead({
+      phone: dto.phone ?? dto.metadata?.phone,
+      email: dto.email ?? dto.metadata?.email,
+      address: dto.fulladdress ?? dto.address ?? dto.address_1 ?? dto.metadata?.address,
+      zip: dto.zip ?? dto.Zip,
+    });
+
+    if (duplicate) {
+      await this.hitRepo.save(
+        this.hitRepo.create({
+          vendor_id: vendor.id,
+          lead_id: duplicate.id,
+          status: 'rejected',
+          rejection_reason: 'duplicate_lead',
+          ip_address: null,
+          payload_snapshot: dto as Record<string, unknown>,
+        }),
+      );
+
+      // Still attempt outbound buyer pings for the existing duplicate lead
+      // so it can be offered to the highest external bidder
+      void this.outboundPingService.pingAll(duplicate).catch(() => {/* logged internally */});
+
+      return {
+        accepted: false,
+        status: 'rejected',
+        error: 'duplicate_lead',
+        duplicate_lead_id: duplicate.id,
+      };
+    }
+
+    const leadType = this.clean(dto.lead_type ?? dto.leadType) ?? 'motivated_seller';
+    const market = this.marketFromDto(dto);
+    const propertyType = this.clean(dto.property_type ?? dto.Propertytype ?? dto.propertyType);
+    const sellerName =
+      dto.seller_name?.trim() ||
+      [dto.first_name, dto.last_name].filter(Boolean).join(' ') ||
+      'Unknown';
+    const address =
+      dto.address?.trim() ||
+      dto.fulladdress?.trim() ||
+      [dto.address_1, dto.address_2].filter(Boolean).join(', ') ||
+      '';
+
+    const { exclusive, shared } = await this.leadPricingConfigService.getPricesForLead(leadType);
+    const exclusivityChoice = dto.exclusivity_choice ?? 'non_exclusive';
+
+    const metadata = {
+      ...(dto.metadata ?? {}),
+
+      // ── Seller identity ────────────────────────────────────────────────────
+      seller_name: sellerName,
+      first_name: dto.first_name ?? null,
+      last_name: dto.last_name ?? null,
+      phone: dto.phone ?? null,
+      email: dto.email ?? null,
+
+      // ── Property address ───────────────────────────────────────────────────
+      address,
+      address_1: dto.address_1 ?? null,
+      address_2: dto.address_2 ?? null,
+      fulladdress: dto.fulladdress ?? null,
+      city: this.clean(dto.city),
+      state: this.clean(dto.state)?.toUpperCase() ?? null,
+      zip: this.clean(dto.zip ?? dto.Zip),
+      county: this.clean(dto.county),
+
+      // ── Property details ───────────────────────────────────────────────────
+      property_type: propertyType,
+      listed: dto.listed ?? null,
+      howsoontosell: dto.howsoontosell ?? dto.timeline ?? null,
+      reasonforselling: dto.reasonforselling ?? dto.reason ?? null,
+      property_condition: dto.property_condition ?? dto.condition ?? null,
+      asking_price_cents: dto.asking_price_cents ?? null,
+      motivation_tags: dto.motivation_tags ?? [],
+
+      // ── Attribution & compliance ───────────────────────────────────────────
+      vendor: dto.vendor ?? vendor.name,
+      referrer: dto.referrer ?? null,
+      IP_Address: dto.IP_Address ?? null,
+      TrustedForm: dto.TrustedForm ?? dto.xxTrustedFormCertUrl ?? null,
+      submitted_at: dto.submitted_at ?? null,
+
+      // ── Notes & IDs ────────────────────────────────────────────────────────
+      notes: dto.notes ?? null,
+      vendor_lead_id: vendorLeadId,
+    };
+
+    const lead = this.leadRepo.create({
+      external_id: vendorLeadId,
+      source: this.clean(dto.source) ?? 'vendor_direct',
+      market,
+      lead_type: leadType,
+      status: LeadStatus.AVAILABLE,
+      exclusivity_level:
+        exclusivityChoice === 'exclusive' ? ExclusivityLevel.EXCLUSIVE : ExclusivityLevel.SHARED,
+      quality_score: dto.quality_score ?? 70,
+      price_cents: exclusive,
+      list_price_anchor_cents: exclusive,
+      exclusive_price_cents: exclusive,
+      shared_price_cents: exclusivityChoice === 'exclusive' ? null : shared,
+      max_non_exclusive_buyers: exclusivityChoice === 'exclusive' ? 1 : 3,
+      title: `${leadType} lead in ${market}`,
+      metadata,
+      canonical_lead_source: vendor.id,
+      utm: dto.referrer ? { source: dto.referrer } : {},
+      early_access_until: null,
+    });
+
+    const saved = await this.leadRepo.save(lead);
+    const priced = await this.leadPricingService.applyTierToLead(saved);
+
+    await this.hitRepo.save(
+      this.hitRepo.create({
+        vendor_id: vendor.id,
+        lead_id: priced.id,
+        status: 'accepted',
+        ip_address: null,
+        payload_snapshot: dto as Record<string, unknown>,
+      }),
+    );
+
+    // Enqueue auto-distribution to buyers who match this lead's criteria
+    void this.distributionService
+      .enqueueLeadDistribution(priced.id)
+      .catch(() => {/* logged internally */});
+
+    // Fire outbound buyer pings (e.g. Juiced) — highest bidder wins
+    void this.outboundPingService.pingAll(priced).catch(() => {/* logged internally */});
+
+    return {
+      accepted: true,
+      lead_id: priced.id,
+      vendor_lead_id: vendorLeadId,
+      market: priced.market,
+      lead_type: priced.lead_type,
+      status: priced.status,
+      exclusivity_level: priced.exclusivity_level,
+      exclusive_price_cents: priced.exclusive_price_cents,
+      shared_price_cents: priced.shared_price_cents,
+    };
   }
 
   listPricingRules(userId: string) {
@@ -417,6 +583,10 @@ export class PingService {
       vendor_lead_id:    dto.vendor_lead_id,
     };
 
+    // Pricing always from admin-controlled config — ignore vendor bid for lead price display
+    const { exclusive: sysExclusive, shared: sysShared } =
+      await this.leadPricingConfigService.getPricesForLead(ping.lead_type ?? 'inbound');
+
     const lead = this.leadRepo.create({
       external_id: dto.vendor_lead_id,
       source: ping.source ?? 'vendor_ping',
@@ -426,9 +596,9 @@ export class PingService {
       exclusivity_level:
         ping.exclusivity_choice === 'exclusive' ? ExclusivityLevel.EXCLUSIVE : ExclusivityLevel.SHARED,
       quality_score: dto.quality_score ?? 70,
-      price_cents: ping.matched_price_cents ?? '0',
-      exclusive_price_cents: ping.matched_price_cents,
-      shared_price_cents: ping.matched_price_cents,
+      price_cents: sysExclusive,
+      exclusive_price_cents: sysExclusive,
+      shared_price_cents: ping.exclusivity_choice === 'exclusive' ? null : sysShared,
       max_non_exclusive_buyers: ping.exclusivity_choice === 'exclusive' ? 1 : 3,
       title: `${ping.lead_type} lead in ${market}`,
       metadata,

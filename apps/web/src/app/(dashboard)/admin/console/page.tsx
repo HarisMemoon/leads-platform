@@ -28,6 +28,8 @@ import {
   getAdminVendors,
   getAdminVendorWebhookHits,
   getAdminVendorPayoutStats,
+  getAdminVendorStats,
+  getAdminVendorDetail,
   getAdminOutboundBuyers,
   getAdminOutboundPingLogs,
   postAdminOutboundBuyer,
@@ -52,16 +54,24 @@ import {
   postAdminIngestionBatch,
   postAdminLeadDiscount,
   postAdminLeadBoost,
+  postAdminMarkLeadBad,
   postAdminLeadMarkDuplicate,
+  postAdminPauseDelivery,
+  postAdminResumeDelivery,
+  postAdminAssignLead,
+  postAdminReplaceAssignment,
   postAdminResourceItem,
   postAdminWalletCredit,
+  patchAdminLeadInternalCost,
+  deleteAdminAssignment,
   type AdminLeadRow,
-  type AdminPlanFeatureBullet,
   type AdminPingRow,
   type AdminPingDetail,
   type AdminRefundRequestRow,
   type AdminSubscriptionPlan,
   type VendorIntegrationDto,
+  type AdminVendorStatsRow,
+  type AdminVendorDetail,
   type AuditLogRow,
   type DistributionEngineSettingsDto,
   type IngestionRowInput,
@@ -75,6 +85,9 @@ import {
   patchAdminRejectLead,
   postAdminBulkApproveLeads,
   postAdminBulkRejectLeads,
+  getAdminLeadPricing,
+  patchAdminLeadPricing,
+  type AdminLeadPricingConfigDto,
   type PendingLeadGroup,
 } from "@/lib/admin-api";
 import { getAuthMe } from "@/lib/auth-api";
@@ -102,20 +115,90 @@ type TabId =
 type TabDef = { id: TabId; label: string; group: string; hint: string };
 
 const TABS: TabDef[] = [
-  { id: "overview", label: "Dashboard", group: "Overview", hint: "Revenue, leads, and health at a glance" },
-  { id: "inventory", label: "Leads", group: "Leads", hint: "Browse, edit, and delete leads" },
-  { id: "ingestion", label: "Add Leads", group: "Leads", hint: "Upload CSVs or connect vendor feeds" },
-  { id: "duplicates", label: "Duplicates", group: "Leads", hint: "Review leads with duplicate phone numbers" },
-  { id: "grading", label: "Lead Quality", group: "Leads", hint: "Review and override lead quality scores" },
-  { id: "distribution", label: "Auto-Distribution", group: "Operations", hint: "Control the engine that routes leads to buyers" },
-  { id: "pings", label: "Lead Vendors", group: "Operations", hint: "Manage vendor connections and routing" },
-  { id: "pricing", label: "Pricing", group: "Operations", hint: "Automatic markdowns and Pro early access" },
-  { id: "wallet", label: "Customer Wallets", group: "Finance", hint: "Add credits to any customer account" },
-  { id: "subscriptions", label: "Subscriptions", group: "Finance", hint: "Pro plan health and settings" },
-  { id: "customers", label: "Customers", group: "People", hint: "Manage accounts and handle refunds" },
-  { id: "integrations", label: "System Health", group: "System", hint: "Check Stripe, GHL, and other connections" },
-  { id: "notifications", label: "Resources", group: "System", hint: "Manage buyer-facing resources and links" },
-  { id: "audit", label: "Audit Log", group: "System", hint: "Record of all sensitive admin actions" },
+  {
+    id: "overview",
+    label: "Dashboard",
+    group: "Overview",
+    hint: "Revenue, leads, and health at a glance",
+  },
+  {
+    id: "inventory",
+    label: "Leads",
+    group: "Leads",
+    hint: "Browse, edit, and delete leads",
+  },
+  {
+    id: "ingestion",
+    label: "Add Leads",
+    group: "Leads",
+    hint: "Upload CSVs or connect vendor feeds",
+  },
+  {
+    id: "duplicates",
+    label: "Duplicates",
+    group: "Leads",
+    hint: "Review leads with duplicate phone numbers",
+  },
+  {
+    id: "grading",
+    label: "Lead Quality",
+    group: "Leads",
+    hint: "Review and override lead quality scores",
+  },
+  {
+    id: "distribution",
+    label: "Auto-Distribution",
+    group: "Operations",
+    hint: "Control the engine that routes leads to buyers",
+  },
+  {
+    id: "pings",
+    label: "Lead Vendors",
+    group: "Operations",
+    hint: "Manage vendor connections and routing",
+  },
+  {
+    id: "pricing",
+    label: "Pricing",
+    group: "Operations",
+    hint: "Automatic markdowns and Pro early access",
+  },
+  {
+    id: "wallet",
+    label: "Customer Wallets",
+    group: "Finance",
+    hint: "Add credits to any customer account",
+  },
+  {
+    id: "subscriptions",
+    label: "Subscriptions",
+    group: "Finance",
+    hint: "Pro plan health and settings",
+  },
+  {
+    id: "customers",
+    label: "Customers",
+    group: "People",
+    hint: "Manage accounts and handle refunds",
+  },
+  {
+    id: "integrations",
+    label: "System Health",
+    group: "System",
+    hint: "Check Stripe, GHL, and other connections",
+  },
+  {
+    id: "notifications",
+    label: "Resources",
+    group: "System",
+    hint: "Manage buyer-facing resources and links",
+  },
+  {
+    id: "audit",
+    label: "Audit Log",
+    group: "System",
+    hint: "Record of all sensitive admin actions",
+  },
 ];
 
 // ---------- Shared styles ----------
@@ -169,9 +252,14 @@ const S = {
     color: "rgba(255,255,255,0.45)",
     fontWeight: 500,
   } as CSSProperties,
-  td: { padding: "12px", fontSize: 13, verticalAlign: "top" as const } as CSSProperties,
+  td: {
+    padding: "12px",
+    fontSize: 13,
+    verticalAlign: "top" as const,
+  } as CSSProperties,
   card: {
-    background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
     border: "1px solid rgba(255,255,255,0.07)",
     borderRadius: 14,
     padding: 20,
@@ -201,21 +289,57 @@ function Stat({
   hint?: string;
 }) {
   return (
-    <div style={{ ...S.card, padding: "20px 20px 18px", position: "relative", overflow: "hidden" }}>
+    <div
+      style={{
+        ...S.card,
+        padding: "20px 20px 18px",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
       {accent && (
-        <span style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: accent }} />
+        <span
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: 2,
+            background: accent,
+          }}
+        />
       )}
-      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontWeight: 500, marginBottom: 10 }}>
+      <div
+        style={{
+          fontSize: 12,
+          color: "rgba(255,255,255,0.45)",
+          fontWeight: 500,
+          marginBottom: 10,
+        }}
+      >
         {label}
       </div>
-      <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "Manrope, sans-serif", lineHeight: 1.1 }}>
+      <div
+        style={{
+          fontSize: 24,
+          fontWeight: 700,
+          fontFamily: "Manrope, sans-serif",
+          lineHeight: 1.1,
+        }}
+      >
         {value}
       </div>
     </div>
   );
 }
 
-function Pill({ children, tone = "default" }: { children: ReactNode; tone?: Tone }) {
+function Pill({
+  children,
+  tone = "default",
+}: {
+  children: ReactNode;
+  tone?: Tone;
+}) {
   const bg: Record<Tone, string> = {
     default: "rgba(255,255,255,0.08)",
     good: "rgba(16,185,129,0.18)",
@@ -250,16 +374,44 @@ function Pill({ children, tone = "default" }: { children: ReactNode; tone?: Tone
 function SectionTitle({ title, sub }: { title: string; sub?: string }) {
   return (
     <div style={{ marginBottom: 4 }}>
-      <h2 style={{ fontSize: 22, fontFamily: "Manrope, sans-serif", margin: 0 }}>{title}</h2>
-      {sub && <p style={{ color: "rgba(255,255,255,0.5)", margin: "4px 0 0", fontSize: 13 }}>{sub}</p>}
+      <h2
+        style={{ fontSize: 22, fontFamily: "Manrope, sans-serif", margin: 0 }}
+      >
+        {title}
+      </h2>
+      {sub && (
+        <p
+          style={{
+            color: "rgba(255,255,255,0.5)",
+            margin: "4px 0 0",
+            fontSize: 13,
+          }}
+        >
+          {sub}
+        </p>
+      )}
     </div>
   );
 }
 
 function Empty({ title, body }: { title: string; body?: string }) {
   return (
-    <div style={{ ...S.card, textAlign: "center", padding: "40px 20px", color: "rgba(255,255,255,0.55)" }}>
-      <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, color: "rgba(255,255,255,0.75)", marginBottom: 6 }}>
+    <div
+      style={{
+        ...S.card,
+        textAlign: "center",
+        padding: "40px 20px",
+        color: "rgba(255,255,255,0.55)",
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "Manrope, sans-serif",
+          fontSize: 16,
+          color: "rgba(255,255,255,0.75)",
+          marginBottom: 6,
+        }}
+      >
         {title}
       </div>
       {body && <div style={{ fontSize: 13 }}>{body}</div>}
@@ -312,7 +464,8 @@ function MiniBar({
                 style={{
                   height: "100%",
                   width: `${pct}%`,
-                  background: it.color ?? "linear-gradient(90deg, #6366f1, #8b5cf6)",
+                  background:
+                    it.color ?? "linear-gradient(90deg, #6366f1, #8b5cf6)",
                   borderRadius: 999,
                 }}
               />
@@ -399,11 +552,53 @@ function statusTone(s: string): Tone {
   return "default";
 }
 
+function refundStatusBadge(status: string) {
+  const map: Record<string, { bg: string; fg: string; label: string }> = {
+    pending: { bg: "rgba(245,158,11,0.12)", fg: "#fbbf24", label: "Pending" },
+    approved: { bg: "rgba(16,185,129,0.12)", fg: "#34d399", label: "Approved" },
+    rejected: { bg: "rgba(239,68,68,0.1)", fg: "#f87171", label: "Rejected" },
+    need_more_proof: {
+      bg: "rgba(99,102,241,0.12)",
+      fg: "#a5b4fc",
+      label: "Need Proof",
+    },
+    credited: { bg: "rgba(16,185,129,0.12)", fg: "#6ee7b7", label: "Credited" },
+    replaced: { bg: "rgba(99,102,241,0.12)", fg: "#c4b5fd", label: "Replaced" },
+    abuse_review: {
+      bg: "rgba(239,68,68,0.15)",
+      fg: "#fca5a5",
+      label: "Abuse Review",
+    },
+  };
+  const s = map[status] ?? {
+    bg: "rgba(255,255,255,0.06)",
+    fg: "rgba(255,255,255,0.4)",
+    label: status,
+  };
+  return (
+    <span
+      style={{
+        padding: "2px 8px",
+        borderRadius: 20,
+        fontSize: 11,
+        fontWeight: 700,
+        background: s.bg,
+        color: s.fg,
+        display: "inline-flex",
+        alignItems: "center",
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
 // ---------- Refund row actions (kept inline, restyled) ----------
 
 function RefundRowActions({ row }: { row: AdminRefundRequestRow }) {
   const qc = useQueryClient();
   const [adminNotes, setAdminNotes] = useState("");
+  const [replacementLeadId, setReplacementLeadId] = useState("");
   const resolveMut = useMutation({
     mutationFn: (status: "approved" | "rejected") =>
       patchAdminRefundRequest(row.id, {
@@ -415,9 +610,39 @@ function RefundRowActions({ row }: { row: AdminRefundRequestRow }) {
       void qc.invalidateQueries({ queryKey: queryKeys.admin.refundRequests });
     },
   });
+  const revokeAssignment = useMutation({
+    mutationFn: () => deleteAdminAssignment(row.lead_assignment.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.refundRequests });
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.leads() });
+    },
+  });
+  const replaceAssignment = useMutation({
+    mutationFn: () =>
+      postAdminReplaceAssignment(
+        row.lead_assignment.id,
+        replacementLeadId.trim(),
+      ),
+    onSuccess: () => {
+      setReplacementLeadId("");
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.refundRequests });
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.leads() });
+    },
+  });
+  const mutationError =
+    (resolveMut.error as Error | null) ??
+    (revokeAssignment.error as Error | null) ??
+    (replaceAssignment.error as Error | null);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 200 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        minWidth: 200,
+      }}
+    >
       <input
         placeholder="Admin notes (optional)"
         value={adminNotes}
@@ -429,7 +654,12 @@ function RefundRowActions({ row }: { row: AdminRefundRequestRow }) {
           type="button"
           disabled={resolveMut.isPending}
           onClick={() => resolveMut.mutate("approved")}
-          style={{ ...S.btn, background: "#10b981", padding: "6px 12px", fontSize: 12 }}
+          style={{
+            ...S.btn,
+            background: "#10b981",
+            padding: "6px 12px",
+            fontSize: 12,
+          }}
         >
           {resolveMut.isPending ? "…" : "Approve + refund"}
         </button>
@@ -437,13 +667,68 @@ function RefundRowActions({ row }: { row: AdminRefundRequestRow }) {
           type="button"
           disabled={resolveMut.isPending}
           onClick={() => resolveMut.mutate("rejected")}
-          style={{ ...S.btn, background: "#64748b", padding: "6px 12px", fontSize: 12 }}
+          style={{
+            ...S.btn,
+            background: "#64748b",
+            padding: "6px 12px",
+            fontSize: 12,
+          }}
         >
           Reject
         </button>
       </div>
-      {resolveMut.isError && (
-        <span style={{ color: "#f87171", fontSize: 11 }}>{(resolveMut.error as Error).message}</span>
+      <div
+        style={{
+          marginTop: 2,
+          paddingTop: 8,
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          display: "grid",
+          gap: 6,
+        }}
+      >
+        <button
+          type="button"
+          disabled={revokeAssignment.isPending}
+          onClick={() => revokeAssignment.mutate()}
+          style={{
+            ...S.btnGhost,
+            padding: "6px 12px",
+            fontSize: 12,
+            color: "#fca5a5",
+            border: "1px solid rgba(239,68,68,0.18)",
+            background: "rgba(239,68,68,0.08)",
+          }}
+        >
+          {revokeAssignment.isPending ? "Removing…" : "Remove from customer"}
+        </button>
+        <div style={{ display: "grid", gap: 6 }}>
+          <input
+            placeholder="Replacement Lead ID"
+            value={replacementLeadId}
+            onChange={(e) => setReplacementLeadId(e.target.value)}
+            style={S.inp}
+          />
+          <button
+            type="button"
+            disabled={replaceAssignment.isPending || !replacementLeadId.trim()}
+            onClick={() => replaceAssignment.mutate()}
+            style={{
+              ...S.btnGhost,
+              padding: "6px 12px",
+              fontSize: 12,
+              color: "#c4b5fd",
+              border: "1px solid rgba(99,102,241,0.2)",
+              background: "rgba(99,102,241,0.08)",
+            }}
+          >
+            {replaceAssignment.isPending ? "Replacing…" : "Replace assignment"}
+          </button>
+        </div>
+      </div>
+      {mutationError && (
+        <span style={{ color: "#f87171", fontSize: 11 }}>
+          {mutationError.message}
+        </span>
       )}
     </div>
   );
@@ -454,7 +739,10 @@ function RefundRowActions({ row }: { row: AdminRefundRequestRow }) {
 export default function AdminConsolePage() {
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("overview");
-  const { data: user } = useQuery({ queryKey: queryKeys.auth.me, queryFn: getAuthMe });
+  const { data: user } = useQuery({
+    queryKey: queryKeys.auth.me,
+    queryFn: getAuthMe,
+  });
   const grouped = useMemo(() => {
     const out = new Map<string, TabDef[]>();
     for (const t of TABS) {
@@ -469,7 +757,11 @@ export default function AdminConsolePage() {
     user?.full_name?.trim() ||
     user?.email?.split("@")[0]?.replace(/\./g, " ") ||
     "Admin";
-  const adminInitial = (user?.full_name?.trim()?.charAt(0) || user?.email?.charAt(0) || "A").toUpperCase();
+  const adminInitial = (
+    user?.full_name?.trim()?.charAt(0) ||
+    user?.email?.charAt(0) ||
+    "A"
+  ).toUpperCase();
 
   function handleLogout() {
     clearAccessToken();
@@ -480,12 +772,15 @@ export default function AdminConsolePage() {
     <div
       style={{
         minHeight: "100vh",
-        background: "radial-gradient(circle at top, rgba(99,102,241,0.08), transparent 60%)",
+        background:
+          "radial-gradient(circle at top, rgba(99,102,241,0.08), transparent 60%)",
         color: "#fff",
         fontFamily: "Inter, sans-serif",
       }}
     >
-      <div style={{ maxWidth: 1320, margin: "0 auto", padding: "32px 24px 100px" }}>
+      <div
+        style={{ maxWidth: 1320, margin: "0 auto", padding: "32px 24px 100px" }}
+      >
         <div
           style={{
             display: "flex",
@@ -497,13 +792,33 @@ export default function AdminConsolePage() {
           }}
         >
           <div>
-            <div style={{ fontSize: 12, color: "rgba(165,180,252,0.7)", marginBottom: 5, fontWeight: 500 }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: "rgba(165,180,252,0.7)",
+                marginBottom: 5,
+                fontWeight: 500,
+              }}
+            >
               Admin Console
             </div>
-            <h1 style={{ fontFamily: "Manrope, sans-serif", fontSize: 28, margin: 0, letterSpacing: "-0.02em" }}>
+            <h1
+              style={{
+                fontFamily: "Manrope, sans-serif",
+                fontSize: 28,
+                margin: 0,
+                letterSpacing: "-0.02em",
+              }}
+            >
               {active.label}
             </h1>
-            <p style={{ color: "rgba(255,255,255,0.4)", marginTop: 5, fontSize: 13 }}>
+            <p
+              style={{
+                color: "rgba(255,255,255,0.4)",
+                marginTop: 5,
+                fontSize: 13,
+              }}
+            >
               {active.hint}
             </p>
           </div>
@@ -543,7 +858,13 @@ export default function AdminConsolePage() {
                     }}
                   >
                     {gi > 0 && (
-                      <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
+                      <div
+                        style={{
+                          flex: 1,
+                          height: 1,
+                          background: "rgba(255,255,255,0.07)",
+                        }}
+                      />
                     )}
                     <span
                       style={{
@@ -555,7 +876,13 @@ export default function AdminConsolePage() {
                     >
                       {group}
                     </span>
-                    <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
+                    <div
+                      style={{
+                        flex: 1,
+                        height: 1,
+                        background: "rgba(255,255,255,0.07)",
+                      }}
+                    />
                   </div>
 
                   {items.map((t) => {
@@ -573,8 +900,12 @@ export default function AdminConsolePage() {
                           padding: "8px 12px 8px 13px",
                           borderRadius: 7,
                           border: "none",
-                          borderLeft: a ? "2px solid #818cf8" : "2px solid transparent",
-                          background: a ? "rgba(99,102,241,0.12)" : "transparent",
+                          borderLeft: a
+                            ? "2px solid #818cf8"
+                            : "2px solid transparent",
+                          background: a
+                            ? "rgba(99,102,241,0.12)"
+                            : "transparent",
                           color: a ? "#c7d2fe" : "rgba(255,255,255,0.5)",
                           fontWeight: a ? 600 : 400,
                           fontSize: 13,
@@ -637,7 +968,13 @@ export default function AdminConsolePage() {
                   >
                     {adminName}
                   </div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "rgba(255,255,255,0.3)",
+                      marginTop: 1,
+                    }}
+                  >
                     Admin
                   </div>
                 </div>
@@ -665,7 +1002,15 @@ export default function AdminConsolePage() {
           </nav>
 
           {/* ── Main content ── */}
-          <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 20 }}>
+          <main
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 20,
+            }}
+          >
             {tab === "overview" && <OverviewTab />}
             {tab === "inventory" && <InventoryTab />}
             {tab === "ingestion" && <IngestionTab />}
@@ -699,9 +1044,18 @@ const cardSection: CSSProperties = {
 function OverviewTab() {
   const [period, setPeriod] = useState<"today" | "week" | "month">("month");
 
-  const metrics = useQuery({ queryKey: queryKeys.admin.metrics, queryFn: getAdminExtendedMetrics });
-  const breakdown = useQuery({ queryKey: queryKeys.admin.metricsBreakdown, queryFn: getAdminMetricsBreakdown });
-  const refunds = useQuery({ queryKey: queryKeys.admin.refundRequests, queryFn: getAdminRefundRequests });
+  const metrics = useQuery({
+    queryKey: queryKeys.admin.metrics,
+    queryFn: getAdminExtendedMetrics,
+  });
+  const breakdown = useQuery({
+    queryKey: queryKeys.admin.metricsBreakdown,
+    queryFn: getAdminMetricsBreakdown,
+  });
+  const refunds = useQuery({
+    queryKey: queryKeys.admin.refundRequests,
+    queryFn: getAdminRefundRequests,
+  });
   const intake = useQuery({
     queryKey: queryKeys.admin.metricsIntake(period),
     queryFn: () => getAdminMetricsIntake(period),
@@ -712,7 +1066,9 @@ function OverviewTab() {
   const ink = intake.data;
   const counts = m?.countByStatus ?? {};
   const inventoryAvailable = Number(counts["available"] ?? 0);
-  const pendingRefunds = (refunds.data ?? []).filter((r) => r.status === "pending");
+  const pendingRefunds = (refunds.data ?? []).filter(
+    (r) => r.status === "pending",
+  );
 
   const byStatus = Object.entries(counts)
     .map(([k, v]) => ({ label: k, value: Number(v) }))
@@ -724,14 +1080,22 @@ function OverviewTab() {
   }));
 
   const deliveryPct = b ? `${(b.deliverySuccessRate * 100).toFixed(1)}%` : "—";
-  const churnPct = b ? `${(b.subscriptionChurn30d.churnRate * 100).toFixed(1)}%` : "—";
-  const periodLabel = period === "today" ? "Today" : period === "week" ? "This week" : "This month";
+  const churnPct = b
+    ? `${(b.subscriptionChurn30d.churnRate * 100).toFixed(1)}%`
+    : "—";
+  const periodLabel =
+    period === "today"
+      ? "Today"
+      : period === "week"
+        ? "This week"
+        : "This month";
 
   const periodBtn = (p: typeof period, label: string) => ({
     padding: "5px 13px",
     borderRadius: 6,
     border: "1px solid rgba(255,255,255,0.1)",
-    background: period === p ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.03)",
+    background:
+      period === p ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.03)",
     color: period === p ? "#a5b4fc" : "rgba(255,255,255,0.45)",
     fontSize: 12,
     cursor: "pointer" as const,
@@ -742,77 +1106,184 @@ function OverviewTab() {
   return (
     <>
       {/* ── Header ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: "Manrope, sans-serif" }}>Dashboard</h2>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 700,
+            fontFamily: "Manrope, sans-serif",
+          }}
+        >
+          Dashboard
+        </h2>
         <div style={{ display: "flex", gap: 4 }}>
-          <button style={periodBtn("today", "Today")} onClick={() => setPeriod("today")}>Today</button>
-          <button style={periodBtn("week", "This week")} onClick={() => setPeriod("week")}>This week</button>
-          <button style={periodBtn("month", "This month")} onClick={() => setPeriod("month")}>This month</button>
+          <button
+            style={periodBtn("today", "Today")}
+            onClick={() => setPeriod("today")}
+          >
+            Today
+          </button>
+          <button
+            style={periodBtn("week", "This week")}
+            onClick={() => setPeriod("week")}
+          >
+            This week
+          </button>
+          <button
+            style={periodBtn("month", "This month")}
+            onClick={() => setPeriod("month")}
+          >
+            This month
+          </button>
         </div>
       </div>
 
-      {metrics.isError && <Banner tone="bad">{(metrics.error as Error).message}</Banner>}
-
-      {/* ── Period snapshot ── */}
-      <div
-        style={{
-          ...S.card,
-          padding: "16px 20px",
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 0,
-        }}
-      >
-        {[
-          { label: "Leads in", value: ink ? ink.leads_in.toLocaleString() : "—" },
-          { label: "Leads sold", value: ink ? ink.leads_sold.toLocaleString() : "—" },
-          { label: "Revenue", value: ink ? fmtCents(ink.revenue_cents) : "—" },
-        ].map((item, i) => (
-          <div
-            key={item.label}
-            style={{
-              padding: "4px 20px 4px 0",
-              borderRight: i < 2 ? "1px solid rgba(255,255,255,0.07)" : "none",
-              marginRight: i < 2 ? 20 : 0,
-            }}
-          >
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 5 }}>
-              {periodLabel} · {item.label}
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "Manrope, sans-serif" }}>{item.value}</div>
-          </div>
-        ))}
-      </div>
-
+      {metrics.isError && (
+        <Banner tone="bad">{(metrics.error as Error).message}</Banner>
+      )}
       {/* ── KPI grid ── */}
       {m && (
         <>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            <Stat label="Sales revenue" value={fmtCents(m.totalRevenueCents)} accent="linear-gradient(90deg,#f59e0b,#ef4444)" />
-            <Stat label="Buyer deposits" value={fmtCents(m.totalWalletDepositsCents)} accent="linear-gradient(90deg,#38bdf8,#6366f1)" />
-            <Stat label="Est. monthly recurring" value={b ? fmtCents(b.mrrEstimateCents) : "—"} accent="linear-gradient(90deg,#ec4899,#8b5cf6)" />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 12,
+            }}
+          >
+            <Stat
+              label="Sales revenue"
+              value={fmtCents(m.totalRevenueCents)}
+              accent="linear-gradient(90deg,#f59e0b,#ef4444)"
+            />
+            <Stat
+              label="Buyer deposits"
+              value={fmtCents(m.totalWalletDepositsCents)}
+              accent="linear-gradient(90deg,#38bdf8,#6366f1)"
+            />
+            <Stat
+              label="Est. monthly recurring"
+              value={b ? fmtCents(b.mrrEstimateCents) : "—"}
+              accent="linear-gradient(90deg,#ec4899,#8b5cf6)"
+            />
             <Stat
               label="Pending refunds"
-              value={<span style={{ color: pendingRefunds.length > 0 ? "#fcd34d" : "inherit" }}>{pendingRefunds.length}</span>}
+              value={
+                <span
+                  style={{
+                    color: pendingRefunds.length > 0 ? "#fcd34d" : "inherit",
+                  }}
+                >
+                  {pendingRefunds.length}
+                </span>
+              }
               accent="linear-gradient(90deg,#f59e0b,#f97316)"
             />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
-            <Stat label="Available leads" value={inventoryAvailable.toLocaleString()} accent="linear-gradient(90deg,#34d399,#10b981)" />
-            <Stat label="Active purchases" value={m.totalAssignments.toLocaleString()} accent="linear-gradient(90deg,#6366f1,#8b5cf6)" />
-            <Stat label="CRM delivery rate" value={deliveryPct} accent="linear-gradient(90deg,#10b981,#34d399)" />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 12,
+            }}
+          >
+            <Stat
+              label="Available leads"
+              value={inventoryAvailable.toLocaleString()}
+              accent="linear-gradient(90deg,#34d399,#10b981)"
+            />
+            <Stat
+              label="Active purchases"
+              value={m.totalAssignments.toLocaleString()}
+              accent="linear-gradient(90deg,#6366f1,#8b5cf6)"
+            />
+            <Stat
+              label="CRM delivery rate"
+              value={deliveryPct}
+              accent="linear-gradient(90deg,#10b981,#34d399)"
+            />
             <Stat
               label="Churn (30 days)"
               value={churnPct}
-              accent={b && b.subscriptionChurn30d.churnRate > 0.1 ? "linear-gradient(90deg,#f59e0b,#ef4444)" : "linear-gradient(90deg,#64748b,#94a3b8)"}
+              accent={
+                b && b.subscriptionChurn30d.churnRate > 0.1
+                  ? "linear-gradient(90deg,#f59e0b,#ef4444)"
+                  : "linear-gradient(90deg,#64748b,#94a3b8)"
+              }
             />
           </div>
-
+          {/* ── Period snapshot ── */}
+          <div
+            style={{
+              ...S.card,
+              padding: "16px 20px",
+              display: "grid",
+              gridTemplateColumns: "repeat(3, 1fr)",
+              gap: 0,
+            }}
+          >
+            {[
+              {
+                label: "Leads in",
+                value: ink ? ink.leads_in.toLocaleString() : "—",
+              },
+              {
+                label: "Leads sold",
+                value: ink ? ink.leads_sold.toLocaleString() : "—",
+              },
+              {
+                label: "Revenue",
+                value: ink ? fmtCents(ink.revenue_cents) : "—",
+              },
+            ].map((item, i) => (
+              <div
+                key={item.label}
+                style={{
+                  padding: "4px 20px 4px 0",
+                  borderRight:
+                    i < 2 ? "1px solid rgba(255,255,255,0.07)" : "none",
+                  marginRight: i < 2 ? 20 : 0,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.4)",
+                    marginBottom: 5,
+                  }}
+                >
+                  {periodLabel} · {item.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    fontFamily: "Manrope, sans-serif",
+                  }}
+                >
+                  {item.value}
+                </div>
+              </div>
+            ))}
+          </div>
           {/* ── Charts ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}
+          >
             <div style={S.card}>
               <div style={cardSection}>Inventory by status</div>
-              {byStatus.length === 0 ? <Empty title="No data yet" /> : <MiniBar items={byStatus} />}
+              {byStatus.length === 0 ? (
+                <Empty title="No data yet" />
+              ) : (
+                <MiniBar items={byStatus} />
+              )}
             </div>
             <div style={S.card}>
               <div style={cardSection}>Sales by lead type</div>
@@ -825,9 +1296,14 @@ function OverviewTab() {
               )}
             </div>
           </div>
-
           {/* ── Bottom row ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.4fr 1fr",
+              gap: 16,
+            }}
+          >
             {/* Top buyers */}
             <div style={S.card}>
               <div style={cardSection}>Top buyers</div>
@@ -851,13 +1327,33 @@ function OverviewTab() {
                         key={row.user_id}
                         style={{
                           borderTop: "1px solid rgba(255,255,255,0.05)",
-                          background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.015)",
+                          background:
+                            i % 2 === 0
+                              ? "transparent"
+                              : "rgba(255,255,255,0.015)",
                         }}
                       >
-                        <td style={{ ...S.td, color: "rgba(255,255,255,0.3)", fontSize: 12 }}>{i + 1}</td>
+                        <td
+                          style={{
+                            ...S.td,
+                            color: "rgba(255,255,255,0.3)",
+                            fontSize: 12,
+                          }}
+                        >
+                          {i + 1}
+                        </td>
                         <td style={S.td}>{row.email}</td>
-                        <td style={{ ...S.td, textAlign: "right" }}>{row.assignment_count.toLocaleString()}</td>
-                        <td style={{ ...S.td, textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+                        <td style={{ ...S.td, textAlign: "right" }}>
+                          {row.assignment_count.toLocaleString()}
+                        </td>
+                        <td
+                          style={{
+                            ...S.td,
+                            textAlign: "right",
+                            fontVariantNumeric: "tabular-nums",
+                            fontWeight: 600,
+                          }}
+                        >
                           {fmtCents(row.total_spend_cents)}
                         </td>
                       </tr>
@@ -869,14 +1365,25 @@ function OverviewTab() {
 
             {/* Pending refunds */}
             <div style={S.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 14,
+                }}
+              >
                 <div style={cardSection}>Refund requests</div>
-                {pendingRefunds.length > 0 && <Pill tone="warn">{pendingRefunds.length} pending</Pill>}
+                {pendingRefunds.length > 0 && (
+                  <Pill tone="warn">{pendingRefunds.length} pending</Pill>
+                )}
               </div>
               {pendingRefunds.length === 0 ? (
                 <Empty title="All clear" body="No pending refund requests." />
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                >
                   {pendingRefunds.slice(0, 6).map((r) => (
                     <div
                       key={r.id}
@@ -891,9 +1398,18 @@ function OverviewTab() {
                       }}
                     >
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 500 }}>{r.lead_assignment.lead.title}</div>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>
-                          {r.buyer.email} · {fmtCents(r.lead_assignment.amount_charged_cents)}
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>
+                          {r.lead_assignment.lead.title}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "rgba(255,255,255,0.4)",
+                            marginTop: 2,
+                          }}
+                        >
+                          {r.buyer.email} ·{" "}
+                          {fmtCents(r.lead_assignment.amount_charged_cents)}
                         </div>
                       </div>
                       <Pill tone="warn">pending</Pill>
@@ -930,14 +1446,35 @@ function LeadEditModal({
   const [status, setStatus] = useState(lead.status);
   const [source, setSource] = useState(lead.source);
   const [excl, setExcl] = useState(
-    lead.exclusive_price_cents ? String(Math.round(Number(lead.exclusive_price_cents) / 100)) : "",
+    lead.exclusive_price_cents
+      ? String(Math.round(Number(lead.exclusive_price_cents) / 100))
+      : "",
   );
   const [shared, setShared] = useState(
-    lead.shared_price_cents ? String(Math.round(Number(lead.shared_price_cents) / 100)) : "",
+    lead.shared_price_cents
+      ? String(Math.round(Number(lead.shared_price_cents) / 100))
+      : "",
   );
   const [cap, setCap] = useState(String(lead.max_non_exclusive_buyers ?? 3));
   const [discountPct, setDiscountPct] = useState("");
   const [boostPct, setBoostPct] = useState("");
+  // Internal cost fields
+  const [costDollars, setCostDollars] = useState(
+    lead.internal_cost_cents
+      ? String(Math.round(Number(lead.internal_cost_cents) / 100))
+      : "",
+  );
+  const [pingPostCost, setPingPostCost] = useState(
+    lead.ping_post_cost_cents
+      ? String(Math.round(Number(lead.ping_post_cost_cents) / 100))
+      : "",
+  );
+  const [campaignName, setCampaignName] = useState(lead.campaign_name ?? "");
+  const [adSource, setAdSource] = useState(lead.ad_source ?? "");
+  const [costNotes, setCostNotes] = useState(lead.cost_notes ?? "");
+  const vendorName = lead.canonical_lead_source
+    ? ((lead.metadata as any)?.vendor_name ?? lead.source ?? "—")
+    : (lead.source ?? "—");
 
   const save = useMutation({
     mutationFn: () =>
@@ -945,24 +1482,96 @@ function LeadEditModal({
         title: title || undefined,
         lead_type: leadType || undefined,
         market: market || undefined,
-        status: status as any || undefined,
+        status: (status as any) || undefined,
         source: source || undefined,
-        exclusive_price_cents: excl ? Math.round(parseFloat(excl) * 100) : undefined,
-        shared_price_cents: shared ? Math.round(parseFloat(shared) * 100) : undefined,
+        exclusive_price_cents: excl
+          ? Math.round(parseFloat(excl) * 100)
+          : undefined,
+        shared_price_cents: shared
+          ? Math.round(parseFloat(shared) * 100)
+          : undefined,
         max_non_exclusive_buyers: cap ? Number(cap) : undefined,
       }),
     onSuccess: onSaved,
   });
 
   const applyDiscount = useMutation({
-    mutationFn: () => postAdminLeadDiscount(lead.id, { percent: Number(discountPct) }),
+    mutationFn: () =>
+      postAdminLeadDiscount(lead.id, { percent: Number(discountPct) }),
     onSuccess: onSaved,
   });
 
   const applyBoost = useMutation({
-    mutationFn: () => postAdminLeadBoost(lead.id, { percent: Number(boostPct) }),
+    mutationFn: () =>
+      postAdminLeadBoost(lead.id, { percent: Number(boostPct) }),
     onSuccess: onSaved,
   });
+
+  const saveCost = useMutation({
+    mutationFn: () =>
+      patchAdminLeadInternalCost(lead.id, {
+        internal_cost_cents: costDollars
+          ? Math.round(parseFloat(costDollars) * 100)
+          : null,
+        ping_post_cost_cents: pingPostCost
+          ? Math.round(parseFloat(pingPostCost) * 100)
+          : null,
+        campaign_name: campaignName.trim() || null,
+        ad_source: adSource.trim() || null,
+        cost_notes: costNotes.trim() || null,
+      }),
+    onSuccess: onSaved,
+  });
+
+  const sectionCard: CSSProperties = {
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 14,
+    padding: 16,
+  };
+
+  const sectionTitle: CSSProperties = {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.38)",
+    marginBottom: 12,
+  };
+
+  const quickStat = (label: string, value: ReactNode, accent: string) => (
+    <div
+      style={{
+        padding: "12px 14px",
+        borderRadius: 12,
+        border: "1px solid rgba(255,255,255,0.07)",
+        background: "rgba(255,255,255,0.025)",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          color: "rgba(255,255,255,0.35)",
+          marginBottom: 6,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 14,
+          fontWeight: 700,
+          color: accent,
+          fontFamily: "Manrope, sans-serif",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -980,104 +1589,540 @@ function LeadEditModal({
     >
       <div
         style={{
-          background: "#0f1420",
-          border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 14,
-          padding: 24,
+          background: "linear-gradient(180deg, #101626 0%, #0b1020 100%)",
+          border: "1px solid rgba(255,255,255,0.09)",
+          borderRadius: 20,
+          padding: 26,
           width: "100%",
-          maxWidth: 600,
-          maxHeight: "90vh",
+          maxWidth: 920,
+          maxHeight: "92vh",
           overflowY: "auto",
+          boxShadow: "0 32px 120px rgba(0,0,0,0.65)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18 }}>
-          <span style={{ fontWeight: 600, fontSize: 16 }}>Edit lead</span>
-          <button type="button" onClick={onClose} style={{ ...S.btnGhost, padding: "4px 10px" }}>×</button>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-          <label style={{ ...S.label, gridColumn: "1 / -1" }}>
-            Title
-            <input style={S.inp} value={title} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <label style={S.label}>
-            Lead type
-            <input style={S.inp} value={leadType} onChange={(e) => setLeadType(e.target.value)} />
-          </label>
-          <label style={S.label}>
-            Market
-            <input style={S.inp} value={market} onChange={(e) => setMarket(e.target.value)} />
-          </label>
-          <label style={S.label}>
-            Status
-            <select style={S.inp} value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="available">available</option>
-              <option value="sold">sold</option>
-              <option value="archived">archived</option>
-            </select>
-          </label>
-          <label style={S.label}>
-            Source
-            <select style={S.inp} value={source} onChange={(e) => setSource(e.target.value)}>
-              <option value="inbound">inbound</option>
-              <option value="outbound">outbound</option>
-              <option value="admin-ingestion">admin-ingestion</option>
-            </select>
-          </label>
-          <label style={S.label}>
-            Exclusive price ($)
-            <input style={S.inp} value={excl} onChange={(e) => setExcl(e.target.value)} placeholder="e.g. 200" />
-          </label>
-          <label style={S.label}>
-            Non-exclusive price ($)
-            <input style={S.inp} value={shared} onChange={(e) => setShared(e.target.value)} placeholder="e.g. 100" />
-          </label>
-          <label style={S.label}>
-            Buyer cap
-            <input style={S.inp} value={cap} onChange={(e) => setCap(e.target.value)} placeholder="3" />
-          </label>
-        </div>
-
-        <button
-          type="button"
-          style={{ ...S.btnPrimary, width: "100%", marginBottom: 14 }}
-          disabled={save.isPending}
-          onClick={() => save.mutate()}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 18,
+            marginBottom: 22,
+          }}
         >
-          {save.isPending ? "Saving…" : "Save changes"}
-        </button>
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(165,180,252,0.75)",
+                marginBottom: 6,
+              }}
+            >
+              Lead details
+            </div>
+            <div
+              style={{
+                fontFamily: "Manrope, sans-serif",
+                fontWeight: 700,
+                fontSize: 22,
+                lineHeight: 1.15,
+              }}
+            >
+              {title || lead.title || "Untitled lead"}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+                marginTop: 10,
+              }}
+            >
+              <Pill tone={statusTone(status)}>{status}</Pill>
+              <Pill tone="info">{source}</Pill>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+                {market || "Unknown market"} · {leadType || "Unknown type"}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              ...S.btnGhost,
+              padding: "6px 11px",
+              minWidth: 0,
+              fontSize: 16,
+              lineHeight: 1,
+              color: "rgba(255,255,255,0.55)",
+            }}
+          >
+            ×
+          </button>
+        </div>
 
-        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ ...S.label, minWidth: 120 }}>
-            Discount (%)
-            <input style={S.inp} value={discountPct} onChange={(e) => setDiscountPct(e.target.value)} placeholder="e.g. 15" />
-          </label>
-          <button
-            type="button"
-            style={{ ...S.btn, background: "#f59e0b", alignSelf: "flex-end" }}
-            disabled={applyDiscount.isPending || !discountPct}
-            onClick={() => applyDiscount.mutate()}
-          >Apply discount</button>
-          <label style={{ ...S.label, minWidth: 120 }}>
-            Boost (%)
-            <input style={S.inp} value={boostPct} onChange={(e) => setBoostPct(e.target.value)} placeholder="e.g. 10" />
-          </label>
-          <button
-            type="button"
-            style={{ ...S.btn, background: "#10b981", alignSelf: "flex-end" }}
-            disabled={applyBoost.isPending || !boostPct}
-            onClick={() => applyBoost.mutate()}
-          >Apply boost</button>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.25fr) minmax(320px, 0.9fr)",
+            gap: 18,
+          }}
+        >
+          <div style={{ display: "grid", gap: 16 }}>
+            <div style={sectionCard}>
+              <div style={sectionTitle}>Core information</div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                }}
+              >
+                <label style={{ ...S.label, gridColumn: "1 / -1" }}>
+                  Title
+                  <input
+                    style={S.inp}
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                  />
+                </label>
+                <label style={S.label}>
+                  Lead type
+                  <input
+                    style={S.inp}
+                    value={leadType}
+                    onChange={(e) => setLeadType(e.target.value)}
+                  />
+                </label>
+                <label style={S.label}>
+                  Market
+                  <input
+                    style={S.inp}
+                    value={market}
+                    onChange={(e) => setMarket(e.target.value)}
+                  />
+                </label>
+                <label style={S.label}>
+                  Status
+                  <select
+                    style={S.inp}
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value)}
+                  >
+                    <option value="available">available</option>
+                    <option value="sold">sold</option>
+                    <option value="archived">archived</option>
+                  </select>
+                </label>
+                <label style={S.label}>
+                  Source
+                  <select
+                    style={S.inp}
+                    value={source}
+                    onChange={(e) => setSource(e.target.value)}
+                  >
+                    <option value="inbound">inbound</option>
+                    <option value="outbound">outbound</option>
+                    <option value="admin-ingestion">admin-ingestion</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div style={sectionCard}>
+              <div style={sectionTitle}>Pricing</div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr 1fr",
+                  gap: 12,
+                }}
+              >
+                <label style={S.label}>
+                  Exclusive price ($)
+                  <input
+                    style={S.inp}
+                    value={excl}
+                    onChange={(e) => setExcl(e.target.value)}
+                    placeholder="e.g. 200"
+                  />
+                </label>
+                <label style={S.label}>
+                  Non Exclusive price ($)
+                  <input
+                    style={S.inp}
+                    value={shared}
+                    onChange={(e) => setShared(e.target.value)}
+                    placeholder="e.g. 100"
+                  />
+                </label>
+                <label style={S.label}>
+                  Buyer cap
+                  <input
+                    style={S.inp}
+                    value={cap}
+                    onChange={(e) => setCap(e.target.value)}
+                    placeholder="3"
+                  />
+                </label>
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 10,
+                  marginTop: 14,
+                }}
+              >
+                {quickStat(
+                  "Lead ID",
+                  <code style={{ fontSize: 12, color: "#e5e7eb" }}>
+                    {lead.id.slice(0, 8)}…
+                  </code>,
+                  "#e5e7eb",
+                )}
+                {quickStat(
+                  "Current price",
+                  fmtCents(lead.price_cents),
+                  "#c4b5fd",
+                )}
+              </div>
+            </div>
+
+            <div style={sectionCard}>
+              <div style={sectionTitle}>Quick pricing actions</div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto 1fr auto",
+                  gap: 10,
+                  alignItems: "end",
+                }}
+              >
+                <label style={{ ...S.label, minWidth: 0 }}>
+                  Discount (%)
+                  <input
+                    style={S.inp}
+                    value={discountPct}
+                    onChange={(e) => setDiscountPct(e.target.value)}
+                    placeholder="e.g. 15"
+                  />
+                </label>
+                <button
+                  type="button"
+                  style={{
+                    ...S.btn,
+                    background:
+                      "linear-gradient(135deg, rgba(245,158,11,0.92), rgba(249,115,22,0.9))",
+                    alignSelf: "flex-end",
+                    padding: "10px 14px",
+                  }}
+                  disabled={applyDiscount.isPending || !discountPct}
+                  onClick={() => applyDiscount.mutate()}
+                >
+                  Apply discount
+                </button>
+                <label style={{ ...S.label, minWidth: 0 }}>
+                  Boost (%)
+                  <input
+                    style={S.inp}
+                    value={boostPct}
+                    onChange={(e) => setBoostPct(e.target.value)}
+                    placeholder="e.g. 10"
+                  />
+                </label>
+                <button
+                  type="button"
+                  style={{
+                    ...S.btn,
+                    background:
+                      "linear-gradient(135deg, rgba(16,185,129,0.92), rgba(5,150,105,0.92))",
+                    alignSelf: "flex-end",
+                    padding: "10px 14px",
+                  }}
+                  disabled={applyBoost.isPending || !boostPct}
+                  onClick={() => applyBoost.mutate()}
+                >
+                  Apply boost
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 16 }}>
+            <div style={sectionCard}>
+              <div style={sectionTitle}>Lead tools</div>
+              <div
+                style={{
+                  marginBottom: 12,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  background: "rgba(255,255,255,0.025)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+                  Lead ID:{" "}
+                  <code style={{ color: "#e5e7eb", fontFamily: "monospace" }}>
+                    {lead.id}
+                  </code>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard.writeText(lead.id)}
+                  style={{ ...S.btnGhost, padding: "5px 10px", fontSize: 11 }}
+                >
+                  Copy
+                </button>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const uid = prompt("Enter user ID to assign this lead to:");
+                    if (uid?.trim())
+                      void postAdminAssignLead(lead.id, uid.trim()).then(
+                        onSaved,
+                      );
+                  }}
+                  style={{
+                    ...S.btn,
+                    background: "rgba(99,102,241,0.12)",
+                    color: "#c4b5fd",
+                    border: "1px solid rgba(99,102,241,0.22)",
+                    padding: "10px 12px",
+                  }}
+                >
+                  Assign to user
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = prompt("Reason for marking as bad?");
+                    if (r !== null)
+                      void postAdminMarkLeadBad(lead.id, r || undefined).then(
+                        onSaved,
+                      );
+                  }}
+                  style={{
+                    ...S.btn,
+                    background: "rgba(239,68,68,0.1)",
+                    color: "#fca5a5",
+                    border: "1px solid rgba(239,68,68,0.2)",
+                    padding: "10px 12px",
+                  }}
+                >
+                  Mark bad lead
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm("Archive this lead?"))
+                      void postAdminMarkLeadBad(lead.id, "archived").then(
+                        onSaved,
+                      );
+                  }}
+                  style={{
+                    ...S.btn,
+                    background: "rgba(255,255,255,0.045)",
+                    color: "rgba(255,255,255,0.72)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    padding: "10px 12px",
+                  }}
+                >
+                  Archive lead
+                </button>
+              </div>
+            </div>
+
+            <div style={sectionCard}>
+              <div style={sectionTitle}>Internal cost tracking</div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 10,
+                  marginBottom: 10,
+                }}
+              >
+                <label style={S.label}>
+                  Vendor
+                  <input
+                    style={{ ...S.inp, opacity: 0.6, cursor: "default" }}
+                    readOnly
+                    value={vendorName}
+                  />
+                </label>
+                <label style={S.label}>
+                  Campaign name
+                  <input
+                    style={S.inp}
+                    placeholder="e.g. Facebook Q2"
+                    value={campaignName}
+                    onChange={(e) => setCampaignName(e.target.value)}
+                  />
+                </label>
+                <label style={S.label}>
+                  Lead acquisition cost ($)
+                  <input
+                    style={S.inp}
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    placeholder="0.00"
+                    value={costDollars}
+                    onChange={(e) => setCostDollars(e.target.value)}
+                  />
+                </label>
+                <label style={S.label}>
+                  Ping / post cost ($)
+                  <input
+                    style={S.inp}
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    placeholder="0.00"
+                    value={pingPostCost}
+                    onChange={(e) => setPingPostCost(e.target.value)}
+                  />
+                </label>
+                <label style={S.label}>
+                  Ad / lead source
+                  <input
+                    style={S.inp}
+                    placeholder="e.g. FB Ads, Google, Cold Call"
+                    value={adSource}
+                    onChange={(e) => setAdSource(e.target.value)}
+                  />
+                </label>
+                <label style={S.label}>
+                  Notes
+                  <input
+                    style={S.inp}
+                    placeholder="Additional cost details"
+                    value={costNotes}
+                    onChange={(e) => setCostNotes(e.target.value)}
+                  />
+                </label>
+              </div>
+              {lead.price_cents &&
+                (costDollars || pingPostCost) &&
+                (() => {
+                  const revenue = Number(lead.price_cents) / 100;
+                  const totalCost =
+                    parseFloat(costDollars || "0") +
+                    parseFloat(pingPostCost || "0");
+                  const profit = revenue - totalCost;
+                  return (
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: 12,
+                        background: "rgba(255,255,255,0.025)",
+                        border: "1px solid rgba(255,255,255,0.06)",
+                        fontSize: 12,
+                        marginBottom: 12,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(3, 1fr)",
+                          gap: 10,
+                        }}
+                      >
+                        {quickStat(
+                          "Revenue",
+                          `$${revenue.toFixed(2)}`,
+                          "#ffffff",
+                        )}
+                        {quickStat(
+                          "Total cost",
+                          `$${totalCost.toFixed(2)}`,
+                          "#fcd34d",
+                        )}
+                        {quickStat(
+                          "Gross profit",
+                          `${profit >= 0 ? "+" : ""}$${profit.toFixed(2)}`,
+                          profit >= 0 ? "#34d399" : "#f87171",
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              <button
+                type="button"
+                disabled={saveCost.isPending}
+                onClick={() => saveCost.mutate()}
+                style={{ ...S.btnPrimary, width: "100%" }}
+              >
+                {saveCost.isPending ? "Saving…" : "Save cost info"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {(save.isError || applyDiscount.isError || applyBoost.isError) && (
           <div style={{ marginTop: 10 }}>
-            <Banner tone="bad">{((save.error ?? applyDiscount.error ?? applyBoost.error) as Error).message}</Banner>
+            <Banner tone="bad">
+              {
+                (
+                  (save.error ??
+                    applyDiscount.error ??
+                    applyBoost.error) as Error
+                ).message
+              }
+            </Banner>
           </div>
         )}
-        {(save.isSuccess || applyDiscount.isSuccess || applyBoost.isSuccess) && (
-          <div style={{ marginTop: 10 }}><Banner tone="good">Saved.</Banner></div>
+        {(save.isSuccess ||
+          applyDiscount.isSuccess ||
+          applyBoost.isSuccess) && (
+          <div style={{ marginTop: 10 }}>
+            <Banner tone="good">Saved.</Banner>
+          </div>
         )}
+        {saveCost.isSuccess && (
+          <div style={{ marginTop: 10 }}>
+            <Banner tone="good">Internal cost saved.</Banner>
+          </div>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            marginTop: 18,
+            paddingTop: 18,
+            borderTop: "1px solid rgba(255,255,255,0.07)",
+          }}
+        >
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+            Changes apply immediately to this lead’s pricing and admin controls.
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button type="button" onClick={onClose} style={S.btnGhost}>
+              Close
+            </button>
+            <button
+              type="button"
+              style={{ ...S.btnPrimary, minWidth: 140 }}
+              disabled={save.isPending}
+              onClick={() => save.mutate()}
+            >
+              {save.isPending ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1087,7 +2132,9 @@ function InventoryTab() {
   const qc = useQueryClient();
   const [period, setPeriod] = useState<InventoryPeriod>("today");
   const [page, setPage] = useState(1);
-  const [sourceFilter, setSourceFilter] = useState<"" | "inbound" | "outbound">("");
+  const [sourceFilter, setSourceFilter] = useState<"" | "inbound" | "outbound">(
+    "",
+  );
   const [editLead, setEditLead] = useState<AdminLeadRow | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -1098,8 +2145,18 @@ function InventoryTab() {
   });
 
   const leadsQ = useQuery({
-    queryKey: queryKeys.admin.leads({ page, source: sourceFilter || undefined, date_from: periodToDateFrom(period) }),
-    queryFn: () => getAdminLeads({ page, limit: 25, source: sourceFilter || undefined, date_from: periodToDateFrom(period) }),
+    queryKey: queryKeys.admin.leads({
+      page,
+      source: sourceFilter || undefined,
+      date_from: periodToDateFrom(period),
+    }),
+    queryFn: () =>
+      getAdminLeads({
+        page,
+        limit: 25,
+        source: sourceFilter || undefined,
+        date_from: periodToDateFrom(period),
+      }),
   });
 
   const deleteMut = useMutation({
@@ -1119,9 +2176,23 @@ function InventoryTab() {
   }
 
   function sourceChip(src: string) {
-    const color = src === "inbound" ? "#6366f1" : src === "outbound" ? "#10b981" : "#64748b";
+    const color =
+      src === "inbound"
+        ? "#6366f1"
+        : src === "outbound"
+          ? "#10b981"
+          : "#64748b";
     return (
-      <span style={{ background: color + "22", color, padding: "2px 7px", borderRadius: 5, fontSize: 11, fontWeight: 600 }}>
+      <span
+        style={{
+          background: color + "22",
+          color,
+          padding: "2px 7px",
+          borderRadius: 5,
+          fontSize: 11,
+          fontWeight: 600,
+        }}
+      >
         {src}
       </span>
     );
@@ -1136,7 +2207,10 @@ function InventoryTab() {
 
   return (
     <>
-      <SectionTitle title="Lead inventory" sub="View leads by period, filter by source, edit or delete." />
+      <SectionTitle
+        title="Lead inventory"
+        sub="View leads by period, filter by source, edit or delete."
+      />
 
       {/* Period tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -1144,64 +2218,153 @@ function InventoryTab() {
           <button
             key={p.id}
             type="button"
-            onClick={() => { setPeriod(p.id); setPage(1); }}
+            onClick={() => {
+              setPeriod(p.id);
+              setPage(1);
+            }}
             style={{
               padding: "7px 16px",
               borderRadius: 8,
-              border: period === p.id ? "1px solid #6366f1" : "1px solid rgba(255,255,255,0.1)",
-              background: period === p.id ? "rgba(99,102,241,0.15)" : "rgba(255,255,255,0.04)",
+              border:
+                period === p.id
+                  ? "1px solid #6366f1"
+                  : "1px solid rgba(255,255,255,0.1)",
+              background:
+                period === p.id
+                  ? "rgba(99,102,241,0.15)"
+                  : "rgba(255,255,255,0.04)",
               color: period === p.id ? "#a5b4fc" : "rgba(255,255,255,0.6)",
               cursor: "pointer",
               fontSize: 13,
               fontWeight: period === p.id ? 600 : 400,
             }}
-          >{p.label}</button>
+          >
+            {p.label}
+          </button>
         ))}
       </div>
 
       {/* Period stats */}
       {period !== "all" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 16 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3,1fr)",
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
           <div style={S.card}>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>Leads In</div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{intakeQ.data?.leads_in ?? "—"}</div>
-          </div>
-          <div style={S.card}>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>Leads Sold</div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{intakeQ.data?.leads_sold ?? "—"}</div>
-          </div>
-          <div style={S.card}>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>Revenue</div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "rgba(255,255,255,0.5)",
+                marginBottom: 4,
+              }}
+            >
+              Leads In
+            </div>
             <div style={{ fontSize: 24, fontWeight: 700 }}>
-              {intakeQ.data ? `$${(Number(intakeQ.data.revenue_cents) / 100).toFixed(0)}` : "—"}
+              {intakeQ.data?.leads_in ?? "—"}
+            </div>
+          </div>
+          <div style={S.card}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "rgba(255,255,255,0.5)",
+                marginBottom: 4,
+              }}
+            >
+              Leads Sold
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>
+              {intakeQ.data?.leads_sold ?? "—"}
+            </div>
+          </div>
+          <div style={S.card}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "rgba(255,255,255,0.5)",
+                marginBottom: 4,
+              }}
+            >
+              Revenue
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>
+              {intakeQ.data
+                ? `$${(Number(intakeQ.data.revenue_cents) / 100).toFixed(0)}`
+                : "—"}
             </div>
           </div>
         </div>
       )}
 
       {/* Filter bar */}
-      <div style={{ ...S.card, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", padding: 12, marginBottom: 12 }}>
+      <div
+        style={{
+          ...S.card,
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 10,
+          alignItems: "center",
+          padding: 12,
+          marginBottom: 12,
+        }}
+      >
         <select
           value={sourceFilter}
-          onChange={(e) => { setSourceFilter(e.target.value as any); setPage(1); }}
+          onChange={(e) => {
+            setSourceFilter(e.target.value as any);
+            setPage(1);
+          }}
           style={{ ...S.inp, width: "auto" }}
         >
           <option value="">All sources</option>
           <option value="inbound">Inbound</option>
           <option value="outbound">Outbound</option>
         </select>
-        <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, marginLeft: "auto" }}>
+        <span
+          style={{
+            color: "rgba(255,255,255,0.5)",
+            fontSize: 12,
+            marginLeft: "auto",
+          }}
+        >
           {leadsQ.data?.pagination.total ?? 0} total
         </span>
-        <button type="button" style={S.btnGhost} disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</button>
-        <button type="button" style={S.btnGhost} onClick={() => setPage((p) => p + 1)}>Next</button>
+        <button
+          type="button"
+          style={S.btnGhost}
+          disabled={page <= 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+        >
+          Prev
+        </button>
+        <button
+          type="button"
+          style={S.btnGhost}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          Next
+        </button>
       </div>
 
       {leadsQ.isLoading && <Empty title="Loading…" />}
-      {leadsQ.isError && <Banner tone="bad">{(leadsQ.error as Error).message}</Banner>}
+      {leadsQ.isError && (
+        <Banner tone="bad">{(leadsQ.error as Error).message}</Banner>
+      )}
 
       {items.length > 0 && (
-        <div style={{ ...S.card, padding: 0, overflow: "hidden" }}>
+        <div
+          style={{
+            ...S.card,
+            padding: 0,
+            overflowX: "auto",
+            overflowY: "hidden",
+          }}
+        >
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead style={{ background: "rgba(0,0,0,0.2)" }}>
               <tr>
@@ -1210,72 +2373,95 @@ function InventoryTab() {
                 <th style={S.th}>Market</th>
                 <th style={S.th}>Source</th>
                 <th style={S.th}>Status</th>
-                <th style={S.th}>Excl. Price</th>
-                <th style={S.th}>Sub. Price</th>
-                <th style={S.th}>Slots</th>
-                <th style={S.th}>Buyers</th>
                 <th style={S.th}>Created</th>
-                <th style={S.th}>Actions</th>
+                <th style={{ ...S.th, width: 180, minWidth: 180 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.map((l) => (
-                <tr key={l.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-                  <td style={{ ...S.td, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.title}</td>
-                  <td style={S.td}><Pill>{l.lead_type}</Pill></td>
+                <tr
+                  key={l.id}
+                  style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+                >
+                  <td
+                    style={{
+                      ...S.td,
+                      maxWidth: 180,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {l.title}
+                  </td>
+                  <td style={S.td}>
+                    <Pill>{l.lead_type}</Pill>
+                  </td>
                   <td style={S.td}>{l.market}</td>
                   <td style={S.td}>{sourceChip(l.source)}</td>
-                  <td style={S.td}><Pill tone={statusTone(l.status)}>{l.status}</Pill></td>
-                  <td style={S.td}>{fmtPrice(l.exclusive_price_cents)}</td>
                   <td style={S.td}>
-                    {l.lead_type === "outbound"
-                      ? "$20"
-                      : "$30"}
-                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginLeft: 4 }}>
-                      {l.lead_type === "outbound" ? "outbound" : "inbound"}
-                    </span>
+                    <Pill tone={statusTone(l.status)}>{l.status}</Pill>
                   </td>
                   <td style={S.td}>
-                    <span style={{
-                      fontSize: 12,
-                      color: l.non_exclusive_buyers_count >= l.max_non_exclusive_buyers
-                        ? "#f87171"
-                        : l.non_exclusive_buyers_count > 0
-                          ? "#fbbf24"
-                          : "rgba(255,255,255,0.45)",
-                    }}>
-                      {l.non_exclusive_buyers_count}/{l.max_non_exclusive_buyers}
-                    </span>
+                    {new Date(l.created_at).toLocaleDateString()}
                   </td>
-                  <td style={S.td}>
-                    {l.buyers.length > 0
-                      ? <span title={l.buyers.join(", ")} style={{ fontSize: 12, color: "#a5b4fc" }}>{l.buyers.length} buyer{l.buyers.length !== 1 ? "s" : ""}</span>
-                      : <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>—</span>}
-                  </td>
-                  <td style={S.td}>{new Date(l.created_at).toLocaleDateString()}</td>
-                  <td style={{ ...S.td, display: "flex", gap: 6 }}>
-                    <button
-                      type="button"
-                      style={{ ...S.btnGhost, padding: "4px 10px", fontSize: 12 }}
-                      onClick={() => setEditLead(l)}
-                    >Edit</button>
-                    {confirmDeleteId === l.id ? (
-                      <>
-                        <button
-                          type="button"
-                          style={{ ...S.btn, background: "#ef4444", padding: "4px 10px", fontSize: 12 }}
-                          disabled={deleteMut.isPending}
-                          onClick={() => deleteMut.mutate(l.id)}
-                        >{deleteMut.isPending ? "…" : "Confirm"}</button>
-                        <button type="button" style={{ ...S.btnGhost, padding: "4px 8px", fontSize: 12 }} onClick={() => setConfirmDeleteId(null)}>Cancel</button>
-                      </>
-                    ) : (
+                  <td style={{ ...S.td, minWidth: 180, whiteSpace: "nowrap" }}>
+                    <div
+                      style={{ display: "flex", gap: 6, alignItems: "center" }}
+                    >
                       <button
                         type="button"
-                        style={{ ...S.btnGhost, padding: "4px 10px", fontSize: 12, color: "#f87171" }}
-                        onClick={() => setConfirmDeleteId(l.id)}
-                      >Delete</button>
-                    )}
+                        style={{
+                          ...S.btnGhost,
+                          padding: "4px 10px",
+                          fontSize: 12,
+                        }}
+                        onClick={() => setEditLead(l)}
+                      >
+                        Edit
+                      </button>
+                      {confirmDeleteId === l.id ? (
+                        <>
+                          <button
+                            type="button"
+                            style={{
+                              ...S.btn,
+                              background: "#ef4444",
+                              padding: "4px 10px",
+                              fontSize: 12,
+                            }}
+                            disabled={deleteMut.isPending}
+                            onClick={() => deleteMut.mutate(l.id)}
+                          >
+                            {deleteMut.isPending ? "…" : "Confirm"}
+                          </button>
+                          <button
+                            type="button"
+                            style={{
+                              ...S.btnGhost,
+                              padding: "4px 8px",
+                              fontSize: 12,
+                            }}
+                            onClick={() => setConfirmDeleteId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          style={{
+                            ...S.btnGhost,
+                            padding: "4px 10px",
+                            fontSize: 12,
+                            color: "#f87171",
+                          }}
+                          onClick={() => setConfirmDeleteId(l.id)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1302,7 +2488,11 @@ function periodToDateFrom(period: InventoryPeriod): string | undefined {
   if (period === "all") return undefined;
   const now = new Date();
   if (period === "today") {
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    return new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    ).toISOString();
   }
   if (period === "week") {
     const d = new Date(now);
@@ -1315,7 +2505,10 @@ function periodToDateFrom(period: InventoryPeriod): string | undefined {
 
 // ---------- Ingestion ----------
 
-function parseIngestionCsv(text: string): { rows: IngestionRowInput[]; errors: string[] } {
+function parseIngestionCsv(text: string): {
+  rows: IngestionRowInput[];
+  errors: string[];
+} {
   const errors: string[] = [];
   // Handle quoted CSV fields properly
   function splitCsvLine(line: string): string[] {
@@ -1324,9 +2517,14 @@ function parseIngestionCsv(text: string): { rows: IngestionRowInput[]; errors: s
     let inQuotes = false;
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
-      if (ch === '"') { inQuotes = !inQuotes; }
-      else if (ch === "," && !inQuotes) { result.push(current.trim()); current = ""; }
-      else { current += ch; }
+      if (ch === '"') {
+        inQuotes = !inQuotes;
+      } else if (ch === "," && !inQuotes) {
+        result.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
     }
     result.push(current.trim());
     return result;
@@ -1334,7 +2532,9 @@ function parseIngestionCsv(text: string): { rows: IngestionRowInput[]; errors: s
 
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) return { rows: [], errors: ["File is empty"] };
-  const header = splitCsvLine(lines[0]).map((h) => h.toLowerCase().replace(/^"|"$/g, ""));
+  const header = splitCsvLine(lines[0]).map((h) =>
+    h.toLowerCase().replace(/^"|"$/g, ""),
+  );
   const idx = (key: string) => header.indexOf(key);
   const required = ["market", "lead_type", "price_cents"];
   for (const r of required) {
@@ -1342,7 +2542,8 @@ function parseIngestionCsv(text: string): { rows: IngestionRowInput[]; errors: s
   }
   if (errors.length) return { rows: [], errors };
 
-  const str = (v: string | undefined) => (v && v.replace(/^"|"$/g, "").trim()) || undefined;
+  const str = (v: string | undefined) =>
+    (v && v.replace(/^"|"$/g, "").trim()) || undefined;
 
   const rows: IngestionRowInput[] = [];
   for (let i = 1; i < lines.length; i++) {
@@ -1359,12 +2560,18 @@ function parseIngestionCsv(text: string): { rows: IngestionRowInput[]; errors: s
       errors.push(`Row ${i + 1}: market and lead_type are required`);
       continue;
     }
-    const row: IngestionRowInput = { market, lead_type: leadType, price_cents: Math.round(price) };
+    const row: IngestionRowInput = {
+      market,
+      lead_type: leadType,
+      price_cents: Math.round(price),
+    };
 
-    const pick = (key: string) => str(idx(key) >= 0 ? cells[idx(key)] : undefined);
+    const pick = (key: string) =>
+      str(idx(key) >= 0 ? cells[idx(key)] : undefined);
 
     const excl = pick("exclusivity_level");
-    if (excl === "exclusive" || excl === "non_exclusive") row.exclusivity_level = excl;
+    if (excl === "exclusive" || excl === "non_exclusive")
+      row.exclusivity_level = excl;
     row.title = pick("title");
     row.source = pick("source");
     row.seller_name = pick("seller_name");
@@ -1382,7 +2589,9 @@ function parseIngestionCsv(text: string): { rows: IngestionRowInput[]; errors: s
     row.notes = pick("notes");
     if (idx("quality_score") >= 0) {
       const qs = Number(cells[idx("quality_score")] ?? 50);
-      row.quality_score = Number.isFinite(qs) ? Math.max(0, Math.min(100, qs)) : 50;
+      row.quality_score = Number.isFinite(qs)
+        ? Math.max(0, Math.min(100, qs))
+        : 50;
     }
     rows.push(row);
   }
@@ -1391,32 +2600,135 @@ function parseIngestionCsv(text: string): { rows: IngestionRowInput[]; errors: s
 
 type ScriptTab = "single" | "batch" | "sheets";
 
-const SCRIPT_TABS: Array<{ id: ScriptTab; label: string; endpoint: string; hint: string }> = [
-  { id: "single", label: "Single lead", endpoint: "POST /inbound/lead", hint: "One lead per request · Zapier, Make.com, form submissions" },
-  { id: "batch", label: "Batch leads", endpoint: "POST /inbound/leads", hint: "Array of leads · call centers, nightly syncs, bulk imports" },
-  { id: "sheets", label: "Google Sheets", endpoint: "Apps Script", hint: "Map sheet columns to lead fields, run from a button or trigger" },
+const SCRIPT_TABS: Array<{
+  id: ScriptTab;
+  label: string;
+  endpoint: string;
+  hint: string;
+}> = [
+  {
+    id: "single",
+    label: "Single lead",
+    endpoint: "POST /inbound/lead",
+    hint: "One lead per request · Zapier, Make.com, form submissions",
+  },
+  {
+    id: "batch",
+    label: "Batch leads",
+    endpoint: "POST /inbound/leads",
+    hint: "Array of leads · call centers, nightly syncs, bulk imports",
+  },
+  {
+    id: "sheets",
+    label: "Google Sheets",
+    endpoint: "Apps Script",
+    hint: "Map sheet columns to lead fields, run from a button or trigger",
+  },
 ];
 
-const LEAD_FIELDS: Array<{ field: string; type: string; required: boolean; desc: string }> = [
-  { field: "market", type: "string", required: true, desc: 'City + state — e.g. "Phoenix, AZ"' },
-  { field: "lead_type", type: "string", required: true, desc: "inherited · foreclosure · divorce · probate · tired_landlord · other" },
-  { field: "title", type: "string", required: false, desc: "Display name — auto-generated if omitted" },
-  { field: "price_cents", type: "integer", required: false, desc: "Base price in cents · 4500 = $45.00" },
-  { field: "exclusive_price_cents", type: "integer", required: false, desc: "Exclusive-purchase price in cents" },
-  { field: "quality_score", type: "0 – 100", required: false, desc: "Lead quality score — defaults to 70" },
-  { field: "metadata.state", type: "string", required: false, desc: '2-letter state code — e.g. "AZ" · used for market alerts' },
-  { field: "metadata.contact_phone", type: "string", required: false, desc: "Seller phone number" },
-  { field: "metadata.contact_email", type: "string", required: false, desc: "Seller email address" },
-  { field: "metadata.address", type: "string", required: false, desc: "Property street address" },
-  { field: "metadata.city", type: "string", required: false, desc: "Property city" },
-  { field: "metadata.zip", type: "string", required: false, desc: "Property ZIP code" },
-  { field: "metadata.property_type", type: "string", required: false, desc: "single_family · multi_family · land · commercial" },
-  { field: "metadata.timeline", type: "string", required: false, desc: "asap · 30_days · 60_days · flexible" },
-  { field: "metadata.notes", type: "string", required: false, desc: "Free-text notes from the vendor" },
+const LEAD_FIELDS: Array<{
+  field: string;
+  type: string;
+  required: boolean;
+  desc: string;
+}> = [
+  {
+    field: "market",
+    type: "string",
+    required: true,
+    desc: 'City + state — e.g. "Phoenix, AZ"',
+  },
+  {
+    field: "lead_type",
+    type: "string",
+    required: true,
+    desc: "inherited · foreclosure · divorce · probate · tired_landlord · other",
+  },
+  {
+    field: "title",
+    type: "string",
+    required: false,
+    desc: "Display name — auto-generated if omitted",
+  },
+  {
+    field: "price_cents",
+    type: "integer",
+    required: false,
+    desc: "Base price in cents · 4500 = $45.00",
+  },
+  {
+    field: "exclusive_price_cents",
+    type: "integer",
+    required: false,
+    desc: "Exclusive-purchase price in cents",
+  },
+  {
+    field: "quality_score",
+    type: "0 – 100",
+    required: false,
+    desc: "Lead quality score — defaults to 70",
+  },
+  {
+    field: "metadata.state",
+    type: "string",
+    required: false,
+    desc: '2-letter state code — e.g. "AZ" · used for market alerts',
+  },
+  {
+    field: "metadata.contact_phone",
+    type: "string",
+    required: false,
+    desc: "Seller phone number",
+  },
+  {
+    field: "metadata.contact_email",
+    type: "string",
+    required: false,
+    desc: "Seller email address",
+  },
+  {
+    field: "metadata.address",
+    type: "string",
+    required: false,
+    desc: "Property street address",
+  },
+  {
+    field: "metadata.city",
+    type: "string",
+    required: false,
+    desc: "Property city",
+  },
+  {
+    field: "metadata.zip",
+    type: "string",
+    required: false,
+    desc: "Property ZIP code",
+  },
+  {
+    field: "metadata.property_type",
+    type: "string",
+    required: false,
+    desc: "single_family · multi_family · land · commercial",
+  },
+  {
+    field: "metadata.timeline",
+    type: "string",
+    required: false,
+    desc: "asap · 30_days · 60_days · flexible",
+  },
+  {
+    field: "metadata.notes",
+    type: "string",
+    required: false,
+    desc: "Free-text notes from the vendor",
+  },
 ];
 
 function VendorWebhookPanel() {
-  const vendors = useQuery({ queryKey: queryKeys.admin.vendors, queryFn: getAdminVendors });
+  const vendors = useQuery({
+    queryKey: queryKeys.admin.vendors,
+    queryFn: getAdminVendors,
+  });
   const [selectedVendorId, setSelectedVendorId] = useState<string>("");
   const [activeTab, setActiveTab] = useState<ScriptTab>("single");
   const [copied, setCopied] = useState(false);
@@ -1548,30 +2860,82 @@ function postLeadToMarketplace() {
     <>
       {/* ── Integration scripts ── */}
       <div style={S.card}>
-        <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, margin: "0 0 4px" }}>
-            Vendor webhook integration
-          </h3>
-          <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: 0 }}>
-            Vendors POST leads using their API key in the <code style={{ color: "#a5b4fc" }}>X-Vendor-Key</code> header.
-            Leads land in the Pending Review queue and require admin approval before going live.
-          </p>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 16,
+            marginBottom: 16,
+          }}
+        >
+          <div>
+            <h3
+              style={{
+                fontFamily: "Manrope, sans-serif",
+                fontSize: 16,
+                margin: "0 0 4px",
+              }}
+            >
+              Vendor webhook integration
+            </h3>
+            <p
+              style={{ color: "rgba(255,255,255,0.45)", fontSize: 13, margin: 0 }}
+            >
+              Vendors POST leads using their API key in the{" "}
+              <code style={{ color: "#a5b4fc" }}>X-Vendor-Key</code> header. Leads
+              land in the Pending Review queue and require admin approval before
+              going live.
+            </p>
+          </div>
+          <a
+            href="/api-docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              ...S.btnGhost,
+              fontSize: 12,
+              padding: "6px 14px",
+              whiteSpace: "nowrap",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            Full API docs ↗
+          </a>
         </div>
 
         {/* Tab bar */}
-        <div style={{
-          display: "flex", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 16,
-        }}>
+        <div
+          style={{
+            display: "flex",
+            borderBottom: "1px solid rgba(255,255,255,0.08)",
+            marginBottom: 16,
+          }}
+        >
           {SCRIPT_TABS.map((t) => (
             <button
               key={t.id}
               type="button"
-              onClick={() => { setActiveTab(t.id); setCopied(false); }}
+              onClick={() => {
+                setActiveTab(t.id);
+                setCopied(false);
+              }}
               style={{
-                background: "none", border: "none", cursor: "pointer",
-                padding: "8px 16px", fontSize: 13, fontWeight: 500,
-                color: activeTab === t.id ? "#a5b4fc" : "rgba(255,255,255,0.45)",
-                borderBottom: activeTab === t.id ? "2px solid #6366f1" : "2px solid transparent",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "8px 16px",
+                fontSize: 13,
+                fontWeight: 500,
+                color:
+                  activeTab === t.id ? "#a5b4fc" : "rgba(255,255,255,0.45)",
+                borderBottom:
+                  activeTab === t.id
+                    ? "2px solid #6366f1"
+                    : "2px solid transparent",
                 marginBottom: -1,
                 transition: "color 0.15s",
               }}
@@ -1582,19 +2946,34 @@ function postLeadToMarketplace() {
         </div>
 
         {/* Tab metadata row */}
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          marginBottom: 10,
-        }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 10,
+          }}
+        >
           <div>
-            <code style={{
-              fontSize: 12, color: "#6ee7b7",
-              background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)",
-              borderRadius: 6, padding: "3px 8px",
-            }}>
+            <code
+              style={{
+                fontSize: 12,
+                color: "#6ee7b7",
+                background: "rgba(16,185,129,0.08)",
+                border: "1px solid rgba(16,185,129,0.2)",
+                borderRadius: 6,
+                padding: "3px 8px",
+              }}
+            >
               {activeTabMeta.endpoint}
             </code>
-            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginLeft: 10 }}>
+            <span
+              style={{
+                fontSize: 12,
+                color: "rgba(255,255,255,0.4)",
+                marginLeft: 10,
+              }}
+            >
               {activeTabMeta.hint}
             </span>
           </div>
@@ -1602,7 +2981,10 @@ function postLeadToMarketplace() {
             type="button"
             onClick={handleCopy}
             style={{
-              ...S.btnGhost, fontSize: 12, padding: "4px 14px", minWidth: 70,
+              ...S.btnGhost,
+              fontSize: 12,
+              padding: "4px 14px",
+              minWidth: 70,
               color: copied ? "#6ee7b7" : undefined,
               borderColor: copied ? "rgba(16,185,129,0.4)" : undefined,
               transition: "color 0.2s, border-color 0.2s",
@@ -1613,12 +2995,20 @@ function postLeadToMarketplace() {
         </div>
 
         {/* Script block */}
-        <pre style={{
-          background: "rgba(0,0,0,0.45)", border: "1px solid rgba(255,255,255,0.07)",
-          borderRadius: 10, padding: "14px 16px", fontSize: 11, color: "#e2e8f0",
-          overflowX: "auto", lineHeight: 1.7, margin: "0 0 16px",
-          fontFamily: "DM Mono, monospace",
-        }}>
+        <pre
+          style={{
+            background: "rgba(0,0,0,0.45)",
+            border: "1px solid rgba(255,255,255,0.07)",
+            borderRadius: 10,
+            padding: "14px 16px",
+            fontSize: 11,
+            color: "#e2e8f0",
+            overflowX: "auto",
+            lineHeight: 1.7,
+            margin: "0 0 16px",
+            fontFamily: "DM Mono, monospace",
+          }}
+        >
           {scripts[activeTab]}
         </pre>
 
@@ -1627,20 +3017,36 @@ function postLeadToMarketplace() {
           type="button"
           onClick={() => setShowFields((v) => !v)}
           style={{
-            ...S.btnGhost, fontSize: 12, padding: "5px 14px",
-            display: "flex", alignItems: "center", gap: 6,
+            ...S.btnGhost,
+            fontSize: 12,
+            padding: "5px 14px",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
           }}
         >
-          <span style={{ fontSize: 10, opacity: 0.6 }}>{showFields ? "▲" : "▼"}</span>
+          <span style={{ fontSize: 10, opacity: 0.6 }}>
+            {showFields ? "▲" : "▼"}
+          </span>
           Lead field reference
         </button>
 
         {showFields && (
-          <div style={{
-            marginTop: 12, borderRadius: 10, overflow: "hidden",
-            border: "1px solid rgba(255,255,255,0.06)",
-          }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <div
+            style={{
+              marginTop: 12,
+              borderRadius: 10,
+              overflow: "hidden",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 12,
+              }}
+            >
               <thead style={{ background: "rgba(0,0,0,0.25)" }}>
                 <tr>
                   <th style={S.th}>Field</th>
@@ -1651,15 +3057,52 @@ function postLeadToMarketplace() {
               </thead>
               <tbody>
                 {LEAD_FIELDS.map((f) => (
-                  <tr key={f.field} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-                    <td style={{ ...S.td, fontFamily: "DM Mono, monospace", fontSize: 11, color: "#a5b4fc" }}>{f.field}</td>
-                    <td style={{ ...S.td, color: "rgba(255,255,255,0.4)", fontSize: 11 }}>{f.type}</td>
-                    <td style={S.td}>
-                      {f.required
-                        ? <Pill tone="warn">required</Pill>
-                        : <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>optional</span>}
+                  <tr
+                    key={f.field}
+                    style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+                  >
+                    <td
+                      style={{
+                        ...S.td,
+                        fontFamily: "DM Mono, monospace",
+                        fontSize: 11,
+                        color: "#a5b4fc",
+                      }}
+                    >
+                      {f.field}
                     </td>
-                    <td style={{ ...S.td, color: "rgba(255,255,255,0.6)", fontSize: 12 }}>{f.desc}</td>
+                    <td
+                      style={{
+                        ...S.td,
+                        color: "rgba(255,255,255,0.4)",
+                        fontSize: 11,
+                      }}
+                    >
+                      {f.type}
+                    </td>
+                    <td style={S.td}>
+                      {f.required ? (
+                        <Pill tone="warn">required</Pill>
+                      ) : (
+                        <span
+                          style={{
+                            color: "rgba(255,255,255,0.25)",
+                            fontSize: 11,
+                          }}
+                        >
+                          optional
+                        </span>
+                      )}
+                    </td>
+                    <td
+                      style={{
+                        ...S.td,
+                        color: "rgba(255,255,255,0.6)",
+                        fontSize: 12,
+                      }}
+                    >
+                      {f.desc}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1670,12 +3113,21 @@ function postLeadToMarketplace() {
 
       {/* ── Vendor inspect ── */}
       <div style={S.card}>
-        <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 12 }}>
+        <h3
+          style={{
+            fontFamily: "Manrope, sans-serif",
+            fontSize: 16,
+            marginTop: 0,
+            marginBottom: 12,
+          }}
+        >
           Inspect vendor activity
         </h3>
 
         {vendors.isLoading ? (
-          <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>Loading vendors…</div>
+          <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
+            Loading vendors…
+          </div>
         ) : vendors.data?.length === 0 ? (
           <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
             No vendors configured yet — add one in the Integrations tab.
@@ -1688,65 +3140,151 @@ function postLeadToMarketplace() {
           >
             <option value="">— Select a vendor to inspect —</option>
             {(vendors.data ?? []).map((v) => (
-              <option key={v.id} value={v.id}>{v.name}{v.enabled ? "" : " (disabled)"}</option>
+              <option key={v.id} value={v.id}>
+                {v.name}
+                {v.enabled ? "" : " (disabled)"}
+              </option>
             ))}
           </select>
         )}
 
         {selectedVendorId && payoutQ.data && (
           <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-            {([
-              { label: "Total hits", value: payoutQ.data.total_hits, color: "#a5b4fc" },
-              { label: "Accepted", value: payoutQ.data.accepted, color: "#6ee7b7" },
-              { label: "Rejected", value: payoutQ.data.rejected, color: "#fca5a5" },
-            ] as const).map(({ label, value, color }) => (
-              <div key={label} style={{
-                flex: 1, padding: "12px 16px", borderRadius: 10,
-                background: "rgba(0,0,0,0.2)", border: "1px solid rgba(255,255,255,0.06)",
-              }}>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>{label}</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color, fontFamily: "Manrope, sans-serif" }}>{value}</div>
+            {(
+              [
+                {
+                  label: "Total hits",
+                  value: payoutQ.data.total_hits,
+                  color: "#a5b4fc",
+                },
+                {
+                  label: "Accepted",
+                  value: payoutQ.data.accepted,
+                  color: "#6ee7b7",
+                },
+                {
+                  label: "Rejected",
+                  value: payoutQ.data.rejected,
+                  color: "#fca5a5",
+                },
+              ] as const
+            ).map(({ label, value, color }) => (
+              <div
+                key={label}
+                style={{
+                  flex: 1,
+                  padding: "12px 16px",
+                  borderRadius: 10,
+                  background: "rgba(0,0,0,0.2)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.4)",
+                    marginBottom: 6,
+                  }}
+                >
+                  {label}
+                </div>
+                <div
+                  style={{
+                    fontSize: 24,
+                    fontWeight: 700,
+                    color,
+                    fontFamily: "Manrope, sans-serif",
+                  }}
+                >
+                  {value}
+                </div>
               </div>
             ))}
           </div>
         )}
 
         {selectedVendorId && hitsQ.isLoading && (
-          <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>Loading activity…</div>
-        )}
-
-        {selectedVendorId && !hitsQ.isLoading && hitsQ.data && hitsQ.data.length > 0 && (
-          <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead style={{ background: "rgba(0,0,0,0.2)" }}>
-                <tr>
-                  <th style={S.th}>Status</th>
-                  <th style={S.th}>Lead ID</th>
-                  <th style={S.th}>IP address</th>
-                  <th style={S.th}>Rejection reason</th>
-                  <th style={S.th}>Received</th>
-                </tr>
-              </thead>
-              <tbody>
-                {hitsQ.data.map((h) => (
-                  <tr key={h.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-                    <td style={S.td}>
-                      <Pill tone={h.status === "accepted" ? "good" : "bad"}>{h.status}</Pill>
-                    </td>
-                    <td style={{ ...S.td, fontFamily: "DM Mono, monospace", fontSize: 11, color: "#a5b4fc" }}>
-                      {h.lead_id ? h.lead_id.slice(0, 8) + "…" : "—"}
-                    </td>
-                    <td style={{ ...S.td, color: "rgba(255,255,255,0.45)", fontSize: 11 }}>{h.ip_address ?? "—"}</td>
-                    <td style={{ ...S.td, color: h.rejection_reason ? "#fca5a5" : "rgba(255,255,255,0.3)" }}>
-                      {h.rejection_reason ?? "—"}
-                    </td>
-                    <td style={{ ...S.td, color: "rgba(255,255,255,0.45)" }}>{new Date(h.created_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
+            Loading activity…
           </div>
         )}
+
+        {selectedVendorId &&
+          !hitsQ.isLoading &&
+          hitsQ.data &&
+          hitsQ.data.length > 0 && (
+            <div
+              style={{
+                borderRadius: 10,
+                overflow: "hidden",
+                border: "1px solid rgba(255,255,255,0.06)",
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 12,
+                }}
+              >
+                <thead style={{ background: "rgba(0,0,0,0.2)" }}>
+                  <tr>
+                    <th style={S.th}>Status</th>
+                    <th style={S.th}>Lead ID</th>
+                    <th style={S.th}>IP address</th>
+                    <th style={S.th}>Rejection reason</th>
+                    <th style={S.th}>Received</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hitsQ.data.map((h) => (
+                    <tr
+                      key={h.id}
+                      style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+                    >
+                      <td style={S.td}>
+                        <Pill tone={h.status === "accepted" ? "good" : "bad"}>
+                          {h.status}
+                        </Pill>
+                      </td>
+                      <td
+                        style={{
+                          ...S.td,
+                          fontFamily: "DM Mono, monospace",
+                          fontSize: 11,
+                          color: "#a5b4fc",
+                        }}
+                      >
+                        {h.lead_id ? h.lead_id.slice(0, 8) + "…" : "—"}
+                      </td>
+                      <td
+                        style={{
+                          ...S.td,
+                          color: "rgba(255,255,255,0.45)",
+                          fontSize: 11,
+                        }}
+                      >
+                        {h.ip_address ?? "—"}
+                      </td>
+                      <td
+                        style={{
+                          ...S.td,
+                          color: h.rejection_reason
+                            ? "#fca5a5"
+                            : "rgba(255,255,255,0.3)",
+                        }}
+                      >
+                        {h.rejection_reason ?? "—"}
+                      </td>
+                      <td style={{ ...S.td, color: "rgba(255,255,255,0.45)" }}>
+                        {new Date(h.created_at).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
         {selectedVendorId && !hitsQ.isLoading && hitsQ.data?.length === 0 && (
           <Empty title="No activity recorded for this vendor yet" />
@@ -1799,7 +3337,9 @@ function PendingLeadsSection() {
   if (pending.isLoading) {
     return (
       <div style={S.card}>
-        <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>Loading pending leads…</div>
+        <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
+          Loading pending leads…
+        </div>
       </div>
     );
   }
@@ -1807,7 +3347,14 @@ function PendingLeadsSection() {
   if (total === 0) return null;
 
   return (
-    <div style={{ ...S.card, borderLeft: "3px solid #f59e0b", padding: 0, overflow: "hidden" }}>
+    <div
+      style={{
+        ...S.card,
+        borderLeft: "3px solid #f59e0b",
+        padding: 0,
+        overflow: "hidden",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -1819,13 +3366,25 @@ function PendingLeadsSection() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{
-            background: "#f59e0b", color: "#000", borderRadius: 20,
-            padding: "2px 10px", fontSize: 12, fontWeight: 700,
-          }}>
+          <span
+            style={{
+              background: "#f59e0b",
+              color: "#000",
+              borderRadius: 20,
+              padding: "2px 10px",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
             {total}
           </span>
-          <span style={{ fontFamily: "Manrope, sans-serif", fontWeight: 600, fontSize: 15 }}>
+          <span
+            style={{
+              fontFamily: "Manrope, sans-serif",
+              fontWeight: 600,
+              fontSize: 15,
+            }}
+          >
             Leads pending review
           </span>
           <span style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
@@ -1836,12 +3395,16 @@ function PendingLeadsSection() {
           <button
             type="button"
             style={{
-              ...S.btnGhost, fontSize: 12, padding: "5px 14px",
+              ...S.btnGhost,
+              fontSize: 12,
+              padding: "5px 14px",
               opacity: bulkReject.isPending ? 0.6 : 1,
             }}
             disabled={bulkReject.isPending}
             onClick={() => {
-              const ids = pending.data?.groups.flatMap((g) => g.leads.map((l) => l.id)) ?? [];
+              const ids =
+                pending.data?.groups.flatMap((g) => g.leads.map((l) => l.id)) ??
+                [];
               bulkReject.mutate(ids);
             }}
           >
@@ -1850,12 +3413,16 @@ function PendingLeadsSection() {
           <button
             type="button"
             style={{
-              ...S.btnPrimary, fontSize: 12, padding: "5px 14px",
+              ...S.btnPrimary,
+              fontSize: 12,
+              padding: "5px 14px",
               opacity: bulkApprove.isPending ? 0.6 : 1,
             }}
             disabled={bulkApprove.isPending}
             onClick={() => {
-              const ids = pending.data?.groups.flatMap((g) => g.leads.map((l) => l.id)) ?? [];
+              const ids =
+                pending.data?.groups.flatMap((g) => g.leads.map((l) => l.id)) ??
+                [];
               bulkApprove.mutate(ids);
             }}
           >
@@ -1865,7 +3432,10 @@ function PendingLeadsSection() {
       </div>
 
       {pending.data?.groups.map((group: PendingLeadGroup) => (
-        <div key={group.vendor_id ?? "unknown"} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+        <div
+          key={group.vendor_id ?? "unknown"}
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+        >
           <div
             style={{
               display: "flex",
@@ -1876,12 +3446,20 @@ function PendingLeadsSection() {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{
-                width: 8, height: 8, borderRadius: "50%",
-                background: group.vendor_id ? "#10b981" : "rgba(255,255,255,0.3)",
-                flexShrink: 0,
-              }} />
-              <span style={{ fontWeight: 600, fontSize: 13 }}>{group.vendor_name}</span>
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: group.vendor_id
+                    ? "#10b981"
+                    : "rgba(255,255,255,0.3)",
+                  flexShrink: 0,
+                }}
+              />
+              <span style={{ fontWeight: 600, fontSize: 13 }}>
+                {group.vendor_name}
+              </span>
               <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
                 {group.count} lead{group.count !== 1 ? "s" : ""}
               </span>
@@ -1889,7 +3467,12 @@ function PendingLeadsSection() {
             <div style={{ display: "flex", gap: 6 }}>
               <button
                 type="button"
-                style={{ ...S.btnGhost, fontSize: 11, padding: "3px 10px", opacity: bulkReject.isPending ? 0.6 : 1 }}
+                style={{
+                  ...S.btnGhost,
+                  fontSize: 11,
+                  padding: "3px 10px",
+                  opacity: bulkReject.isPending ? 0.6 : 1,
+                }}
                 disabled={bulkReject.isPending}
                 onClick={() => bulkReject.mutate(group.leads.map((l) => l.id))}
               >
@@ -1897,7 +3480,12 @@ function PendingLeadsSection() {
               </button>
               <button
                 type="button"
-                style={{ ...S.btnPrimary, fontSize: 11, padding: "3px 10px", opacity: bulkApprove.isPending ? 0.6 : 1 }}
+                style={{
+                  ...S.btnPrimary,
+                  fontSize: 11,
+                  padding: "3px 10px",
+                  opacity: bulkApprove.isPending ? 0.6 : 1,
+                }}
                 disabled={bulkApprove.isPending}
                 onClick={() => bulkApprove.mutate(group.leads.map((l) => l.id))}
               >
@@ -1914,25 +3502,44 @@ function PendingLeadsSection() {
                 <th style={{ ...S.th, fontSize: 11 }}>Type</th>
                 <th style={{ ...S.th, fontSize: 11 }}>Price</th>
                 <th style={{ ...S.th, fontSize: 11 }}>Received</th>
-                <th style={{ ...S.th, fontSize: 11, textAlign: "right" }}>Actions</th>
+                <th style={{ ...S.th, fontSize: 11, textAlign: "right" }}>
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
               {group.leads.map((lead) => (
-                <tr key={lead.id} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                <tr
+                  key={lead.id}
+                  style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}
+                >
                   <td style={S.td}>{lead.title}</td>
                   <td style={S.td}>{lead.market}</td>
                   <td style={S.td}>{lead.lead_type}</td>
-                  <td style={S.td}>${(parseInt(lead.price_cents || "0", 10) / 100).toFixed(2)}</td>
-                  <td style={S.td}>{new Date(lead.created_at).toLocaleString()}</td>
+                  <td style={S.td}>
+                    ${(parseInt(lead.price_cents || "0", 10) / 100).toFixed(2)}
+                  </td>
+                  <td style={S.td}>
+                    {new Date(lead.created_at).toLocaleString()}
+                  </td>
                   <td style={{ ...S.td, textAlign: "right" }}>
-                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 6,
+                        justifyContent: "flex-end",
+                      }}
+                    >
                       <button
                         type="button"
                         style={{
-                          padding: "2px 10px", borderRadius: 6, border: "1px solid rgba(239,68,68,0.4)",
-                          background: "rgba(239,68,68,0.08)", color: "#fca5a5",
-                          fontSize: 11, cursor: "pointer",
+                          padding: "2px 10px",
+                          borderRadius: 6,
+                          border: "1px solid rgba(239,68,68,0.4)",
+                          background: "rgba(239,68,68,0.08)",
+                          color: "#fca5a5",
+                          fontSize: 11,
+                          cursor: "pointer",
                           opacity: reject.isPending ? 0.6 : 1,
                         }}
                         disabled={reject.isPending}
@@ -1943,9 +3550,13 @@ function PendingLeadsSection() {
                       <button
                         type="button"
                         style={{
-                          padding: "2px 10px", borderRadius: 6, border: "1px solid rgba(16,185,129,0.4)",
-                          background: "rgba(16,185,129,0.08)", color: "#6ee7b7",
-                          fontSize: 11, cursor: "pointer",
+                          padding: "2px 10px",
+                          borderRadius: 6,
+                          border: "1px solid rgba(16,185,129,0.4)",
+                          background: "rgba(16,185,129,0.08)",
+                          color: "#6ee7b7",
+                          fontSize: 11,
+                          cursor: "pointer",
                           opacity: approve.isPending ? 0.6 : 1,
                         }}
                         disabled={approve.isPending}
@@ -2019,7 +3630,13 @@ function IngestionTab() {
 
       <PendingLeadsSection />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+        }}
+      >
         <Stat
           label="Pending review"
           value={String(pendingLeads.data?.total ?? "—")}
@@ -2041,7 +3658,14 @@ function IngestionTab() {
       </div>
 
       <div style={S.card}>
-        <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 14 }}>
+        <h3
+          style={{
+            fontFamily: "Manrope, sans-serif",
+            fontSize: 16,
+            marginTop: 0,
+            marginBottom: 14,
+          }}
+        >
           Upload a CSV batch
         </h3>
         <div
@@ -2052,12 +3676,28 @@ function IngestionTab() {
             background: "rgba(255,255,255,0.02)",
           }}
         >
-          <div style={{ fontSize: 14, color: "rgba(255,255,255,0.75)", marginBottom: 6 }}>
+          <div
+            style={{
+              fontSize: 14,
+              color: "rgba(255,255,255,0.75)",
+              marginBottom: 6,
+            }}
+          >
             Drop a CSV here, or click to browse
           </div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 14 }}>
-            Required columns: <code>market, lead_type, price_cents</code>. Optional:{" "}
-            <code>contact_email, contact_phone, title, source, quality_score</code>.
+          <div
+            style={{
+              fontSize: 11,
+              color: "rgba(255,255,255,0.4)",
+              marginBottom: 14,
+            }}
+          >
+            Required columns: <code>market, lead_type, price_cents</code>.
+            Optional:{" "}
+            <code>
+              contact_email, contact_phone, title, source, quality_score
+            </code>
+            .
           </div>
           <div
             style={{
@@ -2087,18 +3727,28 @@ function IngestionTab() {
               style={{
                 ...S.btnPrimary,
                 opacity: parsedRows.length === 0 || upload.isPending ? 0.65 : 1,
-                display: "flex", alignItems: "center", gap: 8, justifyContent: "center", minWidth: 120,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                justifyContent: "center",
+                minWidth: 120,
               }}
               disabled={upload.isPending || parsedRows.length === 0}
               onClick={() => upload.mutate()}
             >
               {upload.isPending ? (
                 <>
-                  <span style={{
-                    width: 14, height: 14, border: "2px solid rgba(255,255,255,0.3)",
-                    borderTopColor: "#fff", borderRadius: "50%",
-                    animation: "spin 0.7s linear infinite", flexShrink: 0,
-                  }} />
+                  <span
+                    style={{
+                      width: 14,
+                      height: 14,
+                      border: "2px solid rgba(255,255,255,0.3)",
+                      borderTopColor: "#fff",
+                      borderRadius: "50%",
+                      animation: "spin 0.7s linear infinite",
+                      flexShrink: 0,
+                    }}
+                  />
                   Uploading…
                 </>
               ) : (
@@ -2109,7 +3759,9 @@ function IngestionTab() {
           {parseErrors.length > 0 && (
             <div style={{ marginTop: 12 }}>
               <Banner tone="bad">
-                {parseErrors.length} parse error{parseErrors.length > 1 ? "s" : ""}: {parseErrors.slice(0, 3).join(" · ")}
+                {parseErrors.length} parse error
+                {parseErrors.length > 1 ? "s" : ""}:{" "}
+                {parseErrors.slice(0, 3).join(" · ")}
                 {parseErrors.length > 3 ? "…" : ""}
               </Banner>
             </div>
@@ -2122,14 +3774,18 @@ function IngestionTab() {
           {upload.isSuccess && upload.data && (
             <div style={{ marginTop: 12 }}>
               <Banner tone="good">
-                Batch ingested · {upload.data.processed_rows} processed, {upload.data.failed_rows} failed.
+                Batch ingested · {upload.data.processed_rows} processed,{" "}
+                {upload.data.failed_rows} failed.
               </Banner>
             </div>
           )}
         </div>
       </div>
 
-      <div style={{ ...S.card, padding: 0, overflow: "hidden" }} id="ingestion-batches">
+      <div
+        style={{ ...S.card, padding: 0, overflow: "hidden" }}
+        id="ingestion-batches"
+      >
         <h3
           style={{
             fontFamily: "Manrope, sans-serif",
@@ -2141,9 +3797,16 @@ function IngestionTab() {
         >
           Recent batches
         </h3>
-        {batches.isLoading && <div style={{ padding: 20, color: "rgba(255,255,255,0.5)" }}>Loading…</div>}
+        {batches.isLoading && (
+          <div style={{ padding: 20, color: "rgba(255,255,255,0.5)" }}>
+            Loading…
+          </div>
+        )}
         {batches.data && batches.data.length === 0 && (
-          <Empty title="No batches yet" body="Drop your first CSV above to begin ingestion." />
+          <Empty
+            title="No batches yet"
+            body="Drop your first CSV above to begin ingestion."
+          />
         )}
         {batches.data && batches.data.length > 0 && (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -2159,7 +3822,10 @@ function IngestionTab() {
             </thead>
             <tbody>
               {batches.data.map((batch) => (
-                <tr key={batch.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                <tr
+                  key={batch.id}
+                  style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+                >
                   <td style={S.td}>{batch.filename}</td>
                   <td style={S.td}>{batch.vendor ?? "—"}</td>
                   <td style={S.td}>
@@ -2168,28 +3834,34 @@ function IngestionTab() {
                         batch.status === "processed"
                           ? "good"
                           : batch.status === "failed"
-                          ? "bad"
-                          : batch.status === "processing"
-                          ? "info"
-                          : "warn"
+                            ? "bad"
+                            : batch.status === "processing"
+                              ? "info"
+                              : "warn"
                       }
                     >
                       {batch.status}
                     </Pill>
                   </td>
                   <td style={S.td}>
-                    <span style={{ color: "#6ee7b7" }}>{batch.processed_rows}</span>
+                    <span style={{ color: "#6ee7b7" }}>
+                      {batch.processed_rows}
+                    </span>
                     {" / "}
                     <span>{batch.total_rows}</span>
                     {batch.failed_rows > 0 && (
                       <>
                         {" · "}
-                        <span style={{ color: "#fca5a5" }}>{batch.failed_rows} failed</span>
+                        <span style={{ color: "#fca5a5" }}>
+                          {batch.failed_rows} failed
+                        </span>
                       </>
                     )}
                   </td>
                   <td style={S.td}>{batch.uploaded_by?.email ?? "—"}</td>
-                  <td style={S.td}>{new Date(batch.created_at).toLocaleString()}</td>
+                  <td style={S.td}>
+                    {new Date(batch.created_at).toLocaleString()}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2205,7 +3877,11 @@ function IngestionTab() {
 // ---------- Duplicates ----------
 
 function fmtShortDate(d: string) {
-  return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return new Date(d).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 function statusDotColor(s: string) {
@@ -2253,33 +3929,89 @@ function ResolvedDuplicatesModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.72)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.72)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div style={{ background: "#0f1420", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 14, width: "100%", maxWidth: 640, maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+      <div
+        style={{
+          background: "#0f1420",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 14,
+          width: "100%",
+          maxWidth: 640,
+          maxHeight: "85vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
         {/* Modal header */}
-        <div style={{ padding: "18px 22px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div
+          style={{
+            padding: "18px 22px",
+            borderBottom: "1px solid rgba(255,255,255,0.07)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 14,
+            }}
+          >
             <div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>Resolved duplicates</div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>
+              <div style={{ fontSize: 16, fontWeight: 600 }}>
+                Resolved duplicates
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "rgba(255,255,255,0.4)",
+                  marginTop: 2,
+                }}
+              >
                 {resolved.data
                   ? `${resolved.data.length} group${resolved.data.length === 1 ? "" : "s"} loaded`
                   : "Loading…"}
               </div>
             </div>
-            <button type="button" onClick={onClose} style={{ ...S.btnGhost, padding: "5px 12px", fontSize: 13 }}>Close</button>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ ...S.btnGhost, padding: "5px 12px", fontSize: 13 }}
+            >
+              Close
+            </button>
           </div>
           {/* Date filter row */}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", whiteSpace: "nowrap" }}>Archived between</span>
+            <span
+              style={{
+                fontSize: 11,
+                color: "rgba(255,255,255,0.4)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Archived between
+            </span>
             <input
               type="date"
               value={dateFrom}
               onChange={(e) => applyDateFilter(e.target.value, dateTo)}
               style={inputStyle}
             />
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>and</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+              and
+            </span>
             <input
               type="date"
               value={dateTo}
@@ -2299,25 +4031,70 @@ function ResolvedDuplicatesModal({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Modal body */}
-        <div style={{ overflowY: "auto", padding: "16px 22px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div
+          style={{
+            overflowY: "auto",
+            padding: "16px 22px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
           {resolved.isLoading && <Empty title="Loading resolved groups…" />}
           {resolved.data && resolved.data.length === 0 && (
-            <Empty title="No resolved groups" body="Archived duplicates will appear here." />
+            <Empty
+              title="No resolved groups"
+              body="Archived duplicates will appear here."
+            />
           )}
           {(resolved.data ?? []).map((g) => (
-            <div key={g.canonical_id} style={{ ...S.card, padding: "14px 16px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+            <div
+              key={g.canonical_id}
+              style={{ ...S.card, padding: "14px 16px" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  marginBottom: 10,
+                }}
+              >
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{g.canonical_title}</div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{g.phone}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                    {g.canonical_title}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "rgba(255,255,255,0.4)",
+                      marginTop: 2,
+                    }}
+                  >
+                    {g.phone}
+                  </div>
                 </div>
                 <Pill tone="good">{g.duplicate_count} archived</Pill>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {(g.duplicates ?? []).map((d) => (
-                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", padding: "7px 10px", background: "rgba(0,0,0,0.2)", borderRadius: 6, fontSize: 12 }}>
-                    <span style={{ color: "rgba(255,255,255,0.55)" }}>{d.title}</span>
-                    <span style={{ color: "rgba(255,255,255,0.3)" }}>{fmtShortDate(d.created_at)}</span>
+                  <div
+                    key={d.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "7px 10px",
+                      background: "rgba(0,0,0,0.2)",
+                      borderRadius: 6,
+                      fontSize: 12,
+                    }}
+                  >
+                    <span style={{ color: "rgba(255,255,255,0.55)" }}>
+                      {d.title}
+                    </span>
+                    <span style={{ color: "rgba(255,255,255,0.3)" }}>
+                      {fmtShortDate(d.created_at)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -2328,7 +4105,13 @@ function ResolvedDuplicatesModal({ onClose }: { onClose: () => void }) {
               type="button"
               onClick={() => setTake((t) => t + PAGE_SIZE)}
               disabled={resolved.isFetching}
-              style={{ ...S.btnGhost, alignSelf: "center", padding: "7px 20px", fontSize: 12, opacity: resolved.isFetching ? 0.5 : 1 }}
+              style={{
+                ...S.btnGhost,
+                alignSelf: "center",
+                padding: "7px 20px",
+                fontSize: 12,
+                opacity: resolved.isFetching ? 0.5 : 1,
+              }}
             >
               {resolved.isFetching ? "Loading…" : "Load more"}
             </button>
@@ -2359,8 +4142,11 @@ function DuplicateGroupCard({
   const leads = group.leads ?? [];
   const [canonicalId, setCanonicalId] = useState(leads[0]?.id ?? "");
 
-  const resolvable = leads.filter((l) => l.id !== canonicalId && !l.is_duplicate);
-  const allSelected = resolvable.length > 0 && resolvable.every((l) => selectedLeadIds.has(l.id));
+  const resolvable = leads.filter(
+    (l) => l.id !== canonicalId && !l.is_duplicate,
+  );
+  const allSelected =
+    resolvable.length > 0 && resolvable.every((l) => selectedLeadIds.has(l.id));
 
   function handleToggleAll() {
     if (allSelected) {
@@ -2379,11 +4165,27 @@ function DuplicateGroupCard({
   return (
     <div style={S.card}>
       {/* Group header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          marginBottom: 14,
+        }}
+      >
         <div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{group.phone || "(no phone)"}</div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>
-            {leads.length} leads share this number · {resolvable.length} to resolve
+          <div style={{ fontSize: 15, fontWeight: 600 }}>
+            {group.phone || "(no phone)"}
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.4)",
+              marginTop: 3,
+            }}
+          >
+            {leads.length} leads share this number · {resolvable.length} to
+            resolve
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -2419,16 +4221,18 @@ function DuplicateGroupCard({
                 border: isCanonical
                   ? "1px solid rgba(52,211,153,0.3)"
                   : isSelected
-                  ? "1px solid rgba(99,102,241,0.4)"
-                  : "1px solid rgba(255,255,255,0.06)",
+                    ? "1px solid rgba(99,102,241,0.4)"
+                    : "1px solid rgba(255,255,255,0.06)",
                 background: isCanonical
                   ? "rgba(52,211,153,0.05)"
                   : isSelected
-                  ? "rgba(99,102,241,0.07)"
-                  : "rgba(0,0,0,0.15)",
+                    ? "rgba(99,102,241,0.07)"
+                    : "rgba(0,0,0,0.15)",
                 cursor: !isCanonical && !isDupe ? "pointer" : "default",
               }}
-              onClick={() => !isCanonical && !isDupe && onToggle(lead.id, canonicalId)}
+              onClick={() =>
+                !isCanonical && !isDupe && onToggle(lead.id, canonicalId)
+              }
             >
               {/* Checkbox / indicator */}
               {isDupe || isCanonical ? (
@@ -2439,17 +4243,44 @@ function DuplicateGroupCard({
                   checked={isSelected}
                   onChange={() => onToggle(lead.id, canonicalId)}
                   onClick={(e) => e.stopPropagation()}
-                  style={{ accentColor: "#6366f1", cursor: "pointer", width: 14, height: 14 }}
+                  style={{
+                    accentColor: "#6366f1",
+                    cursor: "pointer",
+                    width: 14,
+                    height: 14,
+                  }}
                 />
               )}
 
               {/* Title + date */}
               <div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: isDupe ? "rgba(255,255,255,0.35)" : "#fff" }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: isDupe ? "rgba(255,255,255,0.35)" : "#fff",
+                  }}
+                >
                   {lead.title}
                 </div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
-                  <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: statusDotColor(lead.status), marginRight: 5, verticalAlign: "middle" }} />
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.3)",
+                    marginTop: 2,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: statusDotColor(lead.status),
+                      marginRight: 5,
+                      verticalAlign: "middle",
+                    }}
+                  />
                   {lead.status} · {fmtShortDate(lead.created_at)}
                 </div>
               </div>
@@ -2462,8 +4293,20 @@ function DuplicateGroupCard({
               ) : (
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); handleSetCanonical(lead.id); }}
-                  style={{ padding: "3px 9px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)", background: "transparent", color: "rgba(255,255,255,0.45)", fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSetCanonical(lead.id);
+                  }}
+                  style={{
+                    padding: "3px 9px",
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    background: "transparent",
+                    color: "rgba(255,255,255,0.45)",
+                    fontSize: 11,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
                 >
                   Set as canonical
                 </button>
@@ -2474,8 +4317,17 @@ function DuplicateGroupCard({
                 <button
                   type="button"
                   disabled={merging}
-                  onClick={(e) => { e.stopPropagation(); onMergeMany([lead.id], canonicalId); }}
-                  style={{ ...S.btnGhost, padding: "4px 10px", fontSize: 11, opacity: merging ? 0.5 : 1, whiteSpace: "nowrap" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMergeMany([lead.id], canonicalId);
+                  }}
+                  style={{
+                    ...S.btnGhost,
+                    padding: "4px 10px",
+                    fontSize: 11,
+                    opacity: merging ? 0.5 : 1,
+                    whiteSpace: "nowrap",
+                  }}
                 >
                   Archive
                 </button>
@@ -2494,7 +4346,9 @@ function DuplicatesTab() {
   const qc = useQueryClient();
   const [showResolved, setShowResolved] = useState(false);
   // Map<leadId, canonicalId> — lifted selection state shared across all group cards
-  const [globalSelected, setGlobalSelected] = useState<Map<string, string>>(new Map());
+  const [globalSelected, setGlobalSelected] = useState<Map<string, string>>(
+    new Map(),
+  );
 
   const groups = useQuery({
     queryKey: queryKeys.admin.duplicateGroups,
@@ -2507,14 +4361,19 @@ function DuplicatesTab() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.admin.duplicateGroups });
       void qc.invalidateQueries({ queryKey: queryKeys.admin.metricsBreakdown });
-      void qc.invalidateQueries({ queryKey: ["admin", "duplicate-groups", "resolved"] });
+      void qc.invalidateQueries({
+        queryKey: ["admin", "duplicate-groups", "resolved"],
+      });
     },
   });
 
   async function handleMergeMany(duplicateIds: string[], canonicalId: string) {
     await Promise.all(
       duplicateIds.map((id) =>
-        merge.mutateAsync({ duplicateLeadId: id, canonicalLeadId: canonicalId }),
+        merge.mutateAsync({
+          duplicateLeadId: id,
+          canonicalLeadId: canonicalId,
+        }),
       ),
     );
   }
@@ -2559,7 +4418,8 @@ function DuplicatesTab() {
     const items: Array<{ id: string; canonicalId: string }> = [];
     for (const g of groups.data ?? []) {
       const leads = g.leads ?? [];
-      const canonicalId = leads.find((l) => !l.is_duplicate)?.id ?? leads[0]?.id ?? "";
+      const canonicalId =
+        leads.find((l) => !l.is_duplicate)?.id ?? leads[0]?.id ?? "";
       for (const l of leads) {
         if (!l.is_duplicate && l.id !== canonicalId) {
           items.push({ id: l.id, canonicalId });
@@ -2570,7 +4430,8 @@ function DuplicatesTab() {
   }, [groups.data]);
 
   const isAllSelected =
-    allResolvable.length > 0 && allResolvable.every((r) => globalSelected.has(r.id));
+    allResolvable.length > 0 &&
+    allResolvable.every((r) => globalSelected.has(r.id));
 
   function handleGlobalToggleAll() {
     if (isAllSelected) {
@@ -2588,28 +4449,75 @@ function DuplicatesTab() {
 
   return (
     <>
-      {showResolved && <ResolvedDuplicatesModal onClose={() => setShowResolved(false)} />}
+      {showResolved && (
+        <ResolvedDuplicatesModal onClose={() => setShowResolved(false)} />
+      )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: "Manrope, sans-serif" }}>Duplicates</h2>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 700,
+            fontFamily: "Manrope, sans-serif",
+          }}
+        >
+          Duplicates
+        </h2>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {totalToResolve > 0 && <Pill tone="warn">{totalToResolve} to resolve</Pill>}
-          <button type="button" onClick={() => setShowResolved(true)} style={{ ...S.btnGhost, padding: "6px 14px", fontSize: 12 }}>
+          {totalToResolve > 0 && (
+            <Pill tone="warn">{totalToResolve} to resolve</Pill>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowResolved(true)}
+            style={{ ...S.btnGhost, padding: "6px 14px", fontSize: 12 }}
+          >
             View resolved
           </button>
         </div>
       </div>
 
       {totalGroups > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12 }}>
-          <Stat label="Phone clusters" value={String(totalGroups)} accent="linear-gradient(90deg,#f59e0b,#ef4444)" />
-          <Stat label="Leads to resolve" value={String(totalToResolve)} accent="linear-gradient(90deg,#6366f1,#8b5cf6)" />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2,1fr)",
+            gap: 12,
+          }}
+        >
+          <Stat
+            label="Phone clusters"
+            value={String(totalGroups)}
+            accent="linear-gradient(90deg,#f59e0b,#ef4444)"
+          />
+          <Stat
+            label="Leads to resolve"
+            value={String(totalToResolve)}
+            accent="linear-gradient(90deg,#6366f1,#8b5cf6)"
+          />
         </div>
       )}
 
       {/* Global action bar — only shown when there are groups */}
       {totalGroups > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 14px",
+            background: "rgba(255,255,255,0.03)",
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
           <button
             type="button"
             onClick={handleGlobalToggleAll}
@@ -2619,14 +4527,23 @@ function DuplicatesTab() {
           </button>
           {selectedCount > 0 && (
             <>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{selectedCount} selected</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                {selectedCount} selected
+              </span>
               <button
                 type="button"
                 disabled={merge.isPending}
                 onClick={handleMergeGlobalSelected}
-                style={{ ...S.btnPrimary, padding: "5px 14px", fontSize: 12, opacity: merge.isPending ? 0.6 : 1 }}
+                style={{
+                  ...S.btnPrimary,
+                  padding: "5px 14px",
+                  fontSize: 12,
+                  opacity: merge.isPending ? 0.6 : 1,
+                }}
               >
-                {merge.isPending ? "Archiving…" : `Archive ${selectedCount} selected`}
+                {merge.isPending
+                  ? "Archiving…"
+                  : `Archive ${selectedCount} selected`}
               </button>
               <button
                 type="button"
@@ -2640,7 +4557,9 @@ function DuplicatesTab() {
         </div>
       )}
 
-      {merge.isError && <Banner tone="bad">{(merge.error as Error).message}</Banner>}
+      {merge.isError && (
+        <Banner tone="bad">{(merge.error as Error).message}</Banner>
+      )}
       {groups.isLoading && <Empty title="Checking for duplicates…" />}
 
       {groups.data && groups.data.length === 0 && (
@@ -2655,7 +4574,9 @@ function DuplicatesTab() {
           {groups.data.map((g) => {
             const groupLeadIds = new Set((g.leads ?? []).map((l) => l.id));
             const selectedInGroup = new Set(
-              Array.from(globalSelected.keys()).filter((id) => groupLeadIds.has(id)),
+              Array.from(globalSelected.keys()).filter((id) =>
+                groupLeadIds.has(id),
+              ),
             );
             return (
               <DuplicateGroupCard
@@ -2680,7 +4601,9 @@ function DuplicatesTab() {
 
 function GradingTab() {
   const qc = useQueryClient();
-  const [bucket, setBucket] = useState<"" | "high" | "borderline" | "below">("borderline");
+  const [bucket, setBucket] = useState<"" | "high" | "borderline" | "below">(
+    "borderline",
+  );
   const [page, setPage] = useState(1);
   const stats = useQuery({
     queryKey: queryKeys.admin.gradingStats,
@@ -2699,7 +4622,11 @@ function GradingTab() {
     queryKey: queryKeys.admin.gradingOverrides,
     queryFn: () => getAdminGradingOverrides(15),
   });
-  const [selectedLead, setSelectedLead] = useState<{ id: string; title: string; score: number } | null>(null);
+  const [selectedLead, setSelectedLead] = useState<{
+    id: string;
+    title: string;
+    score: number;
+  } | null>(null);
   const [overrideScore, setOverrideScore] = useState("60");
   const [overrideNotes, setOverrideNotes] = useState("");
   const submitOverride = useMutation({
@@ -2725,14 +4652,35 @@ function GradingTab() {
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: "Manrope, sans-serif" }}>Lead quality</h2>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 700,
+            fontFamily: "Manrope, sans-serif",
+          }}
+        >
+          Lead quality
+        </h2>
         <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
           Scores are set at ingestion · override any lead from the queue below
         </span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4,1fr)",
+          gap: 12,
+        }}
+      >
         <Stat
           label="High confidence"
           value={buckets ? String(buckets.high) : "—"}
@@ -2759,26 +4707,68 @@ function GradingTab() {
 
       {/* Override form — only shown when a lead is selected from the queue */}
       {selectedLead && (
-        <div style={{ ...S.card, border: "1px solid rgba(99,102,241,0.35)", background: "rgba(99,102,241,0.05)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div
+          style={{
+            ...S.card,
+            border: "1px solid rgba(99,102,241,0.35)",
+            background: "rgba(99,102,241,0.05)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 14,
+            }}
+          >
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>Override score</div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 3 }}>
-                {selectedLead.title} · current score: <strong style={{ color: "#fff" }}>{selectedLead.score}</strong>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>
+                Override score
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "rgba(255,255,255,0.45)",
+                  marginTop: 3,
+                }}
+              >
+                {selectedLead.title} · current score:{" "}
+                <strong style={{ color: "#fff" }}>{selectedLead.score}</strong>
               </div>
             </div>
-            <button type="button" style={{ ...S.btnGhost, padding: "4px 11px", fontSize: 12 }} onClick={() => setSelectedLead(null)}>
+            <button
+              type="button"
+              style={{ ...S.btnGhost, padding: "4px 11px", fontSize: 12 }}
+              onClick={() => setSelectedLead(null)}
+            >
               Dismiss
             </button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 10, alignItems: "end" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 1fr auto",
+              gap: 10,
+              alignItems: "end",
+            }}
+          >
             <label style={S.label}>
               New score (0–100)
-              <input style={S.inp} value={overrideScore} onChange={(e) => setOverrideScore(e.target.value)} />
+              <input
+                style={S.inp}
+                value={overrideScore}
+                onChange={(e) => setOverrideScore(e.target.value)}
+              />
             </label>
             <label style={S.label}>
               Notes (optional)
-              <input style={S.inp} value={overrideNotes} onChange={(e) => setOverrideNotes(e.target.value)} placeholder="Reason for override…" />
+              <input
+                style={S.inp}
+                value={overrideNotes}
+                onChange={(e) => setOverrideNotes(e.target.value)}
+                placeholder="Reason for override…"
+              />
             </label>
             <button
               type="button"
@@ -2791,13 +4781,16 @@ function GradingTab() {
           </div>
           {submitOverride.isError && (
             <div style={{ marginTop: 10 }}>
-              <Banner tone="bad">{(submitOverride.error as Error).message}</Banner>
+              <Banner tone="bad">
+                {(submitOverride.error as Error).message}
+              </Banner>
             </div>
           )}
           {submitOverride.isSuccess && (
             <div style={{ marginTop: 10 }}>
               <Banner tone="good">
-                Saved · {submitOverride.data.original_score} → {submitOverride.data.override_score}
+                Saved · {submitOverride.data.original_score} →{" "}
+                {submitOverride.data.override_score}
               </Banner>
             </div>
           )}
@@ -2814,7 +4807,9 @@ function GradingTab() {
           flexWrap: "wrap",
         }}
       >
-        <strong style={{ fontFamily: "Manrope, sans-serif", fontSize: 14 }}>Queue filter</strong>
+        <strong style={{ fontFamily: "Manrope, sans-serif", fontSize: 14 }}>
+          Queue filter
+        </strong>
         {(["", "high", "borderline", "below"] as const).map((b) => (
           <button
             key={b || "all"}
@@ -2834,7 +4829,13 @@ function GradingTab() {
             {b === "" ? "All" : b}
           </button>
         ))}
-        <span style={{ marginLeft: "auto", color: "rgba(255,255,255,0.55)", fontSize: 12 }}>
+        <span
+          style={{
+            marginLeft: "auto",
+            color: "rgba(255,255,255,0.55)",
+            fontSize: 12,
+          }}
+        >
           {queue.data?.pagination.total ?? 0} total
         </span>
         <button
@@ -2845,7 +4846,11 @@ function GradingTab() {
         >
           Prev
         </button>
-        <button type="button" style={S.btnGhost} onClick={() => setPage((p) => p + 1)}>
+        <button
+          type="button"
+          style={S.btnGhost}
+          onClick={() => setPage((p) => p + 1)}
+        >
           Next
         </button>
       </div>
@@ -2870,9 +4875,16 @@ function GradingTab() {
             <tbody>
               {queue.data.items.map((l) => {
                 const tone: Tone =
-                  l.quality_score >= 85 ? "good" : l.quality_score >= 50 ? "warn" : "bad";
+                  l.quality_score >= 85
+                    ? "good"
+                    : l.quality_score >= 50
+                      ? "warn"
+                      : "bad";
                 return (
-                  <tr key={l.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                  <tr
+                    key={l.id}
+                    style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+                  >
                     <td style={S.td}>{l.title}</td>
                     <td style={S.td}>{l.market}</td>
                     <td style={S.td}>
@@ -2887,8 +4899,20 @@ function GradingTab() {
                     <td style={S.td}>
                       <button
                         type="button"
-                        onClick={() => { setSelectedLead({ id: l.id, title: l.title, score: l.quality_score }); setOverrideScore(String(l.quality_score)); setOverrideNotes(""); }}
-                        style={{ ...S.btnGhost, padding: "4px 10px", fontSize: 12 }}
+                        onClick={() => {
+                          setSelectedLead({
+                            id: l.id,
+                            title: l.title,
+                            score: l.quality_score,
+                          });
+                          setOverrideScore(String(l.quality_score));
+                          setOverrideNotes("");
+                        }}
+                        style={{
+                          ...S.btnGhost,
+                          padding: "4px 10px",
+                          fontSize: 12,
+                        }}
                       >
                         Override score
                       </button>
@@ -2902,7 +4926,14 @@ function GradingTab() {
       )}
 
       <div style={S.card}>
-        <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 12 }}>
+        <h3
+          style={{
+            fontFamily: "Manrope, sans-serif",
+            fontSize: 16,
+            marginTop: 0,
+            marginBottom: 12,
+          }}
+        >
           Recent overrides
         </h3>
         {overrides.isLoading && <Empty title="Loading…" />}
@@ -2933,10 +4964,19 @@ function GradingTab() {
                     </span>
                   </div>
                   {o.notes && (
-                    <div style={{ color: "rgba(255,255,255,0.45)", marginTop: 2 }}>{o.notes}</div>
+                    <div
+                      style={{ color: "rgba(255,255,255,0.45)", marginTop: 2 }}
+                    >
+                      {o.notes}
+                    </div>
                   )}
                 </div>
-                <div style={{ textAlign: "right", color: "rgba(255,255,255,0.55)" }}>
+                <div
+                  style={{
+                    textAlign: "right",
+                    color: "rgba(255,255,255,0.55)",
+                  }}
+                >
                   <div>{o.reviewer?.email ?? "system"}</div>
                   <div style={{ fontSize: 11, marginTop: 2 }}>
                     {new Date(o.created_at).toLocaleString()}
@@ -2968,10 +5008,24 @@ function SettingField({
 }) {
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.9)", marginBottom: 3 }}>
+      <div
+        style={{
+          fontSize: 13,
+          fontWeight: 500,
+          color: "rgba(255,255,255,0.9)",
+          marginBottom: 3,
+        }}
+      >
         {label}
       </div>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 9, lineHeight: 1.55 }}>
+      <div
+        style={{
+          fontSize: 11,
+          color: "rgba(255,255,255,0.35)",
+          marginBottom: 9,
+          lineHeight: 1.55,
+        }}
+      >
         {description}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2980,7 +5034,9 @@ function SettingField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.38)" }}>{suffix}</span>
+        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.38)" }}>
+          {suffix}
+        </span>
       </div>
     </div>
   );
@@ -2992,17 +5048,22 @@ function DistributionTab() {
     queryKey: queryKeys.admin.engine,
     queryFn: getDistributionEngineSettings,
   });
-  const metrics = useQuery({ queryKey: queryKeys.admin.metrics, queryFn: getAdminExtendedMetrics });
+  const metrics = useQuery({
+    queryKey: queryKeys.admin.metrics,
+    queryFn: getAdminExtendedMetrics,
+  });
 
   const patch = useMutation({
-    mutationFn: (body: Partial<{
-      queue_paused: boolean;
-      max_auto_distribution_runs: number;
-      cooldown_minutes_between_runs: number;
-      markdown_after_days: number;
-      markdown_percent: number;
-      early_access_minutes: number;
-    }>) => patchDistributionEngineSettings(body),
+    mutationFn: (
+      body: Partial<{
+        queue_paused: boolean;
+        max_auto_distribution_runs: number;
+        cooldown_minutes_between_runs: number;
+        markdown_after_days: number;
+        markdown_percent: number;
+        early_access_minutes: number;
+      }>,
+    ) => patchDistributionEngineSettings(body),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.admin.engine });
       void qc.invalidateQueries({ queryKey: queryKeys.admin.metrics });
@@ -3031,8 +5092,10 @@ function DistributionTab() {
   function handleSave() {
     if (!e) return;
     patch.mutate({
-      max_auto_distribution_runs: Number(maxRuns) || e.max_auto_distribution_runs,
-      cooldown_minutes_between_runs: Number(cooldown) || e.cooldown_minutes_between_runs,
+      max_auto_distribution_runs:
+        Number(maxRuns) || e.max_auto_distribution_runs,
+      cooldown_minutes_between_runs:
+        Number(cooldown) || e.cooldown_minutes_between_runs,
       markdown_after_days: Number(mdDays) || e.markdown_after_days,
       markdown_percent: Number(mdPct) || e.markdown_percent,
       early_access_minutes: Number(earlyAccess) || e.early_access_minutes,
@@ -3040,17 +5103,39 @@ function DistributionTab() {
   }
 
   // Conversion helpers for display
-  const fillRate = m && m.availableLeads !== undefined && m.autoDistributionParticipants !== undefined
-    ? m.autoDistributionParticipants > 0
-      ? Math.min(100, Math.round((m.autoDistributionParticipants / Math.max(m.availableLeads, 1)) * 100))
-      : 0
-    : null;
+  const fillRate =
+    m &&
+    m.availableLeads !== undefined &&
+    m.autoDistributionParticipants !== undefined
+      ? m.autoDistributionParticipants > 0
+        ? Math.min(
+            100,
+            Math.round(
+              (m.autoDistributionParticipants / Math.max(m.availableLeads, 1)) *
+                100,
+            ),
+          )
+        : 0
+      : null;
 
   return (
     <>
       {/* Header row with engine toggle */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: "Manrope, sans-serif" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 700,
+            fontFamily: "Manrope, sans-serif",
+          }}
+        >
           Auto-Distribution
         </h2>
         {e && (
@@ -3085,7 +5170,9 @@ function DistributionTab() {
                 border: isRunning
                   ? "1px solid rgba(245,158,11,0.35)"
                   : "1px solid rgba(52,211,153,0.35)",
-                background: isRunning ? "rgba(245,158,11,0.1)" : "rgba(52,211,153,0.1)",
+                background: isRunning
+                  ? "rgba(245,158,11,0.1)"
+                  : "rgba(52,211,153,0.1)",
                 color: isRunning ? "#f59e0b" : "#34d399",
                 fontSize: 13,
                 fontWeight: 600,
@@ -3099,28 +5186,48 @@ function DistributionTab() {
         )}
       </div>
 
-      {engine.isError && <Banner tone="bad">{(engine.error as Error).message}</Banner>}
+      {engine.isError && (
+        <Banner tone="bad">{(engine.error as Error).message}</Banner>
+      )}
 
       {/* Pipeline metrics */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4,1fr)",
+          gap: 12,
+        }}
+      >
         <Stat
           label="Available leads"
-          value={m?.availableLeads !== undefined ? String(m.availableLeads) : "—"}
+          value={
+            m?.availableLeads !== undefined ? String(m.availableLeads) : "—"
+          }
           accent="linear-gradient(90deg,#34d399,#10b981)"
         />
         <Stat
           label="Auto-buy participants"
-          value={m?.autoDistributionParticipants !== undefined ? String(m.autoDistributionParticipants) : "—"}
+          value={
+            m?.autoDistributionParticipants !== undefined
+              ? String(m.autoDistributionParticipants)
+              : "—"
+          }
           accent="linear-gradient(90deg,#6366f1,#8b5cf6)"
         />
         <Stat
           label="Active subscriptions"
-          value={m?.activeSubscriptions !== undefined ? String(m.activeSubscriptions) : "—"}
+          value={
+            m?.activeSubscriptions !== undefined
+              ? String(m.activeSubscriptions)
+              : "—"
+          }
           accent="linear-gradient(90deg,#38bdf8,#6366f1)"
         />
         <Stat
           label="Total assignments"
-          value={m?.totalAssignments !== undefined ? String(m.totalAssignments) : "—"}
+          value={
+            m?.totalAssignments !== undefined ? String(m.totalAssignments) : "—"
+          }
           accent="linear-gradient(90deg,#94a3b8,#64748b)"
         />
       </div>
@@ -3128,34 +5235,67 @@ function DistributionTab() {
       {/* Demand pressure indicator */}
       {fillRate !== null && (
         <div style={{ ...S.card, padding: "14px 18px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 10,
+            }}
+          >
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Pipeline pressure</div>
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>
-                Ratio of active buyers to available leads — higher means more competition per lead
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                Pipeline pressure
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "rgba(255,255,255,0.4)",
+                  marginTop: 2,
+                }}
+              >
+                Ratio of active buyers to available leads — higher means more
+                competition per lead
               </div>
             </div>
-            <span style={{
-              fontSize: 22,
-              fontWeight: 700,
-              color: fillRate > 80 ? "#34d399" : fillRate > 40 ? "#f59e0b" : "#f87171",
-              fontFamily: "Manrope, sans-serif",
-            }}>
+            <span
+              style={{
+                fontSize: 22,
+                fontWeight: 700,
+                color:
+                  fillRate > 80
+                    ? "#34d399"
+                    : fillRate > 40
+                      ? "#f59e0b"
+                      : "#f87171",
+                fontFamily: "Manrope, sans-serif",
+              }}
+            >
               {fillRate}%
             </span>
           </div>
-          <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.07)", overflow: "hidden" }}>
-            <div style={{
-              height: "100%",
+          <div
+            style={{
+              height: 6,
               borderRadius: 3,
-              width: `${Math.min(fillRate, 100)}%`,
-              background: fillRate > 80
-                ? "linear-gradient(90deg,#34d399,#10b981)"
-                : fillRate > 40
-                ? "linear-gradient(90deg,#f59e0b,#fcd34d)"
-                : "linear-gradient(90deg,#f87171,#ef4444)",
-              transition: "width 0.4s ease",
-            }} />
+              background: "rgba(255,255,255,0.07)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                height: "100%",
+                borderRadius: 3,
+                width: `${Math.min(fillRate, 100)}%`,
+                background:
+                  fillRate > 80
+                    ? "linear-gradient(90deg,#34d399,#10b981)"
+                    : fillRate > 40
+                      ? "linear-gradient(90deg,#f59e0b,#fcd34d)"
+                      : "linear-gradient(90deg,#f87171,#ef4444)",
+                transition: "width 0.4s ease",
+              }}
+            />
           </div>
         </div>
       )}
@@ -3164,10 +5304,20 @@ function DistributionTab() {
       {engine.isLoading && <Empty title="Loading settings…" />}
       {e && (
         <div style={S.card}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}
+          >
             {/* Left column — throughput */}
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 18, letterSpacing: "0.04em" }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "rgba(255,255,255,0.4)",
+                  marginBottom: 18,
+                  letterSpacing: "0.04em",
+                }}
+              >
                 THROUGHPUT
               </div>
               <SettingField
@@ -3195,7 +5345,15 @@ function DistributionTab() {
 
             {/* Right column — price decay */}
             <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 18, letterSpacing: "0.04em" }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: "rgba(255,255,255,0.4)",
+                  marginBottom: 18,
+                  letterSpacing: "0.04em",
+                }}
+              >
                 PRICE DECAY
               </div>
               <SettingField
@@ -3214,28 +5372,80 @@ function DistributionTab() {
               />
 
               {/* Current values at a glance */}
-              <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: "12px 14px", marginTop: 4 }}>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>Current live values</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "rgba(255,255,255,0.45)" }}>Max passes</span>
-                    <span style={{ fontWeight: 600 }}>{e.max_auto_distribution_runs}</span>
+              <div
+                style={{
+                  background: "rgba(0,0,0,0.2)",
+                  borderRadius: 8,
+                  padding: "12px 14px",
+                  marginTop: 4,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.3)",
+                    marginBottom: 8,
+                  }}
+                >
+                  Current live values
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 5,
+                    fontSize: 12,
+                  }}
+                >
+                  <div
+                    style={{ display: "flex", justifyContent: "space-between" }}
+                  >
+                    <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                      Max passes
+                    </span>
+                    <span style={{ fontWeight: 600 }}>
+                      {e.max_auto_distribution_runs}
+                    </span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "rgba(255,255,255,0.45)" }}>Cooldown</span>
-                    <span style={{ fontWeight: 600 }}>{e.cooldown_minutes_between_runs} min</span>
+                  <div
+                    style={{ display: "flex", justifyContent: "space-between" }}
+                  >
+                    <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                      Cooldown
+                    </span>
+                    <span style={{ fontWeight: 600 }}>
+                      {e.cooldown_minutes_between_runs} min
+                    </span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "rgba(255,255,255,0.45)" }}>Markdown after</span>
-                    <span style={{ fontWeight: 600 }}>{e.markdown_after_days} days</span>
+                  <div
+                    style={{ display: "flex", justifyContent: "space-between" }}
+                  >
+                    <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                      Markdown after
+                    </span>
+                    <span style={{ fontWeight: 600 }}>
+                      {e.markdown_after_days} days
+                    </span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "rgba(255,255,255,0.45)" }}>Markdown</span>
-                    <span style={{ fontWeight: 600 }}>{e.markdown_percent}%</span>
+                  <div
+                    style={{ display: "flex", justifyContent: "space-between" }}
+                  >
+                    <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                      Markdown
+                    </span>
+                    <span style={{ fontWeight: 600 }}>
+                      {e.markdown_percent}%
+                    </span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "rgba(255,255,255,0.45)" }}>Pro early access</span>
-                    <span style={{ fontWeight: 600 }}>{e.early_access_minutes} min</span>
+                  <div
+                    style={{ display: "flex", justifyContent: "space-between" }}
+                  >
+                    <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                      Pro early access
+                    </span>
+                    <span style={{ fontWeight: 600 }}>
+                      {e.early_access_minutes} min
+                    </span>
                   </div>
                 </div>
               </div>
@@ -3243,14 +5453,16 @@ function DistributionTab() {
           </div>
 
           {/* Save footer */}
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            marginTop: 24,
-            paddingTop: 18,
-            borderTop: "1px solid rgba(255,255,255,0.07)",
-          }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              marginTop: 24,
+              paddingTop: 18,
+              borderTop: "1px solid rgba(255,255,255,0.07)",
+            }}
+          >
             <button
               type="button"
               disabled={patch.isPending}
@@ -3260,14 +5472,22 @@ function DistributionTab() {
               {patch.isPending ? "Saving…" : "Save settings"}
             </button>
             {patch.isSuccess && (
-              <span style={{ fontSize: 12, color: "#34d399" }}>Settings saved</span>
+              <span style={{ fontSize: 12, color: "#34d399" }}>
+                Settings saved
+              </span>
             )}
             {patch.isError && (
               <span style={{ fontSize: 12, color: "#f87171" }}>
                 {(patch.error as Error).message}
               </span>
             )}
-            <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.22)" }}>
+            <span
+              style={{
+                marginLeft: "auto",
+                fontSize: 11,
+                color: "rgba(255,255,255,0.22)",
+              }}
+            >
               Last updated {new Date(e.updated_at).toLocaleString()}
             </span>
           </div>
@@ -3281,164 +5501,620 @@ function DistributionTab() {
 
 function PricingTab() {
   const qc = useQueryClient();
-  const engine = useQuery({ queryKey: queryKeys.admin.engine, queryFn: getDistributionEngineSettings });
-  const patch = useMutation({
-    mutationFn: (body: Partial<{
-      markdown_after_days: number;
-      markdown_percent: number;
-      early_access_minutes: number;
-    }>) => patchDistributionEngineSettings(body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.admin.engine }),
+  const engine = useQuery({
+    queryKey: queryKeys.admin.engine,
+    queryFn: getDistributionEngineSettings,
+  });
+  const pricing = useQuery({
+    queryKey: queryKeys.admin.leadPricing,
+    queryFn: getAdminLeadPricing,
+  });
+  const patchEarlyAccess = useMutation({
+    mutationFn: (
+      body: Partial<{
+        early_access_minutes: number;
+      }>,
+    ) => patchDistributionEngineSettings(body),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.engine }),
+  });
+  type LeadPricingBody = Partial<{
+    new_lead_price_cents: number;
+    shared_price_cents: number | null;
+    discount_after_days: number;
+    discount_amount_cents: number;
+    min_price_floor_cents: number | null;
+  }>;
+  const onLeadPricingSaved = () => {
+    void qc.invalidateQueries({ queryKey: queryKeys.admin.leadPricing });
+    void qc.invalidateQueries({ queryKey: ["subscriptions", "pricing"] });
+  };
+  const patchInbound = useMutation({
+    mutationFn: (body: LeadPricingBody) =>
+      patchAdminLeadPricing("inbound", body),
+    onSuccess: onLeadPricingSaved,
+  });
+  const patchOutbound = useMutation({
+    mutationFn: (body: LeadPricingBody) =>
+      patchAdminLeadPricing("outbound", body),
+    onSuccess: onLeadPricingSaved,
   });
 
   const e = engine.data;
-  const [days, setDays] = useState("");
-  const [pct, setPct] = useState("");
   const [earlyAccess, setEarlyAccess] = useState("");
+  const [pricingState, setPricingState] = useState<
+    Record<
+      string,
+      {
+        exclusivePrice: string;
+        sharedPrice: string;
+        discountDays: string;
+        discountAmount: string;
+        floorPrice: string;
+      }
+    >
+  >({});
 
   useEffect(() => {
     if (!e) return;
-    setDays(String(e.markdown_after_days));
-    setPct(String(e.markdown_percent));
     setEarlyAccess(String(e.early_access_minutes));
   }, [e?.updated_at]);
 
-  function handleSave() {
+  useEffect(() => {
+    if (!pricing.data) return;
+    setPricingState(
+      pricing.data.reduce<
+        Record<
+          string,
+          {
+            exclusivePrice: string;
+            sharedPrice: string;
+            discountDays: string;
+            discountAmount: string;
+            floorPrice: string;
+          }
+        >
+      >((acc, row) => {
+        acc[row.lead_type] = {
+          exclusivePrice: String(
+            Math.round(Number(row.new_lead_price_cents) / 100),
+          ),
+          sharedPrice:
+            row.shared_price_cents != null
+              ? String(Math.round(Number(row.shared_price_cents) / 100))
+              : "",
+          discountDays: String(row.discount_after_days),
+          discountAmount: String(
+            Math.round(Number(row.discount_amount_cents) / 100),
+          ),
+          floorPrice:
+            row.min_price_floor_cents != null
+              ? String(Math.round(Number(row.min_price_floor_cents) / 100))
+              : "",
+        };
+        return acc;
+      }, {}),
+    );
+  }, [pricing.data]);
+
+  function handleSaveEarlyAccess() {
     if (!e) return;
-    patch.mutate({
-      markdown_after_days: Number(days) || e.markdown_after_days,
-      markdown_percent: Number(pct) || e.markdown_percent,
+    patchEarlyAccess.mutate({
       early_access_minutes: Number(earlyAccess) || e.early_access_minutes,
     });
   }
 
+  function setTypeField(
+    type: string,
+    field:
+      | "exclusivePrice"
+      | "sharedPrice"
+      | "discountDays"
+      | "discountAmount"
+      | "floorPrice",
+    value: string,
+  ) {
+    const defaultTypeState = {
+      exclusivePrice: "",
+      sharedPrice: "",
+      discountDays: "",
+      discountAmount: "",
+      floorPrice: "",
+    };
+    setPricingState((prev) => ({
+      ...prev,
+      [type]: {
+        ...defaultTypeState,
+        ...(prev[type] ?? {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  function handleSaveType(type: string) {
+    const row = pricingState[type];
+    if (!row) return;
+    const body: LeadPricingBody = {
+      new_lead_price_cents: Math.round(
+        (parseFloat(row.exclusivePrice) || 0) * 100,
+      ),
+      shared_price_cents: row.sharedPrice.trim()
+        ? Math.round((parseFloat(row.sharedPrice) || 0) * 100)
+        : null,
+      discount_after_days: Number(row.discountDays) || 0,
+      discount_amount_cents: Math.round(
+        (parseFloat(row.discountAmount) || 0) * 100,
+      ),
+      min_price_floor_cents: row.floorPrice.trim()
+        ? Math.round((parseFloat(row.floorPrice) || 0) * 100)
+        : null,
+    };
+    if (type === "inbound") patchInbound.mutate(body);
+    else patchOutbound.mutate(body);
+  }
+
+  const pricingRows = useMemo(() => {
+    const rows = pricing.data ?? [];
+    return ["inbound", "outbound"]
+      .map((type) => rows.find((row) => row.lead_type === type))
+      .filter(Boolean) as AdminLeadPricingConfigDto[];
+  }, [pricing.data]);
+
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: "Manrope, sans-serif" }}>Pricing</h2>
-        {e && (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 700,
+            fontFamily: "Manrope, sans-serif",
+          }}
+        >
+          Pricing
+        </h2>
+        {(e || pricing.data?.length) && (
           <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>
-            Last updated {new Date(e.updated_at).toLocaleDateString()}
+            Last updated{" "}
+            {new Date(
+              (pricing.data?.[0]?.updated_at ?? e?.updated_at) || Date.now(),
+            ).toLocaleDateString()}
           </span>
         )}
       </div>
 
-      {engine.isLoading && <Empty title="Loading pricing settings…" />}
+      {(engine.isLoading || pricing.isLoading) && (
+        <Empty title="Loading pricing settings…" />
+      )}
 
       {e && (
         <>
-          {/* Lead lifecycle timeline */}
           <div style={{ ...S.card, padding: "20px 22px" }}>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 16, fontWeight: 500 }}>
-              LEAD PRICING LIFECYCLE
-            </div>
-            <div style={{ display: "flex", alignItems: "center" }}>
-              {/* Created */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#818cf8", marginBottom: 8 }} />
-                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", textAlign: "center", lineHeight: 1.4 }}>
-                  Lead<br />arrives
-                </div>
-              </div>
-              {/* Pro-only segment */}
-              <div style={{ flex: 1, minWidth: 60, display: "flex", flexDirection: "column", alignItems: "center", padding: "0 4px" }}>
-                <div style={{ height: 2, width: "100%", background: "linear-gradient(90deg,#8b5cf6,#6366f1)", marginBottom: 8, borderRadius: 1 }} />
-                <div style={{ fontSize: 10, color: "#a78bfa", fontWeight: 600, textAlign: "center", whiteSpace: "nowrap" }}>
-                  {e.early_access_minutes}m — Pro only
-                </div>
-              </div>
-              {/* Open to all */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#34d399", marginBottom: 8 }} />
-                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", textAlign: "center", lineHeight: 1.4 }}>
-                  Open to<br />all buyers
-                </div>
-              </div>
-              {/* Full-price segment */}
-              <div style={{ flex: 2, minWidth: 80, display: "flex", flexDirection: "column", alignItems: "center", padding: "0 4px" }}>
-                <div style={{ height: 2, width: "100%", background: "rgba(255,255,255,0.12)", marginBottom: 8, borderRadius: 1 }} />
-                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", textAlign: "center", whiteSpace: "nowrap" }}>
-                  {e.markdown_after_days} days at list price
-                </div>
-              </div>
-              {/* Markdown point */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b", marginBottom: 8 }} />
-                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.5)", textAlign: "center", lineHeight: 1.4 }}>
-                  Markdown<br />applied
-                </div>
-              </div>
-              {/* Reduced-price segment */}
-              <div style={{ flex: 1, minWidth: 50, display: "flex", flexDirection: "column", alignItems: "center", padding: "0 4px" }}>
-                <div style={{ height: 2, width: "100%", background: "linear-gradient(90deg,#f59e0b,#ef4444)", marginBottom: 8, borderRadius: 1 }} />
-                <div style={{ fontSize: 10, color: "#fcd34d", fontWeight: 600, textAlign: "center", whiteSpace: "nowrap" }}>
-                  −{e.markdown_percent}% price
-                </div>
-              </div>
-              {/* End */}
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#475569", marginBottom: 8 }} />
-                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", textAlign: "center", lineHeight: 1.4 }}>
-                  Eventually<br />archived
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Settings card */}
-          <div style={S.card}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
-              {/* Early access */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 18,
+                alignItems: "flex-start",
+                flexWrap: "wrap",
+              }}
+            >
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 18, letterSpacing: "0.04em" }}>
-                  EARLY ACCESS
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.35)",
+                    marginBottom: 8,
+                    fontWeight: 500,
+                  }}
+                >
+                  PRO EARLY ACCESS
                 </div>
-                <SettingField
-                  label="Pro early-access window"
-                  description="New leads are hidden from Free-plan buyers for this long after arrival — only Pro subscribers can purchase during this window."
-                  value={earlyAccess}
-                  onChange={setEarlyAccess}
-                  suffix="minutes"
-                />
-              </div>
-              {/* Price decay */}
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.4)", marginBottom: 18, letterSpacing: "0.04em" }}>
-                  PRICE DECAY
+                <div
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 700,
+                    fontFamily: "Manrope, sans-serif",
+                    marginBottom: 6,
+                  }}
+                >
+                  Control who sees fresh leads first
                 </div>
-                <SettingField
-                  label="Markdown starts after"
-                  description="Leads sitting unsold on the marketplace longer than this will have their price automatically reduced."
-                  value={days}
-                  onChange={setDays}
-                  suffix="days"
-                />
-                <SettingField
-                  label="Markdown amount"
-                  description="The list price is cut by this percentage once the markdown window opens. Applies to both exclusive and non-exclusive prices."
-                  value={pct}
-                  onChange={setPct}
-                  suffix="% off"
-                />
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "rgba(255,255,255,0.5)",
+                    maxWidth: 620,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  Keep this global setting so newly arrived leads stay Pro-only
+                  for a limited window before the marketplace opens to all
+                  eligible buyers.
+                </div>
               </div>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 24, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-              <button
-                type="button"
-                disabled={patch.isPending}
-                style={{ ...S.btnPrimary, padding: "8px 22px" }}
-                onClick={handleSave}
+              <div
+                style={{
+                  minWidth: 220,
+                  padding: "14px 16px",
+                  borderRadius: 14,
+                  background:
+                    "linear-gradient(180deg, rgba(99,102,241,0.14), rgba(99,102,241,0.08))",
+                  border: "1px solid rgba(99,102,241,0.22)",
+                }}
               >
-                {patch.isPending ? "Saving…" : "Save settings"}
-              </button>
-              {patch.isSuccess && <span style={{ fontSize: 12, color: "#34d399" }}>Saved</span>}
-              {patch.isError && (
-                <span style={{ fontSize: 12, color: "#f87171" }}>{(patch.error as Error).message}</span>
-              )}
+                <div
+                  style={{
+                    fontSize: 10,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    color: "rgba(199,210,254,0.72)",
+                    marginBottom: 8,
+                  }}
+                >
+                  Active window
+                </div>
+                <div
+                  style={{
+                    fontSize: 28,
+                    fontWeight: 700,
+                    fontFamily: "Manrope, sans-serif",
+                    color: "#c7d2fe",
+                  }}
+                >
+                  {e.early_access_minutes} min
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: 22 }}>
+              <SettingField
+                label="Pro early-access window"
+                description="New leads are hidden from Free-plan buyers for this long after arrival. Only Pro subscribers can purchase during this window."
+                value={earlyAccess}
+                onChange={setEarlyAccess}
+                suffix="minutes"
+              />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  marginTop: 8,
+                }}
+              >
+                <button
+                  type="button"
+                  disabled={patchEarlyAccess.isPending}
+                  style={{ ...S.btnPrimary, padding: "8px 22px" }}
+                  onClick={handleSaveEarlyAccess}
+                >
+                  {patchEarlyAccess.isPending ? "Saving…" : "Save early access"}
+                </button>
+                {patchEarlyAccess.isSuccess && (
+                  <span style={{ fontSize: 12, color: "#34d399" }}>Saved</span>
+                )}
+                {patchEarlyAccess.isError && (
+                  <span style={{ fontSize: 12, color: "#f87171" }}>
+                    {(patchEarlyAccess.error as Error).message}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
+
+          <div
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}
+          >
+            {pricingRows.map((row) => {
+              const typeState = pricingState[row.lead_type] ?? {
+                exclusivePrice: "",
+                sharedPrice: "",
+                discountDays: "",
+                discountAmount: "",
+                floorPrice: "",
+              };
+              const accent =
+                row.lead_type === "inbound" ? "#38bdf8" : "#f59e0b";
+              const label =
+                row.lead_type === "inbound"
+                  ? "Inbound leads"
+                  : "Outbound leads";
+
+              return (
+                <div key={row.id} style={S.card}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 12,
+                      marginBottom: 18,
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: accent,
+                          marginBottom: 6,
+                        }}
+                      >
+                        {label}
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: "Manrope, sans-serif",
+                          fontSize: 20,
+                          fontWeight: 700,
+                          marginBottom: 6,
+                        }}
+                      >
+                        New lead pricing controls
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "rgba(255,255,255,0.45)",
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        Set incoming lead prices, markdown timing, discount
+                        amount, and the minimum floor for {row.lead_type}{" "}
+                        inventory.
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.06)",
+                        minWidth: 136,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 10,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: "rgba(255,255,255,0.34)",
+                          marginBottom: 6,
+                        }}
+                      >
+                        Exclusive
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 700,
+                          fontFamily: "Manrope, sans-serif",
+                          color: accent,
+                        }}
+                      >
+                        ${typeState.exclusivePrice || "0"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 18,
+                    }}
+                  >
+                    <SettingField
+                      label="Exclusive price"
+                      description="Applied to the new lead as the exclusive purchase price the moment it enters the system."
+                      value={typeState.exclusivePrice}
+                      onChange={(value) =>
+                        setTypeField(row.lead_type, "exclusivePrice", value)
+                      }
+                      suffix="USD"
+                    />
+                    <SettingField
+                      label="Non Exclusive price"
+                      description="Used for non-exclusive buyers for this lead type. Leave blank only if you want no separate shared price."
+                      value={typeState.sharedPrice}
+                      onChange={(value) =>
+                        setTypeField(row.lead_type, "sharedPrice", value)
+                      }
+                      suffix="USD"
+                    />
+                    <SettingField
+                      label="Discount starts after"
+                      description="How many days to wait before the system applies the markdown to unsold leads of this type."
+                      value={typeState.discountDays}
+                      onChange={(value) =>
+                        setTypeField(row.lead_type, "discountDays", value)
+                      }
+                      suffix="days"
+                    />
+                    <SettingField
+                      label="Discount amount"
+                      description="Flat amount removed from the lead price once the discount window is reached."
+                      value={typeState.discountAmount}
+                      onChange={(value) =>
+                        setTypeField(row.lead_type, "discountAmount", value)
+                      }
+                      suffix="USD off"
+                    />
+                    <SettingField
+                      label="Base amount / floor"
+                      description="Minimum amount the lead should not drop below after discounts are applied."
+                      value={typeState.floorPrice}
+                      onChange={(value) =>
+                        setTypeField(row.lead_type, "floorPrice", value)
+                      }
+                      suffix="USD floor"
+                    />
+                    <div
+                      style={{
+                        borderRadius: 14,
+                        border: "1px solid rgba(255,255,255,0.07)",
+                        background:
+                          "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
+                        padding: 16,
+                        alignSelf: "start",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 10,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: "rgba(255,255,255,0.34)",
+                          marginBottom: 10,
+                        }}
+                      >
+                        Preview
+                      </div>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            fontSize: 12,
+                          }}
+                        >
+                          <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                            Starts at
+                          </span>
+                          <strong>${typeState.exclusivePrice || "0"}</strong>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            fontSize: 12,
+                          }}
+                        >
+                          <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                            Discount after
+                          </span>
+                          <strong>{typeState.discountDays || "0"} days</strong>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            fontSize: 12,
+                          }}
+                        >
+                          <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                            Markdown
+                          </span>
+                          <strong>${typeState.discountAmount || "0"}</strong>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 10,
+                            fontSize: 12,
+                          }}
+                        >
+                          <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                            Floor
+                          </span>
+                          <strong>${typeState.floorPrice || "0"}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const mut =
+                      row.lead_type === "inbound"
+                        ? patchInbound
+                        : patchOutbound;
+                    return (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          marginTop: 20,
+                          paddingTop: 18,
+                          borderTop: "1px solid rgba(255,255,255,0.07)",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          disabled={mut.isPending}
+                          style={{ ...S.btnPrimary, padding: "8px 22px" }}
+                          onClick={() => handleSaveType(row.lead_type)}
+                        >
+                          {mut.isPending ? "Saving…" : `Save ${row.lead_type}`}
+                        </button>
+                        {mut.isSuccess && (
+                          <span style={{ fontSize: 12, color: "#34d399" }}>
+                            Saved
+                          </span>
+                        )}
+                        {mut.isError && (
+                          <span style={{ fontSize: 12, color: "#f87171" }}>
+                            {(mut.error as Error).message}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+
+          {!pricing.isLoading && pricingRows.length === 0 && (
+            <div style={S.card}>
+              <Empty
+                title="No pricing configs found"
+                body="Inbound and outbound pricing rows have not been seeded yet."
+              />
+            </div>
+          )}
+          {pricing.isError && (
+            <div style={S.card}>
+              <Banner tone="bad">{(pricing.error as Error).message}</Banner>
+            </div>
+          )}
+          {patchEarlyAccess.isError && !pricing.isError && (
+            <div style={{ marginTop: 12 }}>
+              <Banner tone="bad">
+                {(patchEarlyAccess.error as Error).message}
+              </Banner>
+            </div>
+          )}
+          {(patchInbound.isError || patchOutbound.isError) &&
+            !pricing.isError && (
+              <div style={{ marginTop: 12 }}>
+                <Banner tone="bad">
+                  {
+                    ((patchInbound.error ?? patchOutbound.error) as Error)
+                      .message
+                  }
+                </Banner>
+              </div>
+            )}
         </>
+      )}
+
+      {!engine.isLoading && engine.isError && (
+        <div style={S.card}>
+          <Banner tone="bad">{(engine.error as Error).message}</Banner>
+        </div>
       )}
     </>
   );
@@ -3482,16 +6158,35 @@ function WalletTab() {
     },
   });
 
-  const metrics = useQuery({ queryKey: queryKeys.admin.metrics, queryFn: getAdminExtendedMetrics });
-  const breakdown = useQuery({ queryKey: queryKeys.admin.metricsBreakdown, queryFn: getAdminMetricsBreakdown });
+  const metrics = useQuery({
+    queryKey: queryKeys.admin.metrics,
+    queryFn: getAdminExtendedMetrics,
+  });
+  const breakdown = useQuery({
+    queryKey: queryKeys.admin.metricsBreakdown,
+    queryFn: getAdminMetricsBreakdown,
+  });
 
   return (
     <>
-      <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: "Manrope, sans-serif" }}>
+      <h2
+        style={{
+          margin: 0,
+          fontSize: 20,
+          fontWeight: 700,
+          fontFamily: "Manrope, sans-serif",
+        }}
+      >
         Customer wallets
       </h2>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+        }}
+      >
         <Stat
           label="Lifetime deposits"
           value={fmtCents(metrics.data?.totalWalletDepositsCents)}
@@ -3504,16 +6199,29 @@ function WalletTab() {
         />
         <Stat
           label="Pending refund credits"
-          value={breakdown.data ? fmtCents(breakdown.data.pendingRefundCreditsCents) : "—"}
+          value={
+            breakdown.data
+              ? fmtCents(breakdown.data.pendingRefundCreditsCents)
+              : "—"
+          }
           accent="linear-gradient(90deg,#f59e0b,#ef4444)"
         />
       </div>
 
       <div style={S.card}>
-        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Add credit to a customer</div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>
+          Add credit to a customer
+        </div>
 
         {/* Lookup row */}
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: resolvedUserId || lookupError ? 14 : 0 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-end",
+            marginBottom: resolvedUserId || lookupError ? 14 : 0,
+          }}
+        >
           <label style={{ ...S.label, flex: 1 }}>
             Customer email
             <input
@@ -3527,12 +6235,18 @@ function WalletTab() {
                 setResolvedName(null);
                 setLookupError(null);
               }}
-              onKeyDown={(e) => e.key === "Enter" && email.trim() && lookup.mutate()}
+              onKeyDown={(e) =>
+                e.key === "Enter" && email.trim() && lookup.mutate()
+              }
             />
           </label>
           <button
             type="button"
-            style={{ ...S.btnGhost, alignSelf: "flex-end", whiteSpace: "nowrap" }}
+            style={{
+              ...S.btnGhost,
+              alignSelf: "flex-end",
+              whiteSpace: "nowrap",
+            }}
             disabled={lookup.isPending || !email.trim()}
             onClick={() => lookup.mutate()}
           >
@@ -3548,13 +6262,45 @@ function WalletTab() {
 
         {/* Found customer chip */}
         {resolvedName && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.2)", borderRadius: 8, marginBottom: 16 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#34d399", flexShrink: 0 }} />
-            <span style={{ fontSize: 13, fontWeight: 500, color: "#34d399" }}>{resolvedName}</span>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 12px",
+              background: "rgba(52,211,153,0.08)",
+              border: "1px solid rgba(52,211,153,0.2)",
+              borderRadius: 8,
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: "#34d399",
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#34d399" }}>
+              {resolvedName}
+            </span>
             <button
               type="button"
-              onClick={() => { setResolvedUserId(null); setResolvedName(null); setEmail(""); }}
-              style={{ marginLeft: "auto", background: "none", border: "none", color: "rgba(255,255,255,0.35)", cursor: "pointer", fontSize: 12 }}
+              onClick={() => {
+                setResolvedUserId(null);
+                setResolvedName(null);
+                setEmail("");
+              }}
+              style={{
+                marginLeft: "auto",
+                background: "none",
+                border: "none",
+                color: "rgba(255,255,255,0.35)",
+                cursor: "pointer",
+                fontSize: 12,
+              }}
             >
               Clear
             </button>
@@ -3563,7 +6309,14 @@ function WalletTab() {
 
         {/* Credit form — shown once customer is resolved */}
         {resolvedUserId && (
-          <div style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 10, alignItems: "end" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 1fr auto",
+              gap: 10,
+              alignItems: "end",
+            }}
+          >
             <label style={S.label}>
               Amount ($)
               <input
@@ -3578,7 +6331,11 @@ function WalletTab() {
             </label>
             <label style={S.label}>
               Reason / note
-              <input style={S.inp} value={desc} onChange={(e) => setDesc(e.target.value)} />
+              <input
+                style={S.inp}
+                value={desc}
+                onChange={(e) => setDesc(e.target.value)}
+              />
             </label>
             <button
               type="button"
@@ -3598,7 +6355,9 @@ function WalletTab() {
         )}
         {credit.isSuccess && (
           <div style={{ marginTop: 12 }}>
-            <Banner tone="good">${amountDollars} added to {resolvedName}&apos;s wallet.</Banner>
+            <Banner tone="good">
+              ${amountDollars} added to {resolvedName}&apos;s wallet.
+            </Banner>
           </div>
         )}
       </div>
@@ -3609,12 +6368,18 @@ function WalletTab() {
 // ---------- Subscriptions ----------
 
 function SubscriptionsTab() {
-  const metrics = useQuery({ queryKey: queryKeys.admin.metrics, queryFn: getAdminExtendedMetrics });
+  const metrics = useQuery({
+    queryKey: queryKeys.admin.metrics,
+    queryFn: getAdminExtendedMetrics,
+  });
   const breakdown = useQuery({
     queryKey: queryKeys.admin.metricsBreakdown,
     queryFn: getAdminMetricsBreakdown,
   });
-  const plans = useQuery({ queryKey: queryKeys.admin.plans, queryFn: getAdminSubscriptionPlans });
+  const plans = useQuery({
+    queryKey: queryKeys.admin.plans,
+    queryFn: getAdminSubscriptionPlans,
+  });
 
   const churnPct = breakdown.data
     ? `${(breakdown.data.subscriptionChurn30d.churnRate * 100).toFixed(1)}%`
@@ -3624,10 +6389,30 @@ function SubscriptionsTab() {
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
         <div>
-          <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 18, fontWeight: 700 }}>Subscriptions</div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 3 }}>
+          <div
+            style={{
+              fontFamily: "Manrope, sans-serif",
+              fontSize: 18,
+              fontWeight: 700,
+            }}
+          >
+            Subscriptions
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.38)",
+              marginTop: 3,
+            }}
+          >
             Active subscriber health and plan configuration
           </div>
         </div>
@@ -3641,7 +6426,13 @@ function SubscriptionsTab() {
         </a>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+        }}
+      >
         <Stat
           label="Active subscribers"
           value={String(metrics.data?.activeSubscriptions ?? "—")}
@@ -3649,14 +6440,17 @@ function SubscriptionsTab() {
         />
         <Stat
           label="MRR estimate"
-          value={breakdown.data ? fmtCents(breakdown.data.mrrEstimateCents) : "—"}
+          value={
+            breakdown.data ? fmtCents(breakdown.data.mrrEstimateCents) : "—"
+          }
           accent="linear-gradient(90deg,#10b981,#34d399)"
         />
         <Stat
           label="30-day churn"
           value={churnPct}
           accent={
-            breakdown.data && breakdown.data.subscriptionChurn30d.churnRate > 0.1
+            breakdown.data &&
+            breakdown.data.subscriptionChurn30d.churnRate > 0.1
               ? "linear-gradient(90deg,#ef4444,#f97316)"
               : "linear-gradient(90deg,#f59e0b,#fbbf24)"
           }
@@ -3664,12 +6458,22 @@ function SubscriptionsTab() {
       </div>
 
       <div style={S.card}>
-        <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 14, fontWeight: 700, marginBottom: 16 }}>
+        <div
+          style={{
+            fontFamily: "Manrope, sans-serif",
+            fontSize: 14,
+            fontWeight: 700,
+            marginBottom: 16,
+          }}
+        >
           Plan editor
         </div>
         {plans.isLoading && <Empty title="Loading…" />}
         {plans.data && !subPlan && (
-          <Empty title="Plan not found" body="Run migrations to seed the plan record." />
+          <Empty
+            title="Plan not found"
+            body="Run migrations to seed the plan record."
+          />
         )}
         {subPlan && <PlanEditorCard plan={subPlan} />}
       </div>
@@ -3677,169 +6481,104 @@ function SubscriptionsTab() {
   );
 }
 
-const PRO_PLAN_CARD_DEFAULT_BULLETS = [
-  "Inbound leads — $30 each, up to 5 buyers per lead",
-  "Outbound leads — $20 each, up to 3 buyers per lead",
-  "Early access to new leads before free buyers",
-  "Priority routing and notifications",
-] as const;
-
-function normalizeProPlanEditorBullets(plan: AdminSubscriptionPlan): AdminPlanFeatureBullet[] {
-  const out: AdminPlanFeatureBullet[] = [];
-  const raw = plan.feature_bullets;
-  if (Array.isArray(raw)) {
-    for (const x of raw) {
-      if (typeof x === "string") {
-        out.push({ text: x, visible: true });
-      } else if (x && typeof x === "object" && "text" in x) {
-        out.push({
-          text: String((x as AdminPlanFeatureBullet).text),
-          visible: (x as AdminPlanFeatureBullet).visible !== false,
-        });
-      }
-    }
-  }
-  while (out.length < 4) {
-    const idx = out.length;
-    out.push({
-      text: PRO_PLAN_CARD_DEFAULT_BULLETS[idx] ?? "",
-      visible: true,
-    });
-  }
-  return out.slice(0, 4);
-}
-
 function PlanEditorCard({ plan }: { plan: AdminSubscriptionPlan }) {
   const qc = useQueryClient();
   const [priceStr, setPriceStr] = useState(
     String(Math.round(Number(plan.monthly_price_cents) / 100)),
   );
-  const [active, setActive] = useState(plan.is_active);
-  const [tagline, setTagline] = useState(plan.tagline ?? "");
-  const [bullets, setBullets] = useState<AdminPlanFeatureBullet[]>(() =>
-    normalizeProPlanEditorBullets(plan),
-  );
 
   useEffect(() => {
     setPriceStr(String(Math.round(Number(plan.monthly_price_cents) / 100)));
-    setActive(plan.is_active);
-    setTagline(plan.tagline ?? "");
-    setBullets(normalizeProPlanEditorBullets(plan));
   }, [plan.updated_at, plan.plan_type]);
 
   const patch = useMutation({
     mutationFn: () =>
       patchAdminSubscriptionPlan(plan.plan_type, {
         monthly_price_cents: Math.round((parseFloat(priceStr) || 0) * 100),
-        is_active: active,
-        tagline,
-        feature_bullets: bullets.map((b) => ({ text: b.text.trim(), visible: b.visible })),
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.admin.plans });
       void qc.invalidateQueries({ queryKey: queryKeys.subscriptions.plans });
       void qc.invalidateQueries({ queryKey: queryKeys.subscriptions.me });
       void qc.invalidateQueries({ queryKey: queryKeys.admin.metricsBreakdown });
+      void qc.invalidateQueries({ queryKey: ["subscriptions", "pricing"] });
     },
   });
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
-          plan_type: <span style={{ color: "rgba(255,255,255,0.75)" }}>{plan.plan_type}</span>
-        </div>
-        <button
-          type="button"
-          onClick={() => setActive((v) => !v)}
+      <div
+        style={{
+          fontSize: 13,
+          color: "rgba(255,255,255,0.5)",
+          marginBottom: 16,
+        }}
+      >
+        plan_type:{" "}
+        <span style={{ color: "rgba(255,255,255,0.75)" }}>
+          {plan.plan_type}
+        </span>
+        <span
           style={{
-            ...S.btn,
-            background: active ? "rgba(16,185,129,0.18)" : "rgba(255,255,255,0.06)",
-            color: active ? "#6ee7b7" : "rgba(255,255,255,0.4)",
-            border: `1px solid ${active ? "rgba(16,185,129,0.28)" : "rgba(255,255,255,0.09)"}`,
-            fontSize: 12,
+            marginLeft: 12,
+            fontSize: 11,
+            color: "rgba(255,255,255,0.25)",
           }}
         >
-          {active ? "Active" : "Inactive"}
-        </button>
+          Feature bullets are managed in code — only the price is configurable
+          here.
+        </span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 12, marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
         <label style={S.label}>
           Monthly price
           <div style={{ position: "relative" as const }}>
-            <span style={{
-              position: "absolute" as const, left: 10, top: "50%", transform: "translateY(-50%)",
-              color: "rgba(255,255,255,0.38)", fontSize: 13,
-            }}>$</span>
+            <span
+              style={{
+                position: "absolute" as const,
+                left: 10,
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "rgba(255,255,255,0.38)",
+                fontSize: 13,
+              }}
+            >
+              $
+            </span>
             <input
-              style={{ ...S.inp, paddingLeft: 22 }}
+              style={{ ...S.inp, paddingLeft: 22, width: 140 }}
               value={priceStr}
               onChange={(e) => setPriceStr(e.target.value)}
-              placeholder="99"
+              placeholder="49"
             />
           </div>
         </label>
-        <label style={S.label}>
-          Tagline
-          <input
-            style={S.inp}
-            value={tagline}
-            onChange={(e) => setTagline(e.target.value)}
-            placeholder="Shown on buyer subscription page"
-          />
-        </label>
-      </div>
-
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.38)", letterSpacing: "0.06em", textTransform: "uppercase" as const, marginBottom: 10 }}>
-          Feature bullets
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" as const, gap: 8 }}>
-          {bullets.map((b, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "28px 1fr", gap: 8, alignItems: "center" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = [...bullets];
-                  next[i] = { ...next[i], visible: !next[i].visible };
-                  setBullets(next);
-                }}
-                style={{
-                  width: 28, height: 28, borderRadius: 6, border: "none", cursor: "pointer",
-                  background: b.visible ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.05)",
-                  color: b.visible ? "#a5b4fc" : "rgba(255,255,255,0.2)",
-                  fontSize: 11, fontWeight: 700,
-                }}
-              >
-                {b.visible ? "on" : "off"}
-              </button>
-              <input
-                style={{ ...S.inp, opacity: b.visible ? 1 : 0.35 }}
-                value={b.text}
-                onChange={(e) => {
-                  const next = [...bullets];
-                  next[i] = { ...next[i], text: e.target.value };
-                  setBullets(next);
-                }}
-                placeholder={`Bullet ${i + 1}`}
-              />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button
-          type="button"
-          style={S.btnPrimary}
-          disabled={patch.isPending}
-          onClick={() => patch.mutate()}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            paddingBottom: 1,
+          }}
         >
-          {patch.isPending ? "Saving…" : "Save"}
-        </button>
-        {patch.isSuccess && <span style={{ fontSize: 12, color: "#6ee7b7" }}>Saved</span>}
-        {patch.isError && <span style={{ fontSize: 12, color: "#fca5a5" }}>{(patch.error as Error).message}</span>}
+          <button
+            type="button"
+            style={S.btnPrimary}
+            disabled={patch.isPending}
+            onClick={() => patch.mutate()}
+          >
+            {patch.isPending ? "Saving…" : "Save price"}
+          </button>
+          {patch.isSuccess && (
+            <span style={{ fontSize: 12, color: "#6ee7b7" }}>Saved</span>
+          )}
+          {patch.isError && (
+            <span style={{ fontSize: 12, color: "#fca5a5" }}>
+              {(patch.error as Error).message}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3849,91 +6588,552 @@ function PlanEditorCard({ plan }: { plan: AdminSubscriptionPlan }) {
 
 const USERS_PAGE_SIZE = 10;
 
-function UserDetailModal({ user, onClose, onToggleActive }: {
+function UserDetailModal({
+  user,
+  onClose,
+  onToggleActive,
+}: {
   user: AdminUserRow;
   onClose: () => void;
   onToggleActive: (u: AdminUserRow) => void;
 }) {
+  const qc = useQueryClient();
   const toggle = useMutation({
     mutationFn: () => patchAdminUserActive(user.id, !user.is_active),
-    onSuccess: (updated) => onToggleActive({ ...user, is_active: updated.is_active }),
+    onSuccess: (updated) =>
+      onToggleActive({ ...user, is_active: updated.is_active }),
   });
+  const pauseDelivery = useMutation({
+    mutationFn: () => postAdminPauseDelivery(user.id),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: ["admin", "users"] }),
+  });
+  const resumeDelivery = useMutation({
+    mutationFn: () => postAdminResumeDelivery(user.id),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: ["admin", "users"] }),
+  });
+  const [assignLeadId, setAssignLeadId] = useState("");
+  const [assignMsg, setAssignMsg] = useState<string | null>(null);
+  const [walletCreditAmount, setWalletCreditAmount] = useState("50");
+  const [walletCreditDescription, setWalletCreditDescription] =
+    useState("Admin credit");
+  const assignLead = useMutation({
+    mutationFn: () => postAdminAssignLead(assignLeadId.trim(), user.id),
+    onSuccess: () => {
+      setAssignMsg("✓ Lead assigned");
+      setAssignLeadId("");
+    },
+    onError: (e: Error) => setAssignMsg(e.message),
+  });
+  const creditWallet = useMutation({
+    mutationFn: () =>
+      postAdminWalletCredit({
+        user_id: user.id,
+        amount_cents: Math.round(parseFloat(walletCreditAmount) * 100) || 0,
+        description: walletCreditDescription.trim() || "Admin credit",
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.metrics });
+      void qc.invalidateQueries({ queryKey: queryKeys.wallet.me });
+    },
+  });
+
+  const sectionCard: CSSProperties = {
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 14,
+    padding: 16,
+  };
+
+  const deliveryDisabled =
+    user.account_status === "distribution_paused" ||
+    user.account_status === "auto_delivery_off";
 
   return (
     <div
       style={{
-        position: "fixed", inset: 0, zIndex: 1000,
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
         background: "rgba(0,0,0,0.7)",
-        display: "flex", alignItems: "center", justifyContent: "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         padding: 20,
       }}
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div style={{
-        background: "#0f1221",
-        border: "1px solid rgba(255,255,255,0.09)",
-        borderRadius: 16,
-        padding: 28,
-        width: "100%",
-        maxWidth: 520,
-        boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
+      <div
+        style={{
+          background: "linear-gradient(180deg, #101626 0%, #0b1020 100%)",
+          border: "1px solid rgba(255,255,255,0.09)",
+          borderRadius: 20,
+          padding: 26,
+          width: "100%",
+          maxWidth: 860,
+          boxShadow: "0 32px 120px rgba(0,0,0,0.65)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 18,
+            marginBottom: 24,
+          }}
+        >
           <div>
-            <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 17, fontWeight: 700 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(165,180,252,0.75)",
+                marginBottom: 6,
+              }}
+            >
+              Customer details
+            </div>
+            <div
+              style={{
+                fontFamily: "Manrope, sans-serif",
+                fontSize: 22,
+                fontWeight: 700,
+                lineHeight: 1.12,
+              }}
+            >
               {user.full_name || user.email}
             </div>
-            {user.full_name && (
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>{user.email}</div>
-            )}
+            <div
+              style={{
+                fontSize: 13,
+                color: "rgba(255,255,255,0.42)",
+                marginTop: 6,
+              }}
+            >
+              {user.email}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                marginTop: 10,
+              }}
+            >
+              <Pill tone={user.is_active ? "good" : "bad"}>
+                {user.is_active ? "Active" : "Disabled"}
+              </Pill>
+              <Pill tone={user.role === "admin" ? "info" : "default"}>
+                {user.role}
+              </Pill>
+              {user.account_status && (
+                <Pill tone="warn">
+                  {user.account_status.replace(/_/g, " ")}
+                </Pill>
+              )}
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            style={{ ...S.btn, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", fontSize: 14, lineHeight: 1 }}
+            style={{
+              ...S.btnGhost,
+              padding: "6px 11px",
+              minWidth: 0,
+              fontSize: 16,
+              lineHeight: 1,
+              color: "rgba(255,255,255,0.55)",
+            }}
           >
             ✕
           </button>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 22 }}>
-          {[
-            { label: "Role", value: user.role },
-            { label: "Status", value: user.is_active ? "Active" : "Disabled", color: user.is_active ? "#6ee7b7" : "#fca5a5" },
-            { label: "Company", value: user.company_name || "—" },
-            { label: "Phone", value: user.phone || "—" },
-            { label: "Email verified", value: user.email_verified ? "Yes" : "No" },
-            { label: "Dist. locked", value: user.distribution_locked ? "Yes" : "No" },
-            { label: "Onboarding", value: user.onboarding_completed ? "Complete" : "Pending" },
-            { label: "Joined", value: new Date(user.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) },
-          ].map(({ label, value, color }) => (
-            <div key={label} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "10px 12px" }}>
-              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.35)", marginBottom: 5 }}>
-                {label}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.1fr) minmax(320px, 0.9fr)",
+            gap: 18,
+          }}
+        >
+          <div style={{ display: "grid", gap: 16 }}>
+            <div style={sectionCard}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.38)",
+                  marginBottom: 12,
+                }}
+              >
+                Account overview
               </div>
-              <div style={{ fontSize: 13, color: color || "rgba(255,255,255,0.8)" }}>{value}</div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                }}
+              >
+                {[
+                  { label: "Company", value: user.company_name || "—" },
+                  { label: "Phone", value: user.phone || "—" },
+                  {
+                    label: "Email verified",
+                    value: user.email_verified ? "Yes" : "No",
+                    color: user.email_verified
+                      ? "#6ee7b7"
+                      : "rgba(255,255,255,0.7)",
+                  },
+                  {
+                    label: "Distribution lock",
+                    value: user.distribution_locked ? "Locked" : "Unlocked",
+                    color: user.distribution_locked
+                      ? "#fcd34d"
+                      : "rgba(255,255,255,0.8)",
+                  },
+                  {
+                    label: "Onboarding",
+                    value: user.onboarding_completed ? "Complete" : "Pending",
+                    color: user.onboarding_completed ? "#6ee7b7" : "#fbbf24",
+                  },
+                  {
+                    label: "Joined",
+                    value: new Date(user.created_at).toLocaleDateString(
+                      "en-US",
+                      { year: "numeric", month: "short", day: "numeric" },
+                    ),
+                  },
+                ].map(({ label, value, color }) => (
+                  <div
+                    key={label}
+                    style={{
+                      background: "rgba(255,255,255,0.025)",
+                      borderRadius: 12,
+                      padding: "12px 14px",
+                      border: "1px solid rgba(255,255,255,0.06)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: "0.06em",
+                        textTransform: "uppercase",
+                        color: "rgba(255,255,255,0.35)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      {label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: color || "rgba(255,255,255,0.82)",
+                        fontWeight: 600,
+                      }}
+                    >
+                      {value}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
+
+            <div style={sectionCard}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.38)",
+                  marginBottom: 12,
+                }}
+              >
+                Assign lead manually
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <input
+                  style={{ ...S.inp, flex: 1, fontSize: 13 }}
+                  placeholder="Paste Lead ID here"
+                  value={assignLeadId}
+                  onChange={(e) => {
+                    setAssignLeadId(e.target.value);
+                    setAssignMsg(null);
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={assignLead.isPending || !assignLeadId.trim()}
+                  onClick={() => assignLead.mutate()}
+                  style={{
+                    ...S.btnPrimary,
+                    padding: "10px 16px",
+                    opacity: assignLeadId.trim() ? 1 : 0.5,
+                  }}
+                >
+                  {assignLead.isPending ? "Assigning…" : "Assign lead"}
+                </button>
+              </div>
+              {assignMsg && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    marginTop: 8,
+                    color: assignLead.isError ? "#f87171" : "#34d399",
+                  }}
+                >
+                  {assignMsg}
+                </div>
+              )}
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "rgba(255,255,255,0.28)",
+                  marginTop: 8,
+                }}
+              >
+                Admin override only. This does not charge the customer wallet.
+              </div>
+            </div>
+
+            <div style={sectionCard}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.38)",
+                  marginBottom: 12,
+                }}
+              >
+                Wallet credit
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "132px 1fr",
+                  gap: 10,
+                }}
+              >
+                <label style={S.label}>
+                  Amount ($)
+                  <input
+                    style={S.inp}
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={walletCreditAmount}
+                    onChange={(e) => setWalletCreditAmount(e.target.value)}
+                  />
+                </label>
+                <label style={S.label}>
+                  Description
+                  <input
+                    style={S.inp}
+                    value={walletCreditDescription}
+                    onChange={(e) => setWalletCreditDescription(e.target.value)}
+                    placeholder="Reason for wallet credit"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={creditWallet.isPending || !Number(walletCreditAmount)}
+                onClick={() => creditWallet.mutate()}
+                style={{
+                  ...S.btnPrimary,
+                  width: "100%",
+                  marginTop: 12,
+                  opacity: Number(walletCreditAmount) > 0 ? 1 : 0.5,
+                }}
+              >
+                {creditWallet.isPending ? "Crediting…" : "Credit wallet"}
+              </button>
+              {creditWallet.isSuccess && (
+                <div style={{ fontSize: 12, marginTop: 8, color: "#34d399" }}>
+                  Wallet credited successfully
+                </div>
+              )}
+              {creditWallet.isError && (
+                <div style={{ fontSize: 12, marginTop: 8, color: "#f87171" }}>
+                  {(creditWallet.error as Error).message}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 16 }}>
+            <div style={sectionCard}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.38)",
+                  marginBottom: 12,
+                }}
+              >
+                Auto delivery
+              </div>
+              <div
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  background: deliveryDisabled
+                    ? "rgba(239,68,68,0.08)"
+                    : "rgba(16,185,129,0.08)",
+                  border: `1px solid ${deliveryDisabled ? "rgba(239,68,68,0.18)" : "rgba(16,185,129,0.18)"}`,
+                  marginBottom: 12,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "rgba(255,255,255,0.45)",
+                    marginBottom: 5,
+                  }}
+                >
+                  Current status
+                </div>
+                <div
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 700,
+                    color: deliveryDisabled ? "#fca5a5" : "#6ee7b7",
+                  }}
+                >
+                  {user.account_status ?? "—"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {!deliveryDisabled ? (
+                  <button
+                    type="button"
+                    disabled={pauseDelivery.isPending}
+                    onClick={() => pauseDelivery.mutate()}
+                    style={{
+                      ...S.btn,
+                      background: "rgba(239,68,68,0.12)",
+                      color: "#fca5a5",
+                      border: "1px solid rgba(239,68,68,0.2)",
+                      padding: "10px 16px",
+                    }}
+                  >
+                    {pauseDelivery.isPending ? "Updating…" : "Pause delivery"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={resumeDelivery.isPending}
+                    onClick={() => resumeDelivery.mutate()}
+                    style={{
+                      ...S.btn,
+                      background: "rgba(16,185,129,0.1)",
+                      color: "#6ee7b7",
+                      border: "1px solid rgba(16,185,129,0.2)",
+                      padding: "10px 16px",
+                    }}
+                  >
+                    {resumeDelivery.isPending ? "Updating…" : "Resume delivery"}
+                  </button>
+                )}
+              </div>
+              {(pauseDelivery.isSuccess || resumeDelivery.isSuccess) && (
+                <div style={{ fontSize: 12, color: "#34d399", marginTop: 10 }}>
+                  ✓ Delivery settings updated
+                </div>
+              )}
+            </div>
+
+            <div style={sectionCard}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.38)",
+                  marginBottom: 12,
+                }}
+              >
+                Account controls
+              </div>
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "rgba(255,255,255,0.5)",
+                  lineHeight: 1.6,
+                  marginBottom: 14,
+                }}
+              >
+                Use this only if the customer should be blocked from signing in.
+                This does not delete data or remove assignments.
+              </div>
+              <button
+                type="button"
+                disabled={toggle.isPending}
+                onClick={() => toggle.mutate()}
+                style={{
+                  ...S.btn,
+                  width: "100%",
+                  padding: "11px 16px",
+                  background: user.is_active
+                    ? "rgba(239,68,68,0.16)"
+                    : "rgba(16,185,129,0.16)",
+                  color: user.is_active ? "#fca5a5" : "#6ee7b7",
+                  border: `1px solid ${user.is_active ? "rgba(239,68,68,0.28)" : "rgba(16,185,129,0.28)"}`,
+                }}
+              >
+                {toggle.isPending
+                  ? "Saving…"
+                  : user.is_active
+                    ? "Disable login"
+                    : "Enable login"}
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button type="button" onClick={onClose} style={S.btnGhost}>Close</button>
-          <button
-            type="button"
-            disabled={toggle.isPending}
-            onClick={() => toggle.mutate()}
-            style={{
-              ...S.btn,
-              background: user.is_active ? "rgba(239,68,68,0.18)" : "rgba(16,185,129,0.18)",
-              color: user.is_active ? "#fca5a5" : "#6ee7b7",
-              border: `1px solid ${user.is_active ? "rgba(239,68,68,0.28)" : "rgba(16,185,129,0.28)"}`,
-            }}
-          >
-            {toggle.isPending ? "Saving…" : user.is_active ? "Disable login" : "Enable login"}
+        {/* ── Footer ── */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 12,
+            marginTop: 18,
+            paddingTop: 18,
+            borderTop: "1px solid rgba(255,255,255,0.07)",
+          }}
+        >
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+            Review account status, delivery availability, and manual assignment
+            tools in one place.
+          </div>
+          <button type="button" onClick={onClose} style={S.btnGhost}>
+            Close
           </button>
         </div>
         {toggle.isError && (
-          <div style={{ marginTop: 10, fontSize: 12, color: "#fca5a5", textAlign: "right" as const }}>
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: 12,
+              color: "#fca5a5",
+              textAlign: "right" as const,
+            }}
+          >
             {(toggle.error as Error).message}
           </div>
         )}
@@ -3951,12 +7151,13 @@ function UsersSection() {
 
   const users = useQuery({
     queryKey: ["admin", "users", offset, dateFrom, dateTo],
-    queryFn: () => getAdminUsers({
-      limit: USERS_PAGE_SIZE,
-      offset,
-      dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
-    }),
+    queryFn: () =>
+      getAdminUsers({
+        limit: USERS_PAGE_SIZE,
+        offset,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+      }),
   });
 
   const total = users.data?.total ?? 0;
@@ -3966,11 +7167,32 @@ function UsersSection() {
 
   return (
     <div style={S.card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 14, fontWeight: 700 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <div
+          style={{
+            fontFamily: "Manrope, sans-serif",
+            fontSize: 14,
+            fontWeight: 700,
+          }}
+        >
           Registered users
           {users.data && (
-            <span style={{ fontFamily: "Inter, sans-serif", fontSize: 12, fontWeight: 400, color: "rgba(255,255,255,0.38)", marginLeft: 8 }}>
+            <span
+              style={{
+                fontFamily: "Inter, sans-serif",
+                fontSize: 12,
+                fontWeight: 400,
+                color: "rgba(255,255,255,0.38)",
+                marginLeft: 8,
+              }}
+            >
               {total} total
             </span>
           )}
@@ -3979,20 +7201,32 @@ function UsersSection() {
           <input
             type="date"
             value={dateFrom}
-            onChange={(e) => { setDateFrom(e.target.value); setOffset(0); }}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              setOffset(0);
+            }}
             style={{ ...S.inp, width: 140, fontSize: 12 }}
           />
-          <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>to</span>
+          <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>
+            to
+          </span>
           <input
             type="date"
             value={dateTo}
-            onChange={(e) => { setDateTo(e.target.value); setOffset(0); }}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              setOffset(0);
+            }}
             style={{ ...S.inp, width: 140, fontSize: 12 }}
           />
           {(dateFrom || dateTo) && (
             <button
               type="button"
-              onClick={() => { setDateFrom(""); setDateTo(""); setOffset(0); }}
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+                setOffset(0);
+              }}
               style={{ ...S.btnGhost, fontSize: 12 }}
             >
               Clear
@@ -4006,7 +7240,9 @@ function UsersSection() {
       {list.length > 0 && (
         <>
           <div style={{ overflowX: "auto" as const }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" as const }}>
+            <table
+              style={{ width: "100%", borderCollapse: "collapse" as const }}
+            >
               <thead>
                 <tr style={{ textAlign: "left" as const }}>
                   <th style={S.th}>Name / Email</th>
@@ -4025,23 +7261,52 @@ function UsersSection() {
                       cursor: "pointer",
                       transition: "background 0.12s",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.04)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background =
+                        "rgba(255,255,255,0.04)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
                   >
                     <td style={S.td}>
-                      <div style={{ fontWeight: 500, fontSize: 13 }}>{u.full_name || u.email}</div>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>
+                        {u.full_name || u.email}
+                      </div>
                       {u.full_name && (
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", marginTop: 2 }}>{u.email}</div>
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: "rgba(255,255,255,0.38)",
+                            marginTop: 2,
+                          }}
+                        >
+                          {u.email}
+                        </div>
                       )}
                     </td>
                     <td style={S.td}>
-                      <Pill tone={u.role === "admin" ? "info" : "default"}>{u.role}</Pill>
+                      <Pill tone={u.role === "admin" ? "info" : "default"}>
+                        {u.role}
+                      </Pill>
                     </td>
                     <td style={S.td}>
-                      <Pill tone={u.is_active ? "good" : "bad"}>{u.is_active ? "active" : "disabled"}</Pill>
+                      <Pill tone={u.is_active ? "good" : "bad"}>
+                        {u.is_active ? "active" : "disabled"}
+                      </Pill>
                     </td>
-                    <td style={{ ...S.td, fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
-                      {new Date(u.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
+                    <td
+                      style={{
+                        ...S.td,
+                        fontSize: 12,
+                        color: "rgba(255,255,255,0.5)",
+                      }}
+                    >
+                      {new Date(u.created_at).toLocaleDateString("en-US", {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })}
                     </td>
                   </tr>
                 ))}
@@ -4049,16 +7314,26 @@ function UsersSection() {
             </table>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: 14,
+            }}
+          >
             <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
-              {offset + 1}–{Math.min(offset + USERS_PAGE_SIZE, total)} of {total}
+              {offset + 1}–{Math.min(offset + USERS_PAGE_SIZE, total)} of{" "}
+              {total}
             </span>
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"
                 style={S.btnGhost}
                 disabled={!hasPrev}
-                onClick={() => setOffset((o) => Math.max(0, o - USERS_PAGE_SIZE))}
+                onClick={() =>
+                  setOffset((o) => Math.max(0, o - USERS_PAGE_SIZE))
+                }
               >
                 Prev
               </button>
@@ -4089,13 +7364,453 @@ function UsersSection() {
   );
 }
 
+// ---------- Refund Abuse Section ----------
+
+function RefundAbuseSection({
+  refunds,
+  refundsLoading,
+}: {
+  refunds: AdminRefundRequestRow[];
+  refundsLoading: boolean;
+}) {
+  const qc = useQueryClient();
+  const [filter, setFilter] = useState<
+    "all" | "pending" | "abuse_review" | "need_more_proof"
+  >("pending");
+  const [expandedBuyer, setExpandedBuyer] = useState<string | null>(null);
+
+  // Group refunds by buyer to compute per-customer stats
+  const buyerGroups = useMemo(() => {
+    const map = new Map<
+      string,
+      { email: string; requests: AdminRefundRequestRow[] }
+    >();
+    for (const r of refunds) {
+      if (!map.has(r.buyer.id))
+        map.set(r.buyer.id, { email: r.buyer.email, requests: [] });
+      map.get(r.buyer.id)!.requests.push(r);
+    }
+    return [...map.entries()]
+      .map(([id, { email, requests }]) => {
+        const total = requests.length;
+        const approved = requests.filter(
+          (r) => r.status === "approved" || r.status === "credited",
+        ).length;
+        const denied = requests.filter((r) => r.status === "rejected").length;
+        const pending = requests.filter((r) => r.status === "pending").length;
+        const abuseReview = requests.filter(
+          (r) => r.status === "abuse_review",
+        ).length;
+        // Rate: total requests / total purchases (we don't have total purchases here, use requests as proxy)
+        const flagged = total >= 3 && approved / Math.max(total, 1) >= 0.25;
+        return {
+          id,
+          email,
+          total,
+          approved,
+          denied,
+          pending,
+          abuseReview,
+          flagged,
+          requests,
+        };
+      })
+      .sort((a, b) => b.total - a.total);
+  }, [refunds]);
+
+  const flaggedBuyers = buyerGroups.filter(
+    (b) => b.flagged || b.abuseReview > 0,
+  );
+
+  const filteredRequests = refunds.filter((r) => {
+    if (filter === "all") return true;
+    if (filter === "pending") return r.status === "pending";
+    if (filter === "abuse_review") return r.status === "abuse_review";
+    if (filter === "need_more_proof") return r.status === "need_more_proof";
+    return true;
+  });
+
+  const FILTER_TABS: Array<{ key: typeof filter; label: string }> = [
+    {
+      key: "pending",
+      label: `Pending (${refunds.filter((r) => r.status === "pending").length})`,
+    },
+    {
+      key: "abuse_review",
+      label: `Abuse Review (${refunds.filter((r) => r.status === "abuse_review").length})`,
+    },
+    {
+      key: "need_more_proof",
+      label: `Need Proof (${refunds.filter((r) => r.status === "need_more_proof").length})`,
+    },
+    { key: "all", label: `All (${refunds.length})` },
+  ];
+
+  return (
+    <>
+      {/* Flagged customers alert */}
+      {flaggedBuyers.length > 0 && (
+        <div
+          style={{
+            ...S.card,
+            borderLeft: "3px solid #ef4444",
+            padding: 0,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "12px 18px",
+              background: "rgba(239,68,68,0.06)",
+              borderBottom: "1px solid rgba(239,68,68,0.15)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <span
+              style={{
+                background: "#ef4444",
+                color: "#fff",
+                borderRadius: 20,
+                padding: "2px 10px",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {flaggedBuyers.length}
+            </span>
+            <span
+              style={{
+                fontFamily: "Manrope, sans-serif",
+                fontWeight: 600,
+                fontSize: 14,
+              }}
+            >
+              Customers flagged for refund abuse
+            </span>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+              ≥25% refund rate or under abuse review
+            </span>
+          </div>
+          {flaggedBuyers.map((b) => (
+            <div
+              key={b.id}
+              style={{
+                padding: "10px 18px",
+                borderBottom: "1px solid rgba(255,255,255,0.04)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 8,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{b.email}</span>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                  {b.total} request{b.total !== 1 ? "s" : ""} · {b.approved}{" "}
+                  approved · {b.denied} denied · {b.pending} pending
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                {b.abuseReview > 0 && (
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 20,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      background: "rgba(239,68,68,0.15)",
+                      color: "#fca5a5",
+                    }}
+                  >
+                    ⚠ Abuse Review
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedBuyer(expandedBuyer === b.id ? null : b.id)
+                  }
+                  style={{ ...S.btnGhost, fontSize: 11, padding: "3px 10px" }}
+                >
+                  {expandedBuyer === b.id ? "Hide" : "View history"}
+                </button>
+              </div>
+              {expandedBuyer === b.id && (
+                <div style={{ width: "100%", marginTop: 8 }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: 12,
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ background: "rgba(0,0,0,0.15)" }}>
+                        {[
+                          "Status",
+                          "Lead",
+                          "Amount",
+                          "Reason",
+                          "Notes",
+                          "Date",
+                          "Action",
+                        ].map((h) => (
+                          <th key={h} style={{ ...S.th, fontSize: 11 }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {b.requests.map((r) => (
+                        <tr
+                          key={r.id}
+                          style={{
+                            borderTop: "1px solid rgba(255,255,255,0.04)",
+                          }}
+                        >
+                          <td style={S.td}>{refundStatusBadge(r.status)}</td>
+                          <td style={{ ...S.td, fontSize: 12 }}>
+                            {r.lead_assignment.lead.title}
+                          </td>
+                          <td style={{ ...S.td, fontWeight: 600 }}>
+                            {fmtCents(r.lead_assignment.amount_charged_cents)}
+                          </td>
+                          <td
+                            style={{
+                              ...S.td,
+                              fontSize: 12,
+                              color: "rgba(255,255,255,0.6)",
+                              maxWidth: 140,
+                            }}
+                          >
+                            {r.reason}
+                          </td>
+                          <td
+                            style={{
+                              ...S.td,
+                              fontSize: 11,
+                              color: "rgba(255,255,255,0.4)",
+                            }}
+                          >
+                            {r.admin_notes ?? "—"}
+                          </td>
+                          <td
+                            style={{
+                              ...S.td,
+                              fontSize: 11,
+                              color: "rgba(255,255,255,0.35)",
+                              whiteSpace: "nowrap" as const,
+                            }}
+                          >
+                            {new Date(r.created_at).toLocaleDateString()}
+                          </td>
+                          <td style={S.td}>
+                            <RefundRowActions row={r} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Refund requests table */}
+      <div style={S.card}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 14,
+            flexWrap: "wrap",
+            gap: 10,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: "Manrope, sans-serif",
+              fontSize: 14,
+              fontWeight: 700,
+            }}
+          >
+            Refund requests
+          </div>
+          {/* Filter tabs */}
+          <div style={{ display: "flex", gap: 5 }}>
+            {FILTER_TABS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setFilter(key)}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  background:
+                    filter === key
+                      ? "rgba(99,102,241,0.15)"
+                      : "rgba(255,255,255,0.04)",
+                  border:
+                    filter === key
+                      ? "1px solid rgba(99,102,241,0.35)"
+                      : "1px solid rgba(255,255,255,0.07)",
+                  color: filter === key ? "#a5b4fc" : "rgba(255,255,255,0.45)",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {refundsLoading && <Empty title="Loading refunds…" />}
+        {!refundsLoading && filteredRequests.length === 0 && (
+          <Empty title="No refund requests in this category" />
+        )}
+        {filteredRequests.length > 0 && (
+          <div style={{ overflowX: "auto" as const }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse" as const,
+                minWidth: 860,
+              }}
+            >
+              <colgroup>
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "14%" }} />
+                <col style={{ width: "18%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "9%" }} />
+              </colgroup>
+              <thead>
+                <tr style={{ textAlign: "left" as const }}>
+                  <th style={S.th}>Status</th>
+                  <th style={S.th}>Buyer</th>
+                  <th style={S.th}>Lead</th>
+                  <th style={S.th}>Amount</th>
+                  <th style={S.th}>Reason</th>
+                  <th style={S.th}>Admin notes</th>
+                  <th style={S.th}>Date</th>
+                  <th style={S.th}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRequests.map((r) => (
+                  <tr
+                    key={r.id}
+                    style={{
+                      borderTop: "1px solid rgba(255,255,255,0.05)",
+                      verticalAlign: "top" as const,
+                    }}
+                  >
+                    <td style={S.td}>{refundStatusBadge(r.status)}</td>
+                    <td style={{ ...S.td, fontSize: 12 }}>
+                      <div style={{ fontWeight: 600 }}>{r.buyer.email}</div>
+                      {buyerGroups.find((b) => b.id === r.buyer.id)
+                        ?.flagged && (
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: "#fca5a5",
+                            marginTop: 2,
+                          }}
+                        >
+                          ⚠ Flagged
+                        </div>
+                      )}
+                    </td>
+                    <td style={S.td}>
+                      <div style={{ fontSize: 13 }}>
+                        {r.lead_assignment.lead.title}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(255,255,255,0.38)",
+                          marginTop: 2,
+                        }}
+                      >
+                        {r.lead_assignment.purchase_type}
+                      </div>
+                    </td>
+                    <td
+                      style={{
+                        ...S.td,
+                        fontFamily: "Manrope, sans-serif",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {fmtCents(r.lead_assignment.amount_charged_cents)}
+                    </td>
+                    <td
+                      style={{
+                        ...S.td,
+                        fontSize: 12,
+                        color: "rgba(255,255,255,0.6)",
+                      }}
+                    >
+                      {r.reason}
+                    </td>
+                    <td
+                      style={{
+                        ...S.td,
+                        fontSize: 12,
+                        color: "rgba(255,255,255,0.45)",
+                        fontStyle: r.admin_notes
+                          ? "normal"
+                          : ("italic" as const),
+                      }}
+                    >
+                      {r.admin_notes ?? "—"}
+                    </td>
+                    <td
+                      style={{
+                        ...S.td,
+                        fontSize: 11,
+                        color: "rgba(255,255,255,0.4)",
+                        whiteSpace: "nowrap" as const,
+                      }}
+                    >
+                      {new Date(r.created_at).toLocaleDateString()}
+                    </td>
+                    <td style={S.td}>
+                      <RefundRowActions row={r} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function CustomersTab() {
   const refunds = useQuery({
     queryKey: queryKeys.admin.refundRequests,
     queryFn: getAdminRefundRequests,
   });
   const [lockEmail, setLockEmail] = useState("");
-  const [lockResolved, setLockResolved] = useState<{ id: string; name: string } | null>(null);
+  const [lockResolved, setLockResolved] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [lockError, setLockError] = useState<string | null>(null);
 
   const lockLookup = useMutation({
@@ -4111,20 +7826,43 @@ function CustomersTab() {
   });
 
   const distLock = useMutation({
-    mutationFn: (locked: boolean) => patchAdminUserDistributionLock(lockResolved!.id, { locked }),
+    mutationFn: (locked: boolean) =>
+      patchAdminUserDistributionLock(lockResolved!.id, { locked }),
   });
 
   return (
     <>
       {/* Distribution lock */}
       <div style={S.card}>
-        <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 14, fontWeight: 700, marginBottom: 4 }}>
+        <div
+          style={{
+            fontFamily: "Manrope, sans-serif",
+            fontSize: 14,
+            fontWeight: 700,
+            marginBottom: 4,
+          }}
+        >
           Distribution lock
         </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginBottom: 14 }}>
-          Prevent a buyer from changing their auto-distribution rules. They can still browse and buy manually.
+        <div
+          style={{
+            fontSize: 12,
+            color: "rgba(255,255,255,0.38)",
+            marginBottom: 14,
+          }}
+        >
+          Prevent a buyer from changing their auto-distribution rules. They can
+          still browse and buy manually.
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" as const, marginBottom: 10 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "flex-end",
+            flexWrap: "wrap" as const,
+            marginBottom: 10,
+          }}
+        >
           <label style={{ ...S.label, flex: 1, minWidth: 220 }}>
             Customer email
             <input
@@ -4132,8 +7870,14 @@ function CustomersTab() {
               type="email"
               placeholder="buyer@example.com"
               value={lockEmail}
-              onChange={(e) => { setLockEmail(e.target.value); setLockResolved(null); setLockError(null); }}
-              onKeyDown={(e) => e.key === "Enter" && lockEmail.trim() && lockLookup.mutate()}
+              onChange={(e) => {
+                setLockEmail(e.target.value);
+                setLockResolved(null);
+                setLockError(null);
+              }}
+              onKeyDown={(e) =>
+                e.key === "Enter" && lockEmail.trim() && lockLookup.mutate()
+              }
             />
           </label>
           <button
@@ -4146,19 +7890,43 @@ function CustomersTab() {
           </button>
         </div>
 
-        {lockError && <div style={{ marginBottom: 10 }}><Banner tone="bad">{lockError}</Banner></div>}
+        {lockError && (
+          <div style={{ marginBottom: 10 }}>
+            <Banner tone="bad">{lockError}</Banner>
+          </div>
+        )}
         {lockResolved && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" as const }}>
-            <span style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.25)",
-              borderRadius: 8, padding: "6px 12px", fontSize: 13, color: "#6ee7b7",
-            }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap" as const,
+            }}
+          >
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                background: "rgba(16,185,129,0.12)",
+                border: "1px solid rgba(16,185,129,0.25)",
+                borderRadius: 8,
+                padding: "6px 12px",
+                fontSize: 13,
+                color: "#6ee7b7",
+              }}
+            >
               {lockResolved.name}
             </span>
             <button
               type="button"
-              style={{ ...S.btn, background: "rgba(245,158,11,0.18)", color: "#fcd34d", border: "1px solid rgba(245,158,11,0.28)" }}
+              style={{
+                ...S.btn,
+                background: "rgba(245,158,11,0.18)",
+                color: "#fcd34d",
+                border: "1px solid rgba(245,158,11,0.28)",
+              }}
               disabled={distLock.isPending}
               onClick={() => distLock.mutate(true)}
             >
@@ -4166,7 +7934,12 @@ function CustomersTab() {
             </button>
             <button
               type="button"
-              style={{ ...S.btn, background: "rgba(16,185,129,0.18)", color: "#6ee7b7", border: "1px solid rgba(16,185,129,0.28)" }}
+              style={{
+                ...S.btn,
+                background: "rgba(16,185,129,0.18)",
+                color: "#6ee7b7",
+                border: "1px solid rgba(16,185,129,0.28)",
+              }}
               disabled={distLock.isPending}
               onClick={() => distLock.mutate(false)}
             >
@@ -4179,74 +7952,18 @@ function CustomersTab() {
             )}
           </div>
         )}
-        {distLock.isError && <div style={{ marginTop: 10 }}><Banner tone="bad">{(distLock.error as Error).message}</Banner></div>}
-      </div>
-
-      {/* Refund requests */}
-      <div style={S.card}>
-        <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 14, fontWeight: 700, marginBottom: 14 }}>
-          Refund requests
-        </div>
-        {refunds.isLoading && <Empty title="Loading…" />}
-        {refunds.data && refunds.data.length === 0 && <Empty title="No refund requests" />}
-        {refunds.data && refunds.data.length > 0 && (
-          <div style={{ overflowX: "auto" as const }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" as const }}>
-              <thead>
-                <tr style={{ textAlign: "left" as const }}>
-                  <th style={S.th}>Status</th>
-                  <th style={S.th}>Buyer</th>
-                  <th style={S.th}>Lead</th>
-                  <th style={S.th}>Amount</th>
-                  <th style={S.th}>Reason</th>
-                  <th style={S.th}>Date</th>
-                  <th style={S.th}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {refunds.data.map((r) => (
-                  <tr
-                    key={r.id}
-                    style={{
-                      borderTop: "1px solid rgba(255,255,255,0.05)",
-                      verticalAlign: "top" as const,
-                      opacity: r.status !== "pending" ? 0.65 : 1,
-                    }}
-                  >
-                    <td style={S.td}>
-                      <Pill tone={r.status === "pending" ? "warn" : r.status === "approved" ? "good" : "default"}>
-                        {r.status === "approved" ? "refunded" : r.status}
-                      </Pill>
-                    </td>
-                    <td style={{ ...S.td, fontSize: 12 }}>{r.buyer.email}</td>
-                    <td style={S.td}>
-                      <div style={{ fontSize: 13 }}>{r.lead_assignment.lead.title}</div>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", marginTop: 2 }}>{r.lead_assignment.purchase_type}</div>
-                    </td>
-                    <td style={{ ...S.td, fontFamily: "Manrope, sans-serif", fontWeight: 700 }}>
-                      {fmtCents(r.lead_assignment.amount_charged_cents)}
-                    </td>
-                    <td style={{ ...S.td, maxWidth: 160, fontSize: 12, color: "rgba(255,255,255,0.6)" }}>{r.reason}</td>
-                    <td style={{ ...S.td, fontSize: 12, color: "rgba(255,255,255,0.4)", whiteSpace: "nowrap" as const }}>
-                      {new Date(r.created_at).toLocaleDateString()}
-                    </td>
-                    <td style={S.td}>
-                      {r.status === "pending" ? (
-                        <RefundRowActions row={r} />
-                      ) : (
-                        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
-                          {r.status === "approved" ? "Wallet credited" : "Rejected"}
-                          {r.admin_notes && <div style={{ marginTop: 2, fontStyle: "italic" as const }}>{r.admin_notes}</div>}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {distLock.isError && (
+          <div style={{ marginTop: 10 }}>
+            <Banner tone="bad">{(distLock.error as Error).message}</Banner>
           </div>
         )}
       </div>
+
+      {/* ── Refund abuse tracking ── */}
+      <RefundAbuseSection
+        refunds={refunds.data ?? []}
+        refundsLoading={refunds.isLoading}
+      />
 
       {/* Registered users */}
       <UsersSection />
@@ -4287,7 +8004,9 @@ function IntegrationsTab() {
           type="button"
           style={S.btnGhost}
           onClick={() =>
-            void qc.invalidateQueries({ queryKey: queryKeys.admin.integrationsHealth })
+            void qc.invalidateQueries({
+              queryKey: queryKeys.admin.integrationsHealth,
+            })
           }
         >
           Refresh now
@@ -4295,7 +8014,9 @@ function IntegrationsTab() {
       </div>
 
       {health.isLoading && <Empty title="Probing integrations…" />}
-      {health.isError && <Banner tone="bad">{(health.error as Error).message}</Banner>}
+      {health.isError && (
+        <Banner tone="bad">{(health.error as Error).message}</Banner>
+      )}
       {health.data && (
         <div
           style={{
@@ -4309,18 +8030,18 @@ function IntegrationsTab() {
               it.status === "ok"
                 ? "good"
                 : it.status === "warn"
-                ? "warn"
-                : it.status === "down"
-                ? "bad"
-                : "default";
+                  ? "warn"
+                  : it.status === "down"
+                    ? "bad"
+                    : "default";
             const label =
               it.status === "ok"
                 ? "online"
                 : it.status === "warn"
-                ? "warning"
-                : it.status === "down"
-                ? "down"
-                : "unconfigured";
+                  ? "warning"
+                  : it.status === "down"
+                    ? "down"
+                    : "unconfigured";
             return (
               <div key={it.name} style={S.card}>
                 <div
@@ -4331,12 +8052,22 @@ function IntegrationsTab() {
                     marginBottom: 8,
                   }}
                 >
-                  <strong style={{ fontFamily: "Manrope, sans-serif", fontSize: 15 }}>{it.name}</strong>
+                  <strong
+                    style={{ fontFamily: "Manrope, sans-serif", fontSize: 15 }}
+                  >
+                    {it.name}
+                  </strong>
                   <Pill tone={tone}>{label}</Pill>
                 </div>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>{it.note}</div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>
+                  {it.note}
+                </div>
                 <div
-                  style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}
+                  style={{
+                    fontSize: 10,
+                    color: "rgba(255,255,255,0.35)",
+                    marginTop: 6,
+                  }}
                 >
                   Probed {new Date(it.last_checked_at).toLocaleTimeString()}
                   {it.latency_ms != null ? ` · ${it.latency_ms}ms` : ""}
@@ -4400,18 +8131,41 @@ function NotificationsTab() {
   });
 
   const list = items.data ?? [];
-  const lastUpdated = list[0] ? new Date(list[0].updated_at).toLocaleDateString() : "—";
+  const lastUpdated = list[0]
+    ? new Date(list[0].updated_at).toLocaleDateString()
+    : "—";
 
   return (
     <>
       <div style={{ marginBottom: 4 }}>
-        <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 18, fontWeight: 700 }}>Resources</div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 3 }}>
-          Buyer-facing links, guides, and announcements shown in the resources section
+        <div
+          style={{
+            fontFamily: "Manrope, sans-serif",
+            fontSize: 18,
+            fontWeight: 700,
+          }}
+        >
+          Resources
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "rgba(255,255,255,0.38)",
+            marginTop: 3,
+          }}
+        >
+          Buyer-facing links, guides, and announcements shown in the resources
+          section
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+        }}
+      >
         <Stat
           label="Published items"
           value={String(list.filter((i) => i.is_published).length)}
@@ -4426,7 +8180,14 @@ function NotificationsTab() {
       </div>
 
       <div style={S.card}>
-        <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 16, marginTop: 0, marginBottom: 14 }}>
+        <h3
+          style={{
+            fontFamily: "Manrope, sans-serif",
+            fontSize: 16,
+            marginTop: 0,
+            marginBottom: 14,
+          }}
+        >
           Add resource / announcement
         </h3>
         <div
@@ -4439,7 +8200,11 @@ function NotificationsTab() {
         >
           <label style={S.label}>
             Type
-            <select style={S.inp} value={kind} onChange={(e) => setKind(e.target.value)}>
+            <select
+              style={S.inp}
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+            >
               <option value="link">Link</option>
               <option value="video">Video</option>
               <option value="faq">FAQ</option>
@@ -4448,7 +8213,11 @@ function NotificationsTab() {
           </label>
           <label style={S.label}>
             Title
-            <input style={S.inp} value={title} onChange={(e) => setTitle(e.target.value)} />
+            <input
+              style={S.inp}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
           </label>
           <label style={S.label}>
             URL
@@ -4461,11 +8230,19 @@ function NotificationsTab() {
           </label>
           <label style={S.label}>
             Sort
-            <input style={S.inp} value={sort} onChange={(e) => setSort(e.target.value)} />
+            <input
+              style={S.inp}
+              value={sort}
+              onChange={(e) => setSort(e.target.value)}
+            />
           </label>
           <label style={S.label}>
             Body
-            <input style={S.inp} value={body} onChange={(e) => setBody(e.target.value)} />
+            <input
+              style={S.inp}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+            />
           </label>
           <button
             type="button"
@@ -4485,10 +8262,18 @@ function NotificationsTab() {
 
       <div style={{ ...S.card, padding: 0, overflow: "hidden" }}>
         {items.isLoading && (
-          <div style={{ padding: 20, color: "rgba(255,255,255,0.5)" }}>Loading…</div>
+          <div style={{ padding: 20, color: "rgba(255,255,255,0.5)" }}>
+            Loading…
+          </div>
         )}
         {items.data && items.data.length === 0 && (
-          <div style={{ padding: 24, color: "rgba(255,255,255,0.5)", textAlign: "center" }}>
+          <div
+            style={{
+              padding: 24,
+              color: "rgba(255,255,255,0.5)",
+              textAlign: "center",
+            }}
+          >
             No resources yet.
           </div>
         )}
@@ -4505,14 +8290,23 @@ function NotificationsTab() {
             </thead>
             <tbody>
               {items.data.map((it) => (
-                <tr key={it.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+                <tr
+                  key={it.id}
+                  style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+                >
                   <td style={S.td}>
                     <Pill>{it.kind}</Pill>
                   </td>
                   <td style={S.td}>
                     <div>{it.title}</div>
                     {it.url && (
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(255,255,255,0.4)",
+                          marginTop: 4,
+                        }}
+                      >
                         {it.url}
                       </div>
                     )}
@@ -4543,7 +8337,10 @@ function NotificationsTab() {
                       type="button"
                       disabled={del.isPending}
                       onClick={() => {
-                        if (typeof window !== "undefined" && !window.confirm("Delete this resource row?"))
+                        if (
+                          typeof window !== "undefined" &&
+                          !window.confirm("Delete this resource row?")
+                        )
                           return;
                         del.mutate(it.id);
                       }}
@@ -4594,7 +8391,9 @@ function OutboundBuyerForm({
       : '{\n  "vendor": "Newleey"\n}',
   );
   const [floor, setFloor] = useState(
-    initial?.price_floor_cents ? String(Math.round(Number(initial.price_floor_cents) / 100)) : "0",
+    initial?.price_floor_cents
+      ? String(Math.round(Number(initial.price_floor_cents) / 100))
+      : "0",
   );
   const [timeout, setTimeout_] = useState(String(initial?.timeout_ms ?? 3000));
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -4634,50 +8433,116 @@ function OutboundBuyerForm({
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <label style={{ ...S.label, gridColumn: "1 / -1" }}>
           Buyer name
-          <input style={S.inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Lead Buyer" />
+          <input
+            style={S.inp}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Acme Lead Buyer"
+          />
         </label>
         <label style={S.label}>
           Ping URL (non-PII — we call this first)
-          <input style={S.inp} value={pingUrl} onChange={(e) => setPingUrl(e.target.value)} placeholder="https://buyer.example.com/ping" />
+          <input
+            style={S.inp}
+            value={pingUrl}
+            onChange={(e) => setPingUrl(e.target.value)}
+            placeholder="https://buyer.example.com/ping"
+          />
         </label>
         <label style={S.label}>
           Post URL (full data — optional, falls back to ping URL)
-          <input style={S.inp} value={postUrl} onChange={(e) => setPostUrl(e.target.value)} placeholder="https://buyer.example.com/post" />
+          <input
+            style={S.inp}
+            value={postUrl}
+            onChange={(e) => setPostUrl(e.target.value)}
+            placeholder="https://buyer.example.com/post"
+          />
         </label>
         <label style={S.label}>
           Auth header name (e.g. Authorization)
-          <input style={S.inp} value={authName} onChange={(e) => setAuthName(e.target.value)} placeholder="Authorization" />
+          <input
+            style={S.inp}
+            value={authName}
+            onChange={(e) => setAuthName(e.target.value)}
+            placeholder="Authorization"
+          />
         </label>
         <label style={S.label}>
           Auth header value
-          <input style={S.inp} type="password" value={authValue} onChange={(e) => setAuthValue(e.target.value)} placeholder="Basic dXNlcjpwYXNz" />
+          <input
+            style={S.inp}
+            type="password"
+            value={authValue}
+            onChange={(e) => setAuthValue(e.target.value)}
+            placeholder="Basic dXNlcjpwYXNz"
+          />
         </label>
         <label style={S.label}>
           Minimum bid floor ($)
-          <input style={S.inp} type="number" min="0" step="0.01" value={floor} onChange={(e) => setFloor(e.target.value)} placeholder="25.00" />
+          <input
+            style={S.inp}
+            type="number"
+            min="0"
+            step="0.01"
+            value={floor}
+            onChange={(e) => setFloor(e.target.value)}
+            placeholder="25.00"
+          />
         </label>
         <label style={S.label}>
           Timeout (ms)
-          <input style={S.inp} type="number" value={timeout} onChange={(e) => setTimeout_(e.target.value)} placeholder="3000" />
+          <input
+            style={S.inp}
+            type="number"
+            value={timeout}
+            onChange={(e) => setTimeout_(e.target.value)}
+            placeholder="3000"
+          />
         </label>
         <label style={{ ...S.label, gridColumn: "1 / -1" }}>
           Field mapping (JSON) — rename our fields to their field names
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 4, display: "block" }}>
+          <span
+            style={{
+              fontSize: 11,
+              color: "rgba(255,255,255,0.3)",
+              marginBottom: 4,
+              display: "block",
+            }}
+          >
             {`{ "lead_type": "leadType", "address": "address_1", "zip_code": "zip" }`}
           </span>
           <textarea
-            style={{ ...S.inp, minHeight: 72, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+            style={{
+              ...S.inp,
+              minHeight: 72,
+              resize: "vertical",
+              fontFamily: "monospace",
+              fontSize: 12,
+            }}
             value={fieldMapJson}
             onChange={(e) => setFieldMapJson(e.target.value)}
           />
         </label>
         <label style={{ ...S.label, gridColumn: "1 / -1" }}>
           Static fields (JSON) — always merged into every ping &amp; post
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 4, display: "block" }}>
+          <span
+            style={{
+              fontSize: 11,
+              color: "rgba(255,255,255,0.3)",
+              marginBottom: 4,
+              display: "block",
+            }}
+          >
             Set vendor name, source label, or any fixed value the buyer requires
           </span>
           <textarea
-            style={{ ...S.inp, minHeight: 72, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+            style={{
+              ...S.inp,
+              minHeight: 72,
+              resize: "vertical",
+              fontFamily: "monospace",
+              fontSize: 12,
+            }}
             value={staticFieldsJson}
             onChange={(e) => setStaticFieldsJson(e.target.value)}
           />
@@ -4685,10 +8550,17 @@ function OutboundBuyerForm({
       </div>
       {jsonError && <Banner tone="bad">{jsonError}</Banner>}
       <div style={{ display: "flex", gap: 8 }}>
-        <button type="button" style={S.btnPrimary} disabled={saving || !name || !pingUrl} onClick={handleSave}>
+        <button
+          type="button"
+          style={S.btnPrimary}
+          disabled={saving || !name || !pingUrl}
+          onClick={handleSave}
+        >
           {saving ? "Saving…" : "Save buyer"}
         </button>
-        <button type="button" style={S.btnGhost} onClick={onCancel}>Cancel</button>
+        <button type="button" style={S.btnGhost} onClick={onCancel}>
+          Cancel
+        </button>
       </div>
     </div>
   );
@@ -4698,28 +8570,51 @@ function OutboundBuyersSection() {
   const qc = useQueryClient();
   const [creating, setCreating] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { status: string; bid?: number | null; latency?: number; error?: string | null; response?: Record<string, unknown> | null }>>({});
+  const [testResults, setTestResults] = useState<
+    Record<
+      string,
+      {
+        status: string;
+        bid?: number | null;
+        latency?: number;
+        error?: string | null;
+        response?: Record<string, unknown> | null;
+      }
+    >
+  >({});
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
-  const buyers = useQuery({ queryKey: queryKeys.admin.outboundBuyers, queryFn: getAdminOutboundBuyers });
+  const buyers = useQuery({
+    queryKey: queryKeys.admin.outboundBuyers,
+    queryFn: getAdminOutboundBuyers,
+  });
   const logs = useQuery({
     queryKey: queryKeys.admin.outboundLogs(),
     queryFn: () => getAdminOutboundPingLogs(50),
   });
 
   const create = useMutation({
-    mutationFn: (data: Record<string, unknown>) => postAdminOutboundBuyer(data as any),
-    onSuccess: () => { setCreating(false); void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundBuyers }); },
+    mutationFn: (data: Record<string, unknown>) =>
+      postAdminOutboundBuyer(data as any),
+    onSuccess: () => {
+      setCreating(false);
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundBuyers });
+    },
   });
 
   const patch = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => patchAdminOutboundBuyer(id, data as any),
-    onSuccess: () => { setEditId(null); void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundBuyers }); },
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      patchAdminOutboundBuyer(id, data as any),
+    onSuccess: () => {
+      setEditId(null);
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundBuyers });
+    },
   });
 
   const del = useMutation({
     mutationFn: (id: string) => deleteAdminOutboundBuyer(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundBuyers }),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundBuyers }),
   });
 
   const testPing = useMutation({
@@ -4727,7 +8622,13 @@ function OutboundBuyersSection() {
     onSuccess: (result, id) => {
       setTestResults((prev) => ({
         ...prev,
-        [id]: { status: result.status, bid: result.bid_price_cents, latency: result.latency_ms, error: result.error, response: result.response },
+        [id]: {
+          status: result.status,
+          bid: result.bid_price_cents,
+          latency: result.latency_ms,
+          error: result.error,
+          response: result.response,
+        },
       }));
       void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundLogs() });
     },
@@ -4741,7 +8642,14 @@ function OutboundBuyersSection() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 8 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+        marginTop: 8,
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -4750,38 +8658,82 @@ function OutboundBuyersSection() {
         }}
       >
         <div>
-          <h3 style={{ fontFamily: "Manrope, sans-serif", fontSize: 17, margin: 0 }}>Outbound buyers</h3>
-          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 12, margin: "4px 0 0" }}>
-            External platforms we ping when a lead arrives — they respond with a bid, we POST the full lead to the winner.
+          <h3
+            style={{
+              fontFamily: "Manrope, sans-serif",
+              fontSize: 17,
+              margin: 0,
+            }}
+          >
+            Outbound buyers
+          </h3>
+          <p
+            style={{
+              color: "rgba(255,255,255,0.5)",
+              fontSize: 12,
+              margin: "4px 0 0",
+            }}
+          >
+            External platforms we ping when a lead arrives — they respond with a
+            bid, we POST the full lead to the winner.
           </p>
         </div>
         {!creating && (
-          <button type="button" style={S.btnPrimary} onClick={() => setCreating(true)}>Add buyer</button>
+          <button
+            type="button"
+            style={S.btnPrimary}
+            onClick={() => setCreating(true)}
+          >
+            Add buyer
+          </button>
         )}
       </div>
 
       {creating && (
         <div style={S.card}>
-          <h4 style={{ fontFamily: "Manrope, sans-serif", fontSize: 14, margin: "0 0 14px" }}>New outbound buyer</h4>
+          <h4
+            style={{
+              fontFamily: "Manrope, sans-serif",
+              fontSize: 14,
+              margin: "0 0 14px",
+            }}
+          >
+            New outbound buyer
+          </h4>
           <OutboundBuyerForm
             onSave={(data) => create.mutate(data)}
             onCancel={() => setCreating(false)}
             saving={create.isPending}
           />
-          {create.isError && <div style={{ marginTop: 10 }}><Banner tone="bad">{(create.error as Error).message}</Banner></div>}
+          {create.isError && (
+            <div style={{ marginTop: 10 }}>
+              <Banner tone="bad">{(create.error as Error).message}</Banner>
+            </div>
+          )}
         </div>
       )}
 
       {buyers.isLoading && <Empty title="Loading buyers…" />}
       {(buyers.data ?? []).length === 0 && !buyers.isLoading && (
-        <Empty title="No outbound buyers configured" body="Add a buyer above to start routing leads via the ping/post protocol." />
+        <Empty
+          title="No outbound buyers configured"
+          body="Add a buyer above to start routing leads via the ping/post protocol."
+        />
       )}
 
       {(buyers.data ?? []).map((buyer) => (
         <div key={buyer.id} style={S.card}>
           {editId === buyer.id ? (
             <>
-              <h4 style={{ fontFamily: "Manrope, sans-serif", fontSize: 14, margin: "0 0 14px" }}>Editing: {buyer.name}</h4>
+              <h4
+                style={{
+                  fontFamily: "Manrope, sans-serif",
+                  fontSize: 14,
+                  margin: "0 0 14px",
+                }}
+              >
+                Editing: {buyer.name}
+              </h4>
               <OutboundBuyerForm
                 initial={buyer}
                 onSave={(data) => patch.mutate({ id: buyer.id, data })}
@@ -4790,70 +8742,177 @@ function OutboundBuyersSection() {
               />
             </>
           ) : (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
               <div style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <strong style={{ fontFamily: "Manrope, sans-serif", fontSize: 15 }}>{buyer.name}</strong>
-                  <Pill tone={buyer.is_active ? "good" : "default"}>{buyer.is_active ? "active" : "paused"}</Pill>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 4,
+                  }}
+                >
+                  <strong
+                    style={{ fontFamily: "Manrope, sans-serif", fontSize: 15 }}
+                  >
+                    {buyer.name}
+                  </strong>
+                  <Pill tone={buyer.is_active ? "good" : "default"}>
+                    {buyer.is_active ? "active" : "paused"}
+                  </Pill>
                 </div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 4 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.4)",
+                    marginBottom: 4,
+                  }}
+                >
                   Ping: {buyer.ping_url}
                 </div>
                 {buyer.post_url && (
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 4 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "rgba(255,255,255,0.4)",
+                      marginBottom: 4,
+                    }}
+                  >
                     Post: {buyer.post_url}
                   </div>
                 )}
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
-                  Floor: ${(Number(buyer.price_floor_cents) / 100).toFixed(2)} · Timeout: {buyer.timeout_ms}ms
-                  {buyer.auth_header_name ? ` · Auth: ${buyer.auth_header_name}` : ""}
+                  Floor: ${(Number(buyer.price_floor_cents) / 100).toFixed(2)} ·
+                  Timeout: {buyer.timeout_ms}ms
+                  {buyer.auth_header_name
+                    ? ` · Auth: ${buyer.auth_header_name}`
+                    : ""}
                 </div>
                 {testResults[buyer.id] && (
-                  <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 8, background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.07)", fontSize: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: testResults[buyer.id].response ? 8 : 0 }}>
-                      <span style={{ color: "rgba(255,255,255,0.45)" }}>Last test:</span>
-                      <span style={{ color: statusColor(testResults[buyer.id].status), fontWeight: 700 }}>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      background: "rgba(0,0,0,0.25)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                      fontSize: 12,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        marginBottom: testResults[buyer.id].response ? 8 : 0,
+                      }}
+                    >
+                      <span style={{ color: "rgba(255,255,255,0.45)" }}>
+                        Last test:
+                      </span>
+                      <span
+                        style={{
+                          color: statusColor(testResults[buyer.id].status),
+                          fontWeight: 700,
+                        }}
+                      >
                         {testResults[buyer.id].status}
                       </span>
                       {testResults[buyer.id].bid != null && (
-                        <span style={{ color: "#34d399" }}>· bid ${((testResults[buyer.id].bid ?? 0) / 100).toFixed(2)}</span>
+                        <span style={{ color: "#34d399" }}>
+                          · bid $
+                          {((testResults[buyer.id].bid ?? 0) / 100).toFixed(2)}
+                        </span>
                       )}
                       {testResults[buyer.id].latency != null && (
-                        <span style={{ color: "rgba(255,255,255,0.35)" }}>· {testResults[buyer.id].latency}ms</span>
+                        <span style={{ color: "rgba(255,255,255,0.35)" }}>
+                          · {testResults[buyer.id].latency}ms
+                        </span>
                       )}
                       {testResults[buyer.id].error && (
-                        <span style={{ color: "#f87171" }}>· {testResults[buyer.id].error}</span>
+                        <span style={{ color: "#f87171" }}>
+                          · {testResults[buyer.id].error}
+                        </span>
                       )}
                     </div>
                     {testResults[buyer.id].response && (
-                      <pre style={{
-                        margin: 0, padding: "8px 10px", borderRadius: 6,
-                        background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.06)",
-                        fontSize: 11, color: "rgba(255,255,255,0.7)",
-                        overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all",
-                        maxHeight: 200, overflowY: "auto",
-                      }}>
-                        {JSON.stringify(testResults[buyer.id].response, null, 2)}
+                      <pre
+                        style={{
+                          margin: 0,
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          background: "rgba(0,0,0,0.3)",
+                          border: "1px solid rgba(255,255,255,0.06)",
+                          fontSize: 11,
+                          color: "rgba(255,255,255,0.7)",
+                          overflowX: "auto",
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-all",
+                          maxHeight: 200,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {JSON.stringify(
+                          testResults[buyer.id].response,
+                          null,
+                          2,
+                        )}
                       </pre>
                     )}
                   </div>
                 )}
               </div>
-              <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 6,
+                  flexShrink: 0,
+                  flexWrap: "wrap",
+                }}
+              >
                 <button
                   type="button"
-                  style={{ ...S.btnGhost, padding: "5px 10px", fontSize: 12, color: "#34d399" }}
+                  style={{
+                    ...S.btnGhost,
+                    padding: "5px 10px",
+                    fontSize: 12,
+                    color: "#34d399",
+                  }}
                   disabled={testPing.isPending}
                   onClick={() => testPing.mutate(buyer.id)}
                 >
-                  {testPing.isPending && testPing.variables === buyer.id ? "Pinging…" : "Test ping"}
+                  {testPing.isPending && testPing.variables === buyer.id
+                    ? "Pinging…"
+                    : "Test ping"}
                 </button>
-                <button type="button" style={{ ...S.btnGhost, padding: "5px 10px", fontSize: 12 }} onClick={() => setEditId(buyer.id)}>Edit</button>
                 <button
                   type="button"
-                  style={{ ...S.btnGhost, padding: "5px 10px", fontSize: 12, color: "#f87171" }}
+                  style={{ ...S.btnGhost, padding: "5px 10px", fontSize: 12 }}
+                  onClick={() => setEditId(buyer.id)}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...S.btnGhost,
+                    padding: "5px 10px",
+                    fontSize: 12,
+                    color: "#f87171",
+                  }}
                   disabled={del.isPending}
-                  onClick={() => { if (confirm(`Delete buyer "${buyer.name}"?`)) del.mutate(buyer.id); }}
+                  onClick={() => {
+                    if (confirm(`Delete buyer "${buyer.name}"?`))
+                      del.mutate(buyer.id);
+                  }}
                 >
                   Delete
                 </button>
@@ -4865,14 +8924,51 @@ function OutboundBuyersSection() {
 
       {/* Ping log */}
       <div style={{ ...S.card, padding: 0, overflow: "hidden" }}>
-        <div style={{ padding: "14px 18px", borderBottom: "1px solid rgba(255,255,255,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontFamily: "Manrope, sans-serif", fontSize: 15, fontWeight: 600 }}>Recent outbound ping log</span>
-          <button type="button" style={{ ...S.btnGhost, fontSize: 12, padding: "4px 10px" }} onClick={() => void qc.invalidateQueries({ queryKey: queryKeys.admin.outboundLogs() })}>Refresh</button>
+        <div
+          style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid rgba(255,255,255,0.05)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "Manrope, sans-serif",
+              fontSize: 15,
+              fontWeight: 600,
+            }}
+          >
+            Recent outbound ping log
+          </span>
+          <button
+            type="button"
+            style={{ ...S.btnGhost, fontSize: 12, padding: "4px 10px" }}
+            onClick={() =>
+              void qc.invalidateQueries({
+                queryKey: queryKeys.admin.outboundLogs(),
+              })
+            }
+          >
+            Refresh
+          </button>
         </div>
-        {logs.isLoading && <div style={{ padding: 16, color: "rgba(255,255,255,0.5)" }}>Loading…</div>}
-        {logs.data && logs.data.length === 0 && <Empty title="No outbound pings yet" body="Pings will appear here once a lead arrives or you test a buyer." />}
+        {logs.isLoading && (
+          <div style={{ padding: 16, color: "rgba(255,255,255,0.5)" }}>
+            Loading…
+          </div>
+        )}
+        {logs.data && logs.data.length === 0 && (
+          <Empty
+            title="No outbound pings yet"
+            body="Pings will appear here once a lead arrives or you test a buyer."
+          />
+        )}
         {logs.data && logs.data.length > 0 && (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <table
+            style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}
+          >
             <thead style={{ background: "rgba(0,0,0,0.2)" }}>
               <tr>
                 <th style={S.th}>When</th>
@@ -4886,7 +8982,9 @@ function OutboundBuyersSection() {
             </thead>
             <tbody>
               {logs.data.map((l: OutboundPingLogRow) => {
-                const ep = (buyers.data ?? []).find((b) => b.id === l.buyer_endpoint_id);
+                const ep = (buyers.data ?? []).find(
+                  (b) => b.id === l.buyer_endpoint_id,
+                );
                 const isExpanded = expandedLogId === l.id;
                 const hasDetail = !!(l.response_payload || l.error_message);
                 return (
@@ -4896,60 +8994,125 @@ function OutboundBuyersSection() {
                       style={{
                         borderTop: "1px solid rgba(255,255,255,0.05)",
                         cursor: hasDetail ? "pointer" : "default",
-                        background: isExpanded ? "rgba(99,102,241,0.07)" : undefined,
+                        background: isExpanded
+                          ? "rgba(99,102,241,0.07)"
+                          : undefined,
                       }}
-                      onClick={() => hasDetail && setExpandedLogId(isExpanded ? null : l.id)}
+                      onClick={() =>
+                        hasDetail && setExpandedLogId(isExpanded ? null : l.id)
+                      }
                     >
-                      <td style={S.td}>{new Date(l.created_at).toLocaleString()}</td>
-                      <td style={S.td}>{ep?.name ?? l.buyer_endpoint_id.slice(0, 8) + "…"}</td>
+                      <td style={S.td}>
+                        {new Date(l.created_at).toLocaleString()}
+                      </td>
+                      <td style={S.td}>
+                        {ep?.name ?? l.buyer_endpoint_id.slice(0, 8) + "…"}
+                      </td>
                       <td style={S.td}>
                         <Pill
                           tone={
                             l.status === "accepted" || l.status === "posted"
                               ? "good"
                               : l.status === "below_floor"
-                              ? "warn"
-                              : l.status === "timeout" || l.status === "error"
-                              ? "bad"
-                              : "default"
+                                ? "warn"
+                                : l.status === "timeout" || l.status === "error"
+                                  ? "bad"
+                                  : "default"
                           }
                         >
-                          {l.status}{l.is_test ? " (test)" : ""}
+                          {l.status}
+                          {l.is_test ? " (test)" : ""}
                         </Pill>
                       </td>
-                      <td style={S.td}>{l.bid_price_cents != null ? `$${(Number(l.bid_price_cents) / 100).toFixed(2)}` : "—"}</td>
-                      <td style={S.td}>${(Number(l.floor_price_cents) / 100).toFixed(2)}</td>
-                      <td style={S.td}>{l.latency_ms != null ? `${l.latency_ms}ms` : "—"}</td>
-                      <td style={{ ...S.td, color: "rgba(255,255,255,0.45)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td style={S.td}>
+                        {l.bid_price_cents != null
+                          ? `$${(Number(l.bid_price_cents) / 100).toFixed(2)}`
+                          : "—"}
+                      </td>
+                      <td style={S.td}>
+                        ${(Number(l.floor_price_cents) / 100).toFixed(2)}
+                      </td>
+                      <td style={S.td}>
+                        {l.latency_ms != null ? `${l.latency_ms}ms` : "—"}
+                      </td>
+                      <td
+                        style={{
+                          ...S.td,
+                          color: "rgba(255,255,255,0.45)",
+                          maxWidth: 180,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         {l.error_message ?? "—"}
-                        {hasDetail && <span style={{ marginLeft: 6, opacity: 0.4, fontSize: 10 }}>{isExpanded ? "▲" : "▼"}</span>}
+                        {hasDetail && (
+                          <span
+                            style={{
+                              marginLeft: 6,
+                              opacity: 0.4,
+                              fontSize: 10,
+                            }}
+                          >
+                            {isExpanded ? "▲" : "▼"}
+                          </span>
+                        )}
                       </td>
                     </tr>
                     {isExpanded && (
                       <tr style={{ background: "rgba(0,0,0,0.3)" }}>
                         <td colSpan={7} style={{ padding: "10px 18px" }}>
                           {l.error_message && (
-                            <div style={{ marginBottom: 8, fontSize: 12, color: "#f87171", fontWeight: 600 }}>
+                            <div
+                              style={{
+                                marginBottom: 8,
+                                fontSize: 12,
+                                color: "#f87171",
+                                fontWeight: 600,
+                              }}
+                            >
                               Error: {l.error_message}
                             </div>
                           )}
                           {l.response_payload ? (
                             <>
-                              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  color: "rgba(255,255,255,0.35)",
+                                  marginBottom: 6,
+                                }}
+                              >
                                 Buyer response:
                               </div>
-                              <pre style={{
-                                margin: 0, padding: "10px 12px", borderRadius: 8,
-                                background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.07)",
-                                fontSize: 11, color: "rgba(255,255,255,0.75)",
-                                overflowX: "auto", whiteSpace: "pre-wrap", wordBreak: "break-all",
-                                maxHeight: 300, overflowY: "auto",
-                              }}>
+                              <pre
+                                style={{
+                                  margin: 0,
+                                  padding: "10px 12px",
+                                  borderRadius: 8,
+                                  background: "rgba(0,0,0,0.4)",
+                                  border: "1px solid rgba(255,255,255,0.07)",
+                                  fontSize: 11,
+                                  color: "rgba(255,255,255,0.75)",
+                                  overflowX: "auto",
+                                  whiteSpace: "pre-wrap",
+                                  wordBreak: "break-all",
+                                  maxHeight: 300,
+                                  overflowY: "auto",
+                                }}
+                              >
                                 {JSON.stringify(l.response_payload, null, 2)}
                               </pre>
                             </>
                           ) : (
-                            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>No response body received.</div>
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: "rgba(255,255,255,0.35)",
+                              }}
+                            >
+                              No response body received.
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -4976,7 +9139,14 @@ function PingAuditRow({ pingId }: { pingId: string }) {
   if (detail.isLoading) {
     return (
       <tr>
-        <td colSpan={8} style={{ padding: "10px 18px", color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
+        <td
+          colSpan={8}
+          style={{
+            padding: "10px 18px",
+            color: "rgba(255,255,255,0.35)",
+            fontSize: 12,
+          }}
+        >
           Loading audit…
         </td>
       </tr>
@@ -4987,7 +9157,14 @@ function PingAuditRow({ pingId }: { pingId: string }) {
   if (audit.length === 0) {
     return (
       <tr>
-        <td colSpan={8} style={{ padding: "10px 18px", color: "rgba(255,255,255,0.35)", fontSize: 12 }}>
+        <td
+          colSpan={8}
+          style={{
+            padding: "10px 18px",
+            color: "rgba(255,255,255,0.35)",
+            fontSize: 12,
+          }}
+        >
           No buyer audit records found.
         </td>
       </tr>
@@ -4998,21 +9175,43 @@ function PingAuditRow({ pingId }: { pingId: string }) {
     <>
       {audit.map((a) => (
         <tr key={a.id} style={{ background: "rgba(0,0,0,0.25)" }}>
-          <td colSpan={2} style={{ ...S.td, paddingLeft: 32, color: "rgba(255,255,255,0.5)", fontSize: 11 }}>
+          <td
+            colSpan={2}
+            style={{
+              ...S.td,
+              paddingLeft: 32,
+              color: "rgba(255,255,255,0.5)",
+              fontSize: 11,
+            }}
+          >
             ↳ {a.buyer?.email ?? "unknown buyer"}
           </td>
           <td colSpan={2} style={{ ...S.td, fontSize: 11 }}>
-            <span style={{ color: a.eligible ? "#34d399" : "#f87171", fontWeight: 600 }}>
+            <span
+              style={{
+                color: a.eligible ? "#34d399" : "#f87171",
+                fontWeight: 600,
+              }}
+            >
               {a.eligible ? "eligible" : "rejected"}
             </span>
           </td>
-          <td colSpan={2} style={{ ...S.td, fontSize: 11, color: a.eligible ? "rgba(255,255,255,0.5)" : "#fca5a5" }}>
+          <td
+            colSpan={2}
+            style={{
+              ...S.td,
+              fontSize: 11,
+              color: a.eligible ? "rgba(255,255,255,0.5)" : "#fca5a5",
+            }}
+          >
             {a.rejection_reason ?? (a.eligible ? "—" : "unknown")}
           </td>
           <td style={{ ...S.td, fontSize: 11 }}>
             {a.price_cents ? fmtCents(a.price_cents) : "—"}
           </td>
-          <td style={{ ...S.td, fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+          <td
+            style={{ ...S.td, fontSize: 11, color: "rgba(255,255,255,0.35)" }}
+          >
             {a.pricing_rule?.name ?? "—"}
           </td>
         </tr>
@@ -5021,25 +9220,442 @@ function PingAuditRow({ pingId }: { pingId: string }) {
   );
 }
 
+function VendorDetailModal({
+  vendorId,
+  onClose,
+}: {
+  vendorId: string;
+  onClose: () => void;
+}) {
+  const detail = useQuery<AdminVendorDetail>({
+    queryKey: queryKeys.admin.vendorDetail(vendorId),
+    queryFn: () => getAdminVendorDetail(vendorId),
+  });
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        background: "rgba(0,0,0,0.72)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 1080,
+          maxHeight: "90vh",
+          overflowY: "auto",
+          background: "linear-gradient(180deg, #101626 0%, #0b1020 100%)",
+          border: "1px solid rgba(255,255,255,0.09)",
+          borderRadius: 20,
+          padding: 24,
+          boxShadow: "0 32px 120px rgba(0,0,0,0.65)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 18,
+            marginBottom: 20,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(165,180,252,0.75)",
+                marginBottom: 6,
+              }}
+            >
+              Vendor performance
+            </div>
+            <div
+              style={{
+                fontFamily: "Manrope, sans-serif",
+                fontSize: 24,
+                fontWeight: 700,
+              }}
+            >
+              {detail.data?.vendor.name ?? "Loading vendor…"}
+            </div>
+            {detail.data && (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 8,
+                  marginTop: 10,
+                }}
+              >
+                <Pill tone={detail.data.vendor.enabled ? "good" : "default"}>
+                  {detail.data.vendor.enabled ? "active" : "disabled"}
+                </Pill>
+                <Pill tone="info">
+                  {detail.data.summary.conversion_rate}% converted
+                </Pill>
+                <Pill tone="warn">
+                  {fmtCents(detail.data.summary.total_revenue_cents)} revenue
+                </Pill>
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              ...S.btnGhost,
+              padding: "6px 11px",
+              minWidth: 0,
+              fontSize: 16,
+              lineHeight: 1,
+              color: "rgba(255,255,255,0.55)",
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {detail.isLoading && <Empty title="Loading vendor metrics…" />}
+        {detail.isError && (
+          <Banner tone="bad">{(detail.error as Error).message}</Banner>
+        )}
+
+        {detail.data && (
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                gap: 12,
+                marginBottom: 18,
+              }}
+            >
+              <Stat
+                label="Total leads sent"
+                value={String(detail.data.summary.total_leads)}
+                accent="linear-gradient(90deg,#38bdf8,#6366f1)"
+              />
+              <Stat
+                label="Successfully bought"
+                value={String(detail.data.summary.purchased_leads)}
+                accent="linear-gradient(90deg,#10b981,#34d399)"
+              />
+              <Stat
+                label="Revenue generated"
+                value={fmtCents(detail.data.summary.total_revenue_cents)}
+                accent="linear-gradient(90deg,#f59e0b,#ef4444)"
+              />
+              <Stat
+                label="Avg revenue / sold lead"
+                value={fmtCents(detail.data.summary.avg_revenue_per_lead)}
+                accent="linear-gradient(90deg,#8b5cf6,#6366f1)"
+              />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1.1fr) minmax(320px, 0.9fr)",
+                gap: 18,
+              }}
+            >
+              <div style={S.card}>
+                <div
+                  style={{
+                    fontFamily: "Manrope, sans-serif",
+                    fontSize: 15,
+                    fontWeight: 700,
+                    marginBottom: 12,
+                  }}
+                >
+                  Recent leads from this vendor
+                </div>
+                {detail.data.recent_leads.length === 0 ? (
+                  <Empty
+                    title="No inbound leads recorded"
+                    body="This vendor has not produced any approved inbound leads yet."
+                  />
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                        minWidth: 620,
+                      }}
+                    >
+                      <thead style={{ background: "rgba(0,0,0,0.18)" }}>
+                        <tr>
+                          {[
+                            "Lead",
+                            "Market",
+                            "Received",
+                            "Purchases",
+                            "Revenue",
+                          ].map((h) => (
+                            <th key={h} style={S.th}>
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.data.recent_leads.map((lead) => (
+                          <tr
+                            key={lead.lead_id}
+                            style={{
+                              borderTop: "1px solid rgba(255,255,255,0.05)",
+                            }}
+                          >
+                            <td style={S.td}>
+                              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                                {lead.title}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  color: "rgba(255,255,255,0.35)",
+                                  marginTop: 2,
+                                }}
+                              >
+                                {lead.lead_id.slice(0, 8)}…
+                              </div>
+                            </td>
+                            <td
+                              style={{
+                                ...S.td,
+                                color: "rgba(255,255,255,0.65)",
+                              }}
+                            >
+                              {lead.market || "—"}
+                            </td>
+                            <td
+                              style={{
+                                ...S.td,
+                                color: "rgba(255,255,255,0.45)",
+                              }}
+                            >
+                              {fmtShortDate(lead.created_at)}
+                            </td>
+                            <td style={S.td}>
+                              <Pill
+                                tone={
+                                  lead.purchase_count > 0 ? "good" : "default"
+                                }
+                              >
+                                {lead.purchase_count}
+                              </Pill>
+                            </td>
+                            <td style={{ ...S.td, fontWeight: 700 }}>
+                              {fmtCents(lead.revenue_cents)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "grid", gap: 16 }}>
+                <div style={S.card}>
+                  <div
+                    style={{
+                      fontFamily: "Manrope, sans-serif",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      marginBottom: 12,
+                    }}
+                  >
+                    Vendor summary
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                    }}
+                  >
+                    {[
+                      {
+                        label: "Webhook hits",
+                        value: detail.data.webhook_hits.total,
+                      },
+                      {
+                        label: "Accepted hits",
+                        value: detail.data.webhook_hits.accepted,
+                      },
+                      {
+                        label: "Rejected hits",
+                        value: detail.data.webhook_hits.rejected,
+                      },
+                      {
+                        label: "Conversion rate",
+                        value: `${detail.data.summary.conversion_rate}%`,
+                      },
+                    ].map((item) => (
+                      <div
+                        key={item.label}
+                        style={{
+                          padding: "12px 14px",
+                          borderRadius: 12,
+                          border: "1px solid rgba(255,255,255,0.06)",
+                          background: "rgba(255,255,255,0.025)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 10,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                            color: "rgba(255,255,255,0.35)",
+                            marginBottom: 6,
+                          }}
+                        >
+                          {item.label}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 16,
+                            fontWeight: 700,
+                            fontFamily: "Manrope, sans-serif",
+                          }}
+                        >
+                          {item.value}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={S.card}>
+                  <div
+                    style={{
+                      fontFamily: "Manrope, sans-serif",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      marginBottom: 12,
+                    }}
+                  >
+                    Vendor config
+                  </div>
+                  <div style={{ display: "grid", gap: 10, fontSize: 12 }}>
+                    <div>
+                      <div
+                        style={{
+                          color: "rgba(255,255,255,0.38)",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Allowed sources
+                      </div>
+                      <div>
+                        {detail.data.vendor.allowed_sources.length
+                          ? detail.data.vendor.allowed_sources.join(", ")
+                          : "All sources"}
+                      </div>
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          color: "rgba(255,255,255,0.38)",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Ping timeout
+                      </div>
+                      <div>{detail.data.vendor.ping_timeout_ms}ms</div>
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          color: "rgba(255,255,255,0.38)",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Ping TTL
+                      </div>
+                      <div>{detail.data.vendor.ping_ttl_seconds}s</div>
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          color: "rgba(255,255,255,0.38)",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Created
+                      </div>
+                      <div>
+                        {new Date(
+                          detail.data.vendor.created_at,
+                        ).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function VendorPingsTab() {
   const qc = useQueryClient();
-  const vendors = useQuery({ queryKey: queryKeys.admin.vendors, queryFn: getAdminVendors });
-  const pings = useQuery({ queryKey: queryKeys.admin.pings, queryFn: () => getAdminPings(75) });
+  const vendors = useQuery({
+    queryKey: queryKeys.admin.vendors,
+    queryFn: getAdminVendors,
+  });
+  const pings = useQuery({
+    queryKey: queryKeys.admin.pings,
+    queryFn: () => getAdminPings(75),
+  });
+  const [vendorSort, setVendorSort] = useState<
+    "latest" | "revenue" | "leads" | "sold"
+  >("latest");
+  const [selectedVendorDetailId, setSelectedVendorDetailId] = useState<
+    string | null
+  >(null);
   const [showAdd, setShowAdd] = useState(false);
   const [expandedPingId, setExpandedPingId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [sources, setSources] = useState("");
+  const vendorStats = useQuery({
+    queryKey: queryKeys.admin.vendorStats(vendorSort),
+    queryFn: () => getAdminVendorStats(vendorSort),
+  });
 
   const createVendor = useMutation({
     mutationFn: () =>
       postAdminVendor({
         name,
         api_key: apiKey,
-        allowed_sources: sources.split(",").map((s) => s.trim()).filter(Boolean),
+        allowed_sources: sources
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
       }),
     onSuccess: () => {
-      setName(""); setApiKey(""); setSources(""); setShowAdd(false);
+      setName("");
+      setApiKey("");
+      setSources("");
+      setShowAdd(false);
       void qc.invalidateQueries({ queryKey: queryKeys.admin.vendors });
     },
   });
@@ -5047,23 +9663,46 @@ function VendorPingsTab() {
   const toggleVendor = useMutation({
     mutationFn: (vendor: VendorIntegrationDto) =>
       patchAdminVendor(vendor.id, { enabled: !vendor.enabled }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: queryKeys.admin.vendors }),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: queryKeys.admin.vendors }),
   });
 
   const vendorList = vendors.data ?? [];
   const pingList = pings.data ?? [];
   const activeVendors = vendorList.filter((v) => v.enabled).length;
   const matchedPings = pingList.filter((p) => p.matched_buyer != null).length;
-  const matchRate = pingList.length > 0 ? Math.round((matchedPings / pingList.length) * 100) : null;
-  const avgLatency = pingList.length > 0
-    ? Math.round(pingList.reduce((s, p) => s + (p.latency_ms ?? 0), 0) / pingList.length)
-    : null;
+  const matchRate =
+    pingList.length > 0
+      ? Math.round((matchedPings / pingList.length) * 100)
+      : null;
+  const avgLatency =
+    pingList.length > 0
+      ? Math.round(
+          pingList.reduce((s, p) => s + (p.latency_ms ?? 0), 0) /
+            pingList.length,
+        )
+      : null;
 
   return (
     <>
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, fontFamily: "Manrope, sans-serif" }}>Lead Vendors</h2>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 700,
+            fontFamily: "Manrope, sans-serif",
+          }}
+        >
+          Lead Vendors
+        </h2>
         <button
           type="button"
           style={showAdd ? S.btnGhost : S.btnPrimary}
@@ -5074,7 +9713,13 @@ function VendorPingsTab() {
       </div>
 
       {/* Quick stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3,1fr)",
+          gap: 12,
+        }}
+      >
         <Stat
           label="Active vendors"
           value={vendors.isLoading ? "—" : String(activeVendors)}
@@ -5095,8 +9740,17 @@ function VendorPingsTab() {
       {/* Add vendor form */}
       {showAdd && (
         <div style={S.card}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>New inbound vendor</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>
+            New inbound vendor
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 12,
+              marginBottom: 12,
+            }}
+          >
             <label style={S.label}>
               Vendor name
               <input
@@ -5129,18 +9783,26 @@ function VendorPingsTab() {
             <button
               type="button"
               style={S.btnPrimary}
-              disabled={createVendor.isPending || !name.trim() || !apiKey.trim()}
+              disabled={
+                createVendor.isPending || !name.trim() || !apiKey.trim()
+              }
               onClick={() => createVendor.mutate()}
             >
               {createVendor.isPending ? "Creating…" : "Create vendor"}
             </button>
-            <button type="button" style={S.btnGhost} onClick={() => setShowAdd(false)}>
+            <button
+              type="button"
+              style={S.btnGhost}
+              onClick={() => setShowAdd(false)}
+            >
               Cancel
             </button>
           </div>
           {createVendor.isError && (
             <div style={{ marginTop: 10 }}>
-              <Banner tone="bad">{(createVendor.error as Error).message}</Banner>
+              <Banner tone="bad">
+                {(createVendor.error as Error).message}
+              </Banner>
             </div>
           )}
         </div>
@@ -5149,13 +9811,22 @@ function VendorPingsTab() {
       {/* Inbound vendor list */}
       {vendors.isLoading && <Empty title="Loading vendors…" />}
       {vendorList.length === 0 && !vendors.isLoading && (
-        <Empty title="No vendors yet" body="Add an inbound vendor to start receiving pings." />
+        <Empty
+          title="No vendors yet"
+          body="Add an inbound vendor to start receiving pings."
+        />
       )}
       {vendorList.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {vendorList.map((vendor) => (
             <div key={vendor.id} style={{ ...S.card, padding: "14px 18px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div
                     style={{
@@ -5168,9 +9839,18 @@ function VendorPingsTab() {
                     }}
                   />
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{vendor.name}</div>
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", marginTop: 2 }}>
-                      TTL {vendor.ping_ttl_seconds}s · timeout {vendor.ping_timeout_ms}ms
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>
+                      {vendor.name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: "rgba(255,255,255,0.38)",
+                        marginTop: 2,
+                      }}
+                    >
+                      TTL {vendor.ping_ttl_seconds}s · timeout{" "}
+                      {vendor.ping_timeout_ms}ms
                       {vendor.allowed_sources.length
                         ? ` · sources: ${vendor.allowed_sources.join(", ")}`
                         : " · all sources"}
@@ -5196,6 +9876,190 @@ function VendorPingsTab() {
         </div>
       )}
 
+      <div style={{ ...S.card, padding: 0, overflow: "hidden" }}>
+        <div
+          style={{
+            padding: "16px 18px",
+            borderBottom: "1px solid rgba(255,255,255,0.05)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 12,
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>
+              Vendor performance
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "rgba(255,255,255,0.38)",
+                marginTop: 4,
+              }}
+            >
+              Track which inbound vendor is sending the most leads, producing
+              the most bought leads, and generating the most revenue for payout
+              decisions.
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(
+              [
+                { id: "latest", label: "Latest lead" },
+                { id: "revenue", label: "Most revenue" },
+                { id: "leads", label: "Most leads sent" },
+                { id: "sold", label: "Most bought leads" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setVendorSort(opt.id)}
+                style={{
+                  ...S.btnGhost,
+                  padding: "5px 11px",
+                  fontSize: 12,
+                  background:
+                    vendorSort === opt.id
+                      ? "rgba(99,102,241,0.16)"
+                      : "rgba(255,255,255,0.04)",
+                  border:
+                    vendorSort === opt.id
+                      ? "1px solid rgba(99,102,241,0.35)"
+                      : "1px solid rgba(255,255,255,0.12)",
+                  color: vendorSort === opt.id ? "#c7d2fe" : "#fff",
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {vendorStats.isLoading && <Empty title="Loading vendor metrics…" />}
+        {!vendorStats.isLoading && (vendorStats.data ?? []).length === 0 && (
+          <Empty
+            title="No vendor performance data yet"
+            body="Vendor metrics will appear once inbound leads and purchases start flowing through the system."
+          />
+        )}
+        {(vendorStats.data ?? []).length > 0 && (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 980,
+              }}
+            >
+              <thead style={{ background: "rgba(0,0,0,0.2)" }}>
+                <tr>
+                  {[
+                    "Vendor",
+                    "Status",
+                    "Hits",
+                    "Leads sent",
+                    "Bought leads",
+                    "Revenue",
+                    "Conversion",
+                    "",
+                  ].map((h) => (
+                    <th key={h} style={S.th}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {vendorStats.data?.map((row: AdminVendorStatsRow) => (
+                  <tr
+                    key={row.id}
+                    style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+                  >
+                    <td style={S.td}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        {row.name}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(255,255,255,0.35)",
+                          marginTop: 2,
+                        }}
+                      >
+                        Since {new Date(row.created_at).toLocaleDateString()}
+                      </div>
+                    </td>
+                    <td style={S.td}>
+                      <Pill tone={row.enabled ? "good" : "default"}>
+                        {row.enabled ? "active" : "disabled"}
+                      </Pill>
+                    </td>
+                    <td style={S.td}>
+                      <div style={{ fontWeight: 600 }}>
+                        {row.accepted_hits}/{row.total_hits}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(255,255,255,0.35)",
+                          marginTop: 2,
+                        }}
+                      >
+                        accepted / total
+                      </div>
+                    </td>
+                    <td style={{ ...S.td, fontWeight: 700 }}>
+                      {row.total_leads}
+                    </td>
+                    <td
+                      style={{
+                        ...S.td,
+                        fontWeight: 700,
+                        color: row.purchased_leads > 0 ? "#6ee7b7" : "inherit",
+                      }}
+                    >
+                      {row.purchased_leads}
+                    </td>
+                    <td style={{ ...S.td, fontWeight: 700 }}>
+                      {fmtCents(row.total_revenue_cents)}
+                    </td>
+                    <td style={S.td}>
+                      <Pill
+                        tone={
+                          row.conversion_rate >= 50
+                            ? "good"
+                            : row.conversion_rate >= 20
+                              ? "warn"
+                              : "default"
+                        }
+                      >
+                        {row.conversion_rate}%
+                      </Pill>
+                    </td>
+                    <td style={S.td}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedVendorDetailId(row.id)}
+                        style={{
+                          ...S.btnGhost,
+                          padding: "5px 10px",
+                          fontSize: 12,
+                        }}
+                      >
+                        View details
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Inbound ping log */}
       <div style={{ ...S.card, padding: 0, overflow: "hidden" }}>
         <div
@@ -5213,14 +10077,34 @@ function VendorPingsTab() {
           </span>
         </div>
         {pings.isLoading && <Empty title="Loading pings…" />}
-        {!pings.isLoading && pingList.length === 0 && <Empty title="No vendor pings yet" />}
+        {!pings.isLoading && pingList.length === 0 && (
+          <Empty title="No vendor pings yet" />
+        )}
         {pingList.length > 0 && (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 780, fontSize: 12 }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: 780,
+                fontSize: 12,
+              }}
+            >
               <thead style={{ background: "rgba(0,0,0,0.2)" }}>
                 <tr>
-                  {["Time", "Vendor", "Market", "Type", "Status", "Matched buyer", "Price", "Latency"].map((h) => (
-                    <th key={h} style={S.th}>{h}</th>
+                  {[
+                    "Time",
+                    "Vendor",
+                    "Market",
+                    "Type",
+                    "Status",
+                    "Matched buyer",
+                    "Price",
+                    "Latency",
+                  ].map((h) => (
+                    <th key={h} style={S.th}>
+                      {h}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -5235,30 +10119,53 @@ function VendorPingsTab() {
                         style={{
                           borderTop: "1px solid rgba(255,255,255,0.05)",
                           cursor: "pointer",
-                          background: isExpanded ? "rgba(99,102,241,0.08)" : undefined,
+                          background: isExpanded
+                            ? "rgba(99,102,241,0.08)"
+                            : undefined,
                         }}
-                        onClick={() => setExpandedPingId(isExpanded ? null : row.id)}
+                        onClick={() =>
+                          setExpandedPingId(isExpanded ? null : row.id)
+                        }
                       >
                         <td style={S.td}>{fmtShortDate(row.created_at)}</td>
                         <td style={S.td}>{row.vendor?.name ?? "—"}</td>
                         <td style={S.td}>
-                          {row.market || [row.city, row.state].filter(Boolean).join(", ") || "—"}
+                          {row.market ||
+                            [row.city, row.state].filter(Boolean).join(", ") ||
+                            "—"}
                         </td>
                         <td style={S.td}>{row.lead_type}</td>
                         <td style={S.td}>
-                          <Pill tone={isMatch ? "good" : isRejected ? "bad" : "default"}>
+                          <Pill
+                            tone={
+                              isMatch ? "good" : isRejected ? "bad" : "default"
+                            }
+                          >
                             {row.status}
                           </Pill>
                         </td>
-                        <td style={{ ...S.td, color: isMatch ? "#fff" : "rgba(255,255,255,0.3)" }}>
+                        <td
+                          style={{
+                            ...S.td,
+                            color: isMatch ? "#fff" : "rgba(255,255,255,0.3)",
+                          }}
+                        >
                           {row.matched_buyer?.email ?? "—"}
                         </td>
                         <td style={S.td}>
-                          {row.matched_price_cents ? fmtCents(row.matched_price_cents) : "—"}
+                          {row.matched_price_cents
+                            ? fmtCents(row.matched_price_cents)
+                            : "—"}
                         </td>
                         <td style={{ ...S.td, color: "rgba(255,255,255,0.4)" }}>
                           {row.latency_ms != null ? `${row.latency_ms}ms` : "—"}
-                          <span style={{ marginLeft: 6, fontSize: 10, color: "rgba(255,255,255,0.25)" }}>
+                          <span
+                            style={{
+                              marginLeft: 6,
+                              fontSize: 10,
+                              color: "rgba(255,255,255,0.25)",
+                            }}
+                          >
                             {isExpanded ? "▲" : "▼"}
                           </span>
                         </td>
@@ -5274,6 +10181,12 @@ function VendorPingsTab() {
       </div>
 
       <OutboundBuyersSection />
+      {selectedVendorDetailId && (
+        <VendorDetailModal
+          vendorId={selectedVendorDetailId}
+          onClose={() => setSelectedVendorDetailId(null)}
+        />
+      )}
     </>
   );
 }
@@ -5281,7 +10194,10 @@ function VendorPingsTab() {
 // ---------- Audit log ----------
 
 function AuditTab() {
-  const audit = useQuery({ queryKey: queryKeys.admin.audit, queryFn: getAdminAuditLogs });
+  const audit = useQuery({
+    queryKey: queryKeys.admin.audit,
+    queryFn: getAdminAuditLogs,
+  });
   const [filter, setFilter] = useState("");
   const filtered = (audit.data ?? []).filter((r: AuditLogRow) => {
     if (!filter) return true;
@@ -5316,14 +10232,20 @@ function AuditTab() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>{filtered.length} entries</span>
+        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>
+          {filtered.length} entries
+        </span>
       </div>
 
       {audit.isLoading && <Empty title="Loading…" />}
-      {audit.data && filtered.length === 0 && <Empty title="No matching entries" />}
+      {audit.data && filtered.length === 0 && (
+        <Empty title="No matching entries" />
+      )}
 
       {filtered.length > 0 && (
-        <div style={{ ...S.card, padding: 0, maxHeight: 600, overflow: "auto" }}>
+        <div
+          style={{ ...S.card, padding: 0, maxHeight: 600, overflow: "auto" }}
+        >
           {filtered.map((row) => (
             <div
               key={row.id}
@@ -5340,8 +10262,8 @@ function AuditTab() {
                 {new Date(row.created_at).toLocaleString()}
               </span>
               <span>
-                <strong style={{ color: "#a5b4fc" }}>{row.action}</strong> · {row.target_type}/
-                {row.target_id}
+                <strong style={{ color: "#a5b4fc" }}>{row.action}</strong> ·{" "}
+                {row.target_type}/{row.target_id}
                 {row.actor?.email ? ` · ${row.actor.email}` : ""}
               </span>
             </div>

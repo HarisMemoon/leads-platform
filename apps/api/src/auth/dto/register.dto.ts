@@ -17,6 +17,10 @@ export class RegisterDto {
   @IsNotEmpty()
   company_name!: string;
 
+  @IsString()
+  @IsNotEmpty()
+  phone!: string;
+
   @IsOptional()
   @IsString()
   utm_source?: string;

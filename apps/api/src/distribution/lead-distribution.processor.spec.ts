@@ -24,6 +24,7 @@ describe('LeadDistributionProcessor', () => {
     const leadAssignmentRepo = createRepositoryMock<any>()
     const engineSettingsRepo = createRepositoryMock<any>()
 
+    const termsRepo = createRepositoryMock<any>()
     const processor = new LeadDistributionProcessor(
       leadRepo as any,
       subscriptionRepo as any,
@@ -31,6 +32,7 @@ describe('LeadDistributionProcessor', () => {
       walletRepo as any,
       leadAssignmentRepo as any,
       engineSettingsRepo as any,
+      termsRepo as any,
       leadsService as any,
       distributionService as any,
     )

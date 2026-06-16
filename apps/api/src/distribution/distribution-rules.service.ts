@@ -1,8 +1,14 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { DistributionRule } from '../entities/distribution-rule.entity';
 import { User } from '../entities/user.entity';
+import { Subscription } from '../entities/subscription.entity';
+import { WalletAccount } from '../entities/wallet-account.entity';
+import { TermsAcceptance } from '../entities/terms-acceptance.entity';
+import { PlanType } from '../../common/enums/plan-type.enum';
+import { SubscriptionStatus } from '../../common/enums/subscription-status.enum';
 import { UpdateDistributionRuleDto } from './dto/update-distribution-rule.dto';
 
 @Injectable()
@@ -12,6 +18,13 @@ export class DistributionRulesService {
     private readonly ruleRepo: Repository<DistributionRule>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(Subscription)
+    private readonly subscriptionRepo: Repository<Subscription>,
+    @InjectRepository(WalletAccount)
+    private readonly walletRepo: Repository<WalletAccount>,
+    @InjectRepository(TermsAcceptance)
+    private readonly termsRepo: Repository<TermsAcceptance>,
+    private readonly config: ConfigService,
   ) {}
 
   private async assertDistributionUnlocked(userId: string) {
@@ -23,24 +36,66 @@ export class DistributionRulesService {
     }
   }
 
-  listForUser(userId: string) {
-    return this.ruleRepo.find({
-      where: { user: { id: userId } },
-      order: { created_at: 'ASC' },
+  private async hasProAutoPurchaseAccess(userId: string): Promise<boolean> {
+    const subscription = await this.subscriptionRepo.findOne({
+      where: {
+        user: { id: userId },
+        plan_type: PlanType.PRO,
+      },
+      order: { created_at: 'DESC' },
     });
+
+    if (!subscription) return false;
+    if (subscription.status === SubscriptionStatus.ACTIVE) return true;
+    return (
+      subscription.status === SubscriptionStatus.CANCELLED &&
+      subscription.current_period_end != null &&
+      new Date(subscription.current_period_end) > new Date()
+    );
   }
 
-  async getMe(userId: string): Promise<DistributionRule> {
-    const rule = await this.ruleRepo.findOne({
-      where: { user: { id: userId } },
-      order: { created_at: 'ASC' },
-    });
+  private withProAccess(rule: DistributionRule, proAutoPurchaseEligible: boolean) {
+    return {
+      ...rule,
+      pro_auto_purchase_eligible: proAutoPurchaseEligible,
+    };
+  }
+
+  async listForUser(userId: string) {
+    const [rules, proAutoPurchaseEligible] = await Promise.all([
+      this.ruleRepo.find({
+        where: { user: { id: userId } },
+        order: { created_at: 'ASC' },
+      }),
+      this.hasProAutoPurchaseAccess(userId),
+    ]);
+    return rules.map((rule) => this.withProAccess(rule, proAutoPurchaseEligible));
+  }
+
+  async getMe(userId: string) {
+    const [rule, proAutoPurchaseEligible] = await Promise.all([
+      this.ruleRepo.findOne({
+        where: { user: { id: userId } },
+        order: { created_at: 'ASC' },
+      }),
+      this.hasProAutoPurchaseAccess(userId),
+    ]);
     if (!rule) throw new NotFoundException('No distribution rule found — complete onboarding first');
-    return rule;
+    return this.withProAccess(rule, proAutoPurchaseEligible);
   }
 
-  async upsertMe(userId: string, dto: UpdateDistributionRuleDto): Promise<DistributionRule> {
+  async upsertMe(userId: string, dto: UpdateDistributionRuleDto) {
     await this.assertDistributionUnlocked(userId);
+    const proAutoPurchaseEligible = await this.hasProAutoPurchaseAccess(userId);
+    if (
+      dto.exclusivity_preference !== undefined &&
+      dto.exclusivity_preference !== 'exclusive_only' &&
+      !proAutoPurchaseEligible
+    ) {
+      throw new ForbiddenException(
+        'Non-exclusive lead preferences require an active Pro subscription. Please set your purchase type to Exclusive Only, or upgrade to Pro.',
+      );
+    }
     let rule = await this.ruleRepo.findOne({
       where: { user: { id: userId } },
       order: { created_at: 'ASC' },
@@ -86,11 +141,99 @@ export class DistributionRulesService {
       rule.max_lead_price_cents = dto.max_lead_price_cents === null ? null : String(dto.max_lead_price_cents);
     }
 
-    return this.ruleRepo.save(rule);
+    const saved = await this.ruleRepo.save(rule);
+    return this.withProAccess(saved, proAutoPurchaseEligible);
+  }
+
+  /**
+   * Verifies all 5 prerequisites and sets launched_at on the user's rule.
+   * Returns a checklist so the frontend can show which gates passed/failed.
+   */
+  async launchDistribution(userId: string): Promise<{
+    ok: boolean;
+    launched_at: Date | null;
+    checklist: Record<string, boolean>;
+  }> {
+    const rule = await this.ruleRepo.findOne({
+      where: { user: { id: userId } },
+      order: { created_at: 'ASC' },
+    });
+    if (!rule) throw new NotFoundException('No distribution rule found — complete onboarding first');
+
+    const termsVersion = this.config.get<string>('TERMS_VERSION') ?? '2025-01';
+    const [termsRecord, wallet] = await Promise.all([
+      this.termsRepo.findOne({ where: { user: { id: userId }, terms_version: termsVersion } }),
+      this.walletRepo.findOne({ where: { user: { id: userId } } }),
+    ]);
+
+    const checklist = {
+      terms_accepted: termsRecord !== null,
+      wallet_funded: Number(wallet?.balance_cents ?? 0) > 0,
+      has_filters: (rule.market_filters?.length ?? 0) > 0 || (rule.lead_type_filters?.length ?? 0) > 0,
+      participation_enabled: rule.participation_enabled === true,
+    };
+
+    const allPassed = Object.values(checklist).every(Boolean);
+    if (!allPassed) {
+      throw new BadRequestException({ message: 'Not all launch prerequisites are met', checklist });
+    }
+
+    rule.launched_at = new Date();
+    await this.ruleRepo.save(rule);
+
+    return { ok: true, launched_at: rule.launched_at, checklist };
+  }
+
+  /** Returns the launch checklist without launching — for frontend display. */
+  async getLaunchChecklist(userId: string): Promise<{
+    launched_at: Date | null;
+    checklist: Record<string, boolean>;
+  }> {
+    const rule = await this.ruleRepo.findOne({
+      where: { user: { id: userId } },
+      order: { created_at: 'ASC' },
+    });
+    if (!rule) {
+      return {
+        launched_at: null,
+        checklist: {
+          terms_accepted: false,
+          wallet_funded: false,
+          has_filters: false,
+          participation_enabled: false,
+        },
+      };
+    }
+
+    const termsVersion = this.config.get<string>('TERMS_VERSION') ?? '2025-01';
+    const [termsRecord, wallet] = await Promise.all([
+      this.termsRepo.findOne({ where: { user: { id: userId }, terms_version: termsVersion } }),
+      this.walletRepo.findOne({ where: { user: { id: userId } } }),
+    ]);
+
+    return {
+      launched_at: rule.launched_at,
+      checklist: {
+        terms_accepted: termsRecord !== null,
+        wallet_funded: Number(wallet?.balance_cents ?? 0) > 0,
+        has_filters: (rule.market_filters?.length ?? 0) > 0 || (rule.lead_type_filters?.length ?? 0) > 0,
+        participation_enabled: rule.participation_enabled === true,
+      },
+    };
   }
 
   async updateOwnRule(userId: string, ruleId: string, dto: UpdateDistributionRuleDto) {
     await this.assertDistributionUnlocked(userId);
+    const proAutoPurchaseEligible = await this.hasProAutoPurchaseAccess(userId);
+    if (
+      dto.exclusivity_preference !== undefined &&
+      dto.exclusivity_preference !== 'exclusive_only' &&
+      !proAutoPurchaseEligible
+    ) {
+      throw new ForbiddenException(
+        'Non-exclusive lead preferences require an active Pro subscription. Please set your purchase type to Exclusive Only, or upgrade to Pro.',
+      );
+    }
     const rule = await this.ruleRepo.findOne({
       where: { id: ruleId },
       relations: { user: true },
@@ -150,6 +293,7 @@ export class DistributionRulesService {
       rule.max_lead_price_cents = dto.max_lead_price_cents === null ? null : String(dto.max_lead_price_cents);
     }
 
-    return this.ruleRepo.save(rule);
+    const saved = await this.ruleRepo.save(rule);
+    return this.withProAccess(saved, proAutoPurchaseEligible);
   }
 }

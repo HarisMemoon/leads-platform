@@ -37,6 +37,10 @@ export class LeadRefundRequest {
   @Column({ type: 'varchar', nullable: true })
   resolution!: string | null;
 
+  /** URL to uploaded evidence (screenshot, recording, etc.) */
+  @Column({ type: 'varchar', nullable: true })
+  support_evidence_url!: string | null;
+
   @CreateDateColumn({ type: 'timestamp with time zone' })
   created_at!: Date;
 

@@ -37,6 +37,7 @@ import {
   SUBSCRIPTION_PRICE_INBOUND_CENTS,
   SUBSCRIPTION_PRICE_OUTBOUND_CENTS,
 } from '../subscriptions/pro-entitlement.service';
+import { LeadPricingService as LeadPricingConfigService } from '../lead-pricing/lead-pricing.service';
 import { DistributionRule } from '../entities/distribution-rule.entity';
 
 export type ExclusivityChoice = 'exclusive' | 'non_exclusive';
@@ -66,6 +67,7 @@ export class LeadsService {
     private readonly integrationsService: IntegrationsService,
     private readonly config: ConfigService,
     private readonly proEntitlementService: ProEntitlementService,
+    private readonly leadPricingConfigService: LeadPricingConfigService,
   ) {}
 
   private getExclusivePriceCents(lead: Pick<Lead, 'exclusive_price_cents' | 'price_cents'>): bigint {
@@ -73,13 +75,13 @@ export class LeadsService {
   }
 
   private getSharedCap(lead: Pick<Lead, 'max_non_exclusive_buyers'>): number {
-    return Math.max(1, Number(lead.max_non_exclusive_buyers ?? 3));
+    return Math.max(1, Number(lead.max_non_exclusive_buyers ?? 5));
   }
 
   /**
    * Flat subscription pricing per spec:
-   *   Inbound  → $30 (SUBSCRIPTION_PRICE_INBOUND_CENTS)
-   *   Outbound → $20 (SUBSCRIPTION_PRICE_OUTBOUND_CENTS)
+   *   Inbound  → $25 (SUBSCRIPTION_PRICE_INBOUND_CENTS)
+   *   Outbound → $25 (SUBSCRIPTION_PRICE_OUTBOUND_CENTS)
    *
    * Falls back to stored shared_price_cents if explicitly set by admin
    * (allows per-lead overrides without breaking the default model).
@@ -150,28 +152,27 @@ export class LeadsService {
     const leadType = (rest as any).lead_type ?? 'inbound';
     const defaultMaxBuyers = leadType === 'outbound' ? 3 : 5;
 
-    const exclusivePriceCents =
-      (dto as any).exclusive_price_cents != null
-        ? String((dto as any).exclusive_price_cents)
-        : dto.price_cents.toString();
-
-    // shared_price_cents is null by default — computed at query time as exclusive / cap
-    const sharedPriceCents =
-      (dto as any).shared_price_cents != null
-        ? String((dto as any).shared_price_cents)
-        : null;
+    // Pricing always comes from admin-controlled lead_pricing_config table
+    const { exclusive: exclusivePriceCents, shared: sharedPriceCents } =
+      await this.leadPricingConfigService.getPricesForLead(leadType);
 
     const lead = this.leadRepo.create({
-      ...rest,
+      source: dto.source,
+      market: dto.market,
+      lead_type: dto.lead_type,
+      status: LeadStatus.AVAILABLE, // always available — no admin approval
+      exclusivity_level: dto.exclusivity_level,
+      quality_score: dto.quality_score,
+      title: dto.title,
       external_id: dto.external_id ?? null,
       metadata: dto.metadata ?? {},
       utm: utm ?? {},
       canonical_lead_source: canonical_lead_source ?? null,
       duplicate_of_lead: duplicateOf,
-      price_cents: dto.price_cents.toString(),
+      price_cents: exclusivePriceCents,
       exclusive_price_cents: exclusivePriceCents,
       shared_price_cents: sharedPriceCents,
-      max_non_exclusive_buyers: (dto as any).max_non_exclusive_buyers ?? defaultMaxBuyers,
+      max_non_exclusive_buyers: dto.max_non_exclusive_buyers ?? defaultMaxBuyers,
       early_access_until: earlyAccessUntil,
     });
 
@@ -999,26 +1000,35 @@ export class LeadsService {
     return this.leadRepo.manager.query<Array<{
       phone: string;
       count: string;
-      leads: Array<{ id: string; title: string; status: string; created_at: string; is_duplicate: boolean }>;
+      leads: Array<{
+        id: string; title: string; status: string; created_at: string;
+        is_duplicate: boolean; source: string; canonical_lead_source: string | null;
+        vendor_name: string | null;
+      }>;
     }>>(
-      `SELECT LOWER(TRIM(metadata->>'phone')) AS phone,
+      `SELECT LOWER(TRIM(l.metadata->>'phone')) AS phone,
               COUNT(*)::text AS count,
               json_agg(
                 json_build_object(
-                  'id', id,
-                  'title', title,
-                  'status', status,
-                  'created_at', created_at,
-                  'is_duplicate', (duplicate_of_lead_id IS NOT NULL)
-                ) ORDER BY created_at ASC
+                  'id', l.id,
+                  'title', l.title,
+                  'status', l.status,
+                  'created_at', l.created_at,
+                  'source', l.source,
+                  'canonical_lead_source', l.canonical_lead_source,
+                  'vendor_name', vi.name,
+                  'is_duplicate', (l.duplicate_of_lead_id IS NOT NULL)
+                ) ORDER BY l.created_at ASC
               ) AS leads
-       FROM leads
-       WHERE COALESCE(metadata->>'phone', '') <> ''
-         AND status != 'archived'
+       FROM leads l
+       LEFT JOIN vendor_integrations vi
+              ON vi.id::text = l.canonical_lead_source AND l.source = 'inbound'
+       WHERE COALESCE(l.metadata->>'phone', '') <> ''
+         AND l.status != 'archived'
        GROUP BY 1
        HAVING COUNT(*) > 1
        ORDER BY COUNT(*) DESC
-       LIMIT 50`,
+       LIMIT 100`,
     );
   }
 
@@ -1070,6 +1080,72 @@ export class LeadsService {
        LIMIT $${idx} OFFSET $${idx + 1}`,
       args,
     );
+  }
+
+  /** Admin: manually assign a lead to a specific buyer. */
+  async assignLeadAsAdmin(leadId: string, userId: string) {
+    return this.buyLead(userId, leadId, 'manual' as any, 'exclusive');
+  }
+
+  /** Admin: revoke an assignment, refund the wallet, reopen the lead. */
+  async revokeAssignment(assignmentId: string) {
+    const assignment = await this.leadAssignmentRepo.findOne({
+      where: { id: assignmentId },
+      relations: { buyer: true, lead: true },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+    if (assignment.disposition === 'refunded') {
+      throw new BadRequestException('Assignment is already revoked');
+    }
+
+    const lead = assignment.lead;
+    const amount = Number(assignment.amount_charged_cents);
+
+    await this.walletService.adminCreditWallet(
+      assignment.buyer.id,
+      amount,
+      `Admin revoked assignment for lead: ${lead.title}`,
+    );
+
+    await this.leadAssignmentRepo.update(assignmentId, { disposition: 'refunded' });
+
+    if (assignment.exclusivity_choice === 'non_exclusive' && lead.non_exclusive_buyers_count > 0) {
+      await this.leadRepo.decrement({ id: lead.id }, 'non_exclusive_buyers_count', 1);
+    }
+    if (lead.status === LeadStatus.SOLD || lead.status === LeadStatus.SOLD_OUT || lead.status === LeadStatus.LOCKED) {
+      await this.leadRepo.update({ id: lead.id }, { status: LeadStatus.AVAILABLE });
+    }
+
+    await this.assignmentEventRepo.save(
+      this.assignmentEventRepo.create({
+        assignment: { id: assignmentId } as LeadAssignment,
+        event_type: 'admin_revoked',
+        body: { amount_refunded: amount },
+      }),
+    );
+
+    return { ok: true, assignment_id: assignmentId, refunded_cents: amount };
+  }
+
+  /** Admin: replace one assignment with another lead. Revokes old + assigns new. */
+  async replaceAssignment(assignmentId: string, newLeadId: string) {
+    const assignment = await this.leadAssignmentRepo.findOne({
+      where: { id: assignmentId },
+      relations: { buyer: true, lead: true },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+
+    await this.revokeAssignment(assignmentId);
+    const newAssignment = await this.assignLeadAsAdmin(newLeadId, assignment.buyer.id);
+    return { ok: true, old_assignment_id: assignmentId, new_assignment: newAssignment };
+  }
+
+  /** Admin: mark a lead as bad quality. */
+  async markLeadBad(id: string) {
+    const lead = await this.findLeadOrThrow(id);
+    lead.is_bad_lead = true;
+    lead.status = LeadStatus.BAD;
+    return this.leadRepo.save(lead);
   }
 
   async markLeadAsDuplicateOf(canonicalLeadId: string, duplicateLeadId: string) {
@@ -1145,6 +1221,13 @@ export class LeadsService {
         if (!isSubscribed) {
           throw new ForbiddenException(
             'An active $99/month subscription is required to purchase shared leads. Non-subscribers may only buy exclusive leads.',
+          );
+        }
+        // Cancelled users (past current_period_end) may only purchase exclusive leads
+        const cancelledOnly = await this.proEntitlementService.isCancelledExpired(buyerId);
+        if (cancelledOnly) {
+          throw new ForbiddenException(
+            'Your subscription has expired. Reactivate your subscription to purchase shared leads — your wallet balance can still be used for exclusive purchases.',
           );
         }
       }
@@ -1314,6 +1397,9 @@ export class LeadsService {
 
       await queryRunner.commitTransaction();
 
+      // Fire-and-forget: check wallet balance after purchase and notify if low
+      void this.checkWalletThresholdsAfterPurchase(buyerId, Number(effectivePriceCents)).catch(() => {/* logged inside */});
+
       await Promise.allSettled([
         this.notificationsService.logPurchase(
           buyerId,
@@ -1336,6 +1422,8 @@ export class LeadsService {
             lead_type: lead.lead_type,
             metadata: lead.metadata ?? {},
           },
+          // Pass assignment ID so CRM retry worker can pick it up on failure
+          { assignmentId: savedAssignment.id },
         ),
       ]);
 
@@ -1353,6 +1441,134 @@ export class LeadsService {
       throw err;
     } finally {
       await queryRunner.release();
+    }
+  }
+
+  /**
+   * Exclusive buyout: buyer pays exclusive_price_cents to lock a partially-sold
+   * shared lead, preventing further non-exclusive sales.
+   */
+  async exclusiveBuyout(buyerId: string, leadId: string) {
+    const canBuy = await this.proEntitlementService.canBuyDuringEarlyAccess(
+      buyerId,
+      await this.findLeadOrThrow(leadId),
+    );
+    if (!canBuy) {
+      throw new ForbiddenException(
+        'This lead is in early access — available to Pro subscribers only for now.',
+      );
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const lead = await queryRunner.manager
+        .getRepository(Lead)
+        .createQueryBuilder('lead')
+        .setLock('pessimistic_write')
+        .where('lead.id = :id', { id: leadId })
+        .getOne();
+
+      if (!lead) throw new NotFoundException('Lead not found');
+
+      if (lead.status !== LeadStatus.AVAILABLE) {
+        throw new BadRequestException('Lead is not available for exclusive buyout');
+      }
+      if (lead.non_exclusive_buyers_count >= lead.max_non_exclusive_buyers) {
+        throw new BadRequestException('Lead is already sold out — no slots remain to lock');
+      }
+
+      const existingExclusive = await queryRunner.manager
+        .getRepository(LeadAssignment)
+        .createQueryBuilder('a')
+        .where('a.lead_id = :leadId', { leadId })
+        .andWhere("a.exclusivity_choice = 'exclusive'")
+        .andWhere("COALESCE(a.disposition, '') != 'refunded'")
+        .getCount();
+      if (existingExclusive > 0) {
+        throw new BadRequestException('Lead has already been purchased exclusively');
+      }
+
+      const exclusivePrice = this.getExclusivePriceCents(lead);
+      const effectivePrice = await this.proEntitlementService.discountedPriceCents(buyerId, exclusivePrice);
+
+      const buyerWallet = await queryRunner.manager.findOne(WalletAccount, {
+        where: { user: { id: buyerId } },
+      });
+      if (!buyerWallet) throw new NotFoundException('Wallet not found');
+      if (BigInt(buyerWallet.balance_cents) < effectivePrice) {
+        throw new BadRequestException('Insufficient wallet balance');
+      }
+
+      // Lock the lead — prevent further non-exclusive purchases
+      lead.status = LeadStatus.LOCKED;
+      lead.reserved_until = null;
+      lead.reserved_by_user = null;
+      await queryRunner.manager.save(lead);
+
+      const assignment = queryRunner.manager.create(LeadAssignment, {
+        buyer: { id: buyerId } as any,
+        lead,
+        purchase_type: 'manual' as any,
+        amount_charged_cents: effectivePrice.toString(),
+        lifecycle_phase: 'new',
+        exclusivity_choice: 'exclusive_buyout',
+      });
+      const savedAssignment = await queryRunner.manager.save(assignment);
+
+      const effectivePriceNumber = Number(effectivePrice);
+      if (!Number.isSafeInteger(effectivePriceNumber)) {
+        throw new BadRequestException('Lead price is too large');
+      }
+
+      await this.walletService.debitWallet(
+        buyerId,
+        effectivePriceNumber,
+        'lead_purchase',
+        lead.id,
+        'Lead purchase (exclusive buyout)',
+      );
+
+      await queryRunner.commitTransaction();
+
+      void this.checkWalletThresholdsAfterPurchase(buyerId, effectivePriceNumber).catch(() => {/* logged inside */});
+
+      await this.assignmentEventRepo.save(
+        this.assignmentEventRepo.create({
+          assignment: { id: savedAssignment.id } as LeadAssignment,
+          event_type: 'purchased',
+          body: { purchase_type: 'manual', exclusivity_choice: 'exclusive_buyout' },
+        }),
+      );
+
+      return savedAssignment;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  private async checkWalletThresholdsAfterPurchase(buyerId: string, paidCents: number) {
+    try {
+      const wallet = await this.walletService.getWallet(buyerId);
+      if (!wallet) return;
+
+      const balanceCents = Number(wallet.balance_cents);
+      // Use the price that was just charged as the "lead price" reference
+      const leadPrice = Math.max(paidCents, SUBSCRIPTION_PRICE_INBOUND_CENTS > 0n ? Number(SUBSCRIPTION_PRICE_INBOUND_CENTS) : 2500);
+      const remaining = Math.floor(balanceCents / leadPrice);
+
+      if (balanceCents < leadPrice) {
+        await this.notificationsService.notifyDeliveryPaused(buyerId, balanceCents, leadPrice);
+      } else if (remaining <= 2) {
+        await this.notificationsService.notifyWalletLow(buyerId, remaining, leadPrice);
+      }
+    } catch {
+      // non-critical: don't surface wallet-check errors to the caller
     }
   }
 }

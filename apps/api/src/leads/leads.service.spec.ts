@@ -43,6 +43,9 @@ describe('LeadsService', () => {
       ),
     } as unknown as ConfigService
 
+    const leadPricingConfigService = {
+      getPricesForLead: jest.fn().mockResolvedValue({ exclusive: '15000', shared: '2500' }),
+    };
     const service = new LeadsService(
       leadRepo as any,
       leadPriceHistoryRepo as any,
@@ -50,6 +53,7 @@ describe('LeadsService', () => {
       leadAssignmentRepo as any,
       assignmentEventRepo as any,
       subscriptionRepo as any,
+      {} as any, // distributionRuleRepo
       dataSource as any,
       walletService as any,
       distributionService as any,
@@ -57,6 +61,8 @@ describe('LeadsService', () => {
       notificationsService as any,
       integrationsService as any,
       config,
+      {} as any, // proEntitlementService
+      leadPricingConfigService as any,
     )
 
     return { service, leadRepo, leadAssignmentRepo, queryRunner }

@@ -2,14 +2,14 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Loader2, Sparkles, Users, Crown, Calendar } from "lucide-react";
+import { Check, Loader2, Sparkles, Users, Zap } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import {
   cancelSubscription,
   checkoutSubscription,
   createCustomerPortal,
   getMySubscription,
-  // getSubscriptionPlans, // commented out — card is hardcoded
+  getSubscriptionPricing,
   syncSubscriptionCheckout,
   type SubscriptionDto,
 } from "@/lib/subscriptions-api";
@@ -28,14 +28,6 @@ function badgeColor(status: SubscriptionDto["status"]) {
   return { bg: "rgba(148,163,184,0.1)", border: "rgba(148,163,184,0.2)", text: "#cbd5e1" };
 }
 
-const PRO_BULLETS: Array<{ icon: typeof Check; text: string }> = [
-  { icon: Users, text: "Shared inbound leads — $30/buyer (up to 5 buyers per lead)" },
-  { icon: Users, text: "Shared outbound leads — $20/buyer (up to 3 buyers per lead)" },
-  { icon: Crown, text: "Full exclusive lead access at standard exclusive pricing" },
-  { icon: Sparkles, text: "Early access — 60 min head start on new leads before non-subscribers" },
-  { icon: Calendar, text: "Cancel anytime — no lock-in, managed through Stripe" },
-];
-
 function SubscriptionsContent() {
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
@@ -46,6 +38,28 @@ function SubscriptionsContent() {
     queryKey: queryKeys.subscriptions.me,
     queryFn: getMySubscription,
   });
+
+  const { data: pricing } = useQuery({
+    queryKey: ["subscriptions", "pricing"],
+    queryFn: getSubscriptionPricing,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const proDisplayPrice = pricing?.proDisplayPrice ?? "$49";
+  const sharedInboundPrice = pricing
+    ? `$${Math.round(pricing.sharedInboundPriceCents / 100)}`
+    : "$30";
+  const sharedOutboundPrice = pricing
+    ? `$${Math.round(pricing.sharedOutboundPriceCents / 100)}`
+    : "$20";
+
+  const proBullets: Array<{ icon: typeof Check; text: string }> = [
+    { icon: Users, text: `Non-exclusive inbound leads — ${sharedInboundPrice} each (up to 5 buyers)` },
+    { icon: Users, text: `Non-exclusive outbound leads — ${sharedOutboundPrice} each (up to 3 buyers)` },
+    { icon: Sparkles, text: "Early marketplace access — see new leads before free members" },
+    { icon: Zap, text: "Non-exclusive leads & auto-delivery — fresh matching leads routed to your CRM automatically" },
+    { icon: Check, text: "Cancel anytime" },
+  ];
 
   const hasActive = sub != null && (ACTIVE_LIKE as readonly string[]).includes(sub.status);
 
@@ -195,14 +209,14 @@ function SubscriptionsContent() {
             <div className="plan-card pro" style={{ position: "relative" }}>
               {hasActive && <span className="current-badge">Active</span>}
               <div className="plan-eyebrow pro">Pro</div>
-              <div className="plan-name" style={{ color: "#a5b4fc" }}>Subscription</div>
+              <div className="plan-name" style={{ color: "#a5b4fc" }}>Membership</div>
               <div className="plan-tagline">
-                Access discounted shared lead pricing and 60-minute early access on every new lead.
+                Membership is {proDisplayPrice} per month. Access shared lead pricing, auto-delivery, and early marketplace access.
               </div>
-              <div className="plan-price">$99</div>
-              <div className="plan-price-sub">per month, billed via Stripe</div>
+              <div className="plan-price">{proDisplayPrice}</div>
+              <div className="plan-price-sub" style={{ marginBottom: 6 }}>per month · cancel anytime</div>
               <ul className="plan-bullets">
-                {PRO_BULLETS.map(({ icon: Icon, text }) => (
+                {proBullets.map(({ icon: Icon, text }) => (
                   <li key={text} className="plan-bullet">
                     <span className="plan-bullet-icon pro" style={{ display: "flex" }}>
                       <Icon size={14} />
@@ -227,7 +241,7 @@ function SubscriptionsContent() {
                       <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
                       Redirecting…
                     </span>
-                  ) : "Subscribe — $99/mo"}
+                  ) : `Subscribe — ${proDisplayPrice}/month`}
                 </button>
               )}
             </div>
@@ -238,6 +252,26 @@ function SubscriptionsContent() {
             <div style={{ textAlign: "center", padding: "28px 0", color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
               <Loader2 size={18} style={{ animation: "spin 1s linear infinite", display: "inline-block" }} />
               {" "}Loading subscription status…
+            </div>
+          )}
+
+          {/* Cancelled-but-in-grace-period notice */}
+          {!subLoading && sub?.status === "cancelled" && sub.current_period_end && new Date(sub.current_period_end) > new Date() && (
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#fbbf24", marginBottom: 4 }}>Subscription cancelled — access until {fmtDate(sub.current_period_end)}</div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>
+                You still have full access including discounted shared leads until your current billing period ends. After that, auto delivery will be turned off and shared lead pricing will no longer apply. Your wallet balance will remain and can still be used toward exclusive leads.
+              </div>
+            </div>
+          )}
+
+          {/* Fully expired cancellation notice */}
+          {!subLoading && sub?.status === "cancelled" && sub.current_period_end && new Date(sub.current_period_end) <= new Date() && (
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.7)", marginBottom: 4 }}>Subscription ended</div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>
+                You still have wallet funds available. To access discounted shared leads, reactivate your subscription. You can still use your wallet balance toward exclusive lead purchases.
+              </div>
             </div>
           )}
 

@@ -160,6 +160,10 @@ export function buyLead(leadId: string, exclusivityChoice: 'exclusive' | 'non_ex
   return apiPost<{ id: string }>(`/leads/${leadId}/buy`, { exclusivity_choice: exclusivityChoice });
 }
 
+export function exclusiveBuyout(leadId: string) {
+  return apiPatch<{ id: string }>(`/leads/${leadId}/exclusive-buyout`, {});
+}
+
 export type LeadQuoteResponse = {
   exclusive_price_cents: string;
   shared_price_cents: string;
@@ -218,4 +222,18 @@ export function patchAssignmentLifecycle(
 
 export function createRefundRequest(assignment_id: string, reason: string) {
   return apiPost<{ id: string }>('/leads/me/refund-requests', { assignment_id, reason });
+}
+
+export type PricingConfigEntry = {
+  id: string;
+  lead_type: 'inbound' | 'outbound';
+  new_lead_price_cents: string;
+  shared_price_cents: string | null;
+  discount_after_days: number;
+  discount_amount_cents: string;
+  min_price_floor_cents: string | null;
+};
+
+export function getPricingConfig() {
+  return apiGet<PricingConfigEntry[]>('/leads/pricing-config');
 }

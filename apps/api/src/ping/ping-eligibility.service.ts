@@ -5,6 +5,9 @@ import { MoreThanOrEqual, Repository } from 'typeorm';
 import { DistributionRule } from '../entities/distribution-rule.entity';
 import { LeadAssignment } from '../entities/lead-assignment.entity';
 import { WalletAccount } from '../entities/wallet-account.entity';
+import { TermsAcceptance } from '../entities/terms-acceptance.entity';
+
+const CURRENT_TERMS_VERSION = '2025-01';
 
 export type PingEligibilityInput = {
   buyerId: string;
@@ -29,6 +32,8 @@ export class PingEligibilityService {
     private readonly walletRepo: Repository<WalletAccount>,
     @InjectRepository(LeadAssignment)
     private readonly assignmentRepo: Repository<LeadAssignment>,
+    @InjectRepository(TermsAcceptance)
+    private readonly termsRepo: Repository<TermsAcceptance>,
   ) {}
 
   async check(input: PingEligibilityInput): Promise<PingEligibilityResult> {
@@ -45,7 +50,21 @@ export class PingEligibilityService {
       return { eligible: false, reason: 'distribution_paused', distributionRule: rule };
     }
 
+    // Buyer must have accepted terms before receiving auto-delivered leads
+    const termsAccepted = await this.termsRepo.findOne({
+      where: { user: { id: input.buyerId }, terms_version: CURRENT_TERMS_VERSION },
+    });
+    if (!termsAccepted) {
+      return { eligible: false, reason: 'terms_not_accepted', distributionRule: rule };
+    }
+
+    // Buyer must have set at least one filter (market or lead type) before receiving auto-delivered leads.
+    // Empty filters means setup is incomplete — skip them to avoid blasting every lead to everyone.
     const marketFilters = rule.market_filters || [];
+    const leadTypeFilters = rule.lead_type_filters || [];
+    if (marketFilters.length === 0 && leadTypeFilters.length === 0) {
+      return { eligible: false, reason: 'no_criteria_set', distributionRule: rule };
+    }
     if (
       marketFilters.length > 0 &&
       input.market != null &&
@@ -54,7 +73,6 @@ export class PingEligibilityService {
       return { eligible: false, reason: 'market_not_enabled', distributionRule: rule };
     }
 
-    const leadTypeFilters = rule.lead_type_filters || [];
     if (
       leadTypeFilters.length > 0 &&
       !leadTypeFilters.map((m) => this.norm(m)).includes(this.norm(input.leadType))
@@ -136,6 +154,12 @@ export class PingEligibilityService {
           return { eligible: false, reason: 'cooldown_active', distributionRule: rule };
         }
       }
+    }
+
+    // Record launch date the first time a buyer passes all checks
+    if (!rule.launched_at) {
+      rule.launched_at = new Date();
+      await this.distributionRuleRepo.save(rule);
     }
 
     return { eligible: true, distributionRule: rule };

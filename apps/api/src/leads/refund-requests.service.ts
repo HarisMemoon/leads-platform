@@ -99,7 +99,7 @@ export class RefundRequestsService {
 
   async resolveAdmin(
     id: string,
-    status: 'approved' | 'rejected',
+    status: 'approved' | 'rejected' | 'need_more_proof' | 'credited' | 'replaced' | 'abuse_review',
     adminNotes: string | undefined,
     resolution: 'wallet_credit' | undefined,
   ) {
@@ -111,10 +111,38 @@ export class RefundRequestsService {
       },
     });
     if (!row) throw new NotFoundException('Refund request not found');
-    if (row.status !== RefundRequestStatus.PENDING) {
-      throw new BadRequestException('Refund is no longer pending');
+    // Allow updates from any non-terminal state (previously only from PENDING)
+    const terminal = [RefundRequestStatus.APPROVED, RefundRequestStatus.CREDITED, RefundRequestStatus.REPLACED];
+    if (terminal.includes(row.status)) {
+      throw new BadRequestException('Refund is already in a terminal state');
     }
     row.admin_notes = adminNotes ?? null;
+
+    // Handle non-approval statuses directly
+    if (status === 'need_more_proof' || status === 'abuse_review') {
+      row.status = status === 'need_more_proof' ? RefundRequestStatus.NEED_MORE_PROOF : RefundRequestStatus.ABUSE_REVIEW;
+      return this.refundRepo.save(row);
+    }
+    if (status === 'credited') {
+      row.status = RefundRequestStatus.CREDITED;
+      row.resolution = 'wallet_credit';
+      const saved = await this.refundRepo.save(row);
+      // Wire actual wallet credit
+      const assignment = row.lead_assignment;
+      if (assignment) {
+        const amount = Number(assignment.amount_charged_cents);
+        await this.walletService.adminCreditWallet(
+          row.buyer.id,
+          amount,
+          `Refund credit for lead: ${assignment.lead?.title ?? assignment.id}`,
+        );
+      }
+      return saved;
+    }
+    if (status === 'replaced') {
+      row.status = RefundRequestStatus.REPLACED;
+      return this.refundRepo.save(row);
+    }
     if (status === 'rejected') {
       row.status = RefundRequestStatus.REJECTED;
       row.resolution = null;
@@ -212,6 +240,31 @@ export class RefundRequestsService {
   }
 
   /** When purchases count against subscription monthly cap, refunds should restore it. */
+  /**
+   * Returns refund stats for a buyer. Used by admin to detect abuse.
+   * If refund_rate > 25%, the buyer should be flagged.
+   */
+  async getRefundAbuseStats(buyerId: string) {
+    const all = await this.refundRepo.find({ where: { buyer: { id: buyerId } } });
+    const totalPurchases = await this.assignmentRepo.count({ where: { buyer: { id: buyerId } } });
+    const totalRequests = all.length;
+    const approved = all.filter((r) => r.status === RefundRequestStatus.APPROVED || r.status === RefundRequestStatus.CREDITED).length;
+    const denied = all.filter((r) => r.status === RefundRequestStatus.REJECTED).length;
+    const pending = all.filter((r) => r.status === RefundRequestStatus.PENDING).length;
+    const abuseReview = all.filter((r) => r.status === RefundRequestStatus.ABUSE_REVIEW).length;
+    const refundRate = totalPurchases > 0 ? Math.round((totalRequests / totalPurchases) * 100) : 0;
+    return {
+      total_purchases: totalPurchases,
+      total_refund_requests: totalRequests,
+      approved,
+      denied,
+      pending,
+      abuse_review: abuseReview,
+      refund_rate_pct: refundRate,
+      flagged: refundRate >= 25,
+    };
+  }
+
   private async adjustCappedSubscriptionLeadUsage(buyerId: string, delta: number) {
     const sub = await this.subscriptionRepo.findOne({
       where: {

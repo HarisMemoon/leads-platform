@@ -13,8 +13,10 @@ import { WalletAccount } from '../entities/wallet-account.entity';
 import { WalletService } from '../wallet/wallet.service';
 import { Subscription } from '../entities/subscription.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { DistributionRule } from '../entities/distribution-rule.entity';
 import { SubscriptionStatus } from '../../common/enums/subscription-status.enum';
 import { PlanType } from '../../common/enums/plan-type.enum';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class StripeService {
@@ -33,7 +35,10 @@ export class StripeService {
     private readonly subscriptionRepo: Repository<Subscription>,
     @InjectRepository(SubscriptionPlan)
     private readonly subscriptionPlanRepo: Repository<SubscriptionPlan>,
+    @InjectRepository(DistributionRule)
+    private readonly distributionRuleRepo: Repository<DistributionRule>,
     private readonly walletService: WalletService,
+    private readonly notificationsService: NotificationsService,
   ) {
     const secretKey = configService.get<string>('STRIPE_SECRET_KEY');
     const webhookSecret = (configService.get<string>('STRIPE_WEBHOOK_SECRET') ?? '').trim();
@@ -543,23 +548,78 @@ export class StripeService {
    * plan (10% discount, early access, priority notifications) — no wallet top-up.
    * This handler is kept as a no-op stub so the webhook pipeline stays intact.
    */
-  private async handleInvoicePaid(_invoice: Stripe.Invoice) {
-    // No-op: monthly wallet credits removed in marketplace v2.
+  private async handleInvoicePaid(invoice: Stripe.Invoice) {
+    // When payment succeeds, restore auto-delivery for any previously paused accounts.
+    const subId = this.extractSubscriptionIdFromInvoice(invoice);
+    if (!subId) return;
+
+    const localSub = await this.subscriptionRepo.findOne({
+      where: { stripe_subscription_id: subId },
+      relations: { user: true },
+    });
+    if (!localSub || !localSub.user?.id) return;
+
+    // Re-activate distribution rule so leads start flowing again
+    const updateResult = await this.distributionRuleRepo.update(
+      { user: { id: localSub.user.id } },
+      { is_active: true },
+    );
+
+    // Notify the customer that their subscription is active and auto-delivery has resumed
+    void this.notificationsService.sendUserEvent({
+      userId: localSub.user.id,
+      type: 'subscription_payment_restored',
+      title: 'Your Newleey subscription is active',
+      body: 'Your payment went through and auto lead delivery has been restored. Matching leads will be delivered to you automatically.',
+      emailSubject: 'Your Newleey subscription is active again',
+      emailHtml: `<div style="font-family:Arial,sans-serif;max-width:560px;line-height:1.6">
+        <h2 style="color:#10b981">Subscription Restored ✓</h2>
+        <p>Your $49/month Newleey subscription payment was successful.</p>
+        <p><strong>Auto lead delivery has been re-enabled.</strong> You will start receiving matching leads automatically based on your distribution settings.</p>
+        <a href="${this.appBaseUrl}/distribution" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">View Distribution Settings →</a>
+      </div>`,
+    }).catch((e) => this.logger.warn(`Payment restored notification failed: ${e instanceof Error ? e.message : e}`));
   }
 
   private async handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
     const subId = this.extractSubscriptionIdFromInvoice(invoice);
-    if (!subId) {
-      return;
-    }
+    if (!subId) return;
 
     const localSub = await this.subscriptionRepo.findOne({
       where: { stripe_subscription_id: subId },
+      relations: { user: true },
     });
     if (!localSub) return;
 
     localSub.status = SubscriptionStatus.PAST_DUE;
     await this.subscriptionRepo.save(localSub);
+
+    const userId = localSub.user?.id;
+    if (!userId) return;
+
+    // Pause auto-delivery immediately — is_active = false stops the distribution
+    // processor and ping eligibility from routing leads to this buyer.
+    await this.distributionRuleRepo.update(
+      { user: { id: userId } },
+      { is_active: false },
+    );
+
+    // Day-1 email notification
+    void this.notificationsService.sendUserEvent({
+      userId,
+      type: 'subscription_payment_failed',
+      title: 'Your Newleey payment failed',
+      body: 'Your subscription payment did not go through. Auto lead delivery has been paused. Please update your payment method to resume.',
+      emailSubject: 'Action required: Your Newleey subscription payment failed',
+      emailHtml: `<div style="font-family:Arial,sans-serif;max-width:560px;line-height:1.6">
+        <h2 style="color:#ef4444">Payment Failed</h2>
+        <p>Your $49/month Newleey subscription payment did not go through.</p>
+        <p><strong>Auto lead delivery has been paused immediately.</strong> You will not receive new leads until your payment is resolved.</p>
+        <p>Please update your payment method to resume lead delivery.</p>
+        <a href="${this.appBaseUrl}/subscriptions" style="display:inline-block;margin-top:12px;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">Update Payment Method →</a>
+        <p style="margin-top:16px;font-size:12px;color:#999">Your wallet balance and lead settings are preserved.</p>
+      </div>`,
+    }).catch((e) => this.logger.warn(`Failed to send payment-failed email: ${e instanceof Error ? e.message : e}`));
   }
 
   private async upsertSubscriptionFromStripe(stripeSub: Stripe.Subscription) {

@@ -9,6 +9,7 @@ import { visibleFeatureBulletTexts } from '../../common/subscription-plan-bullet
 import { SubscriptionPlanCatalogItemDto } from './dto/subscription-plan-catalog.dto';
 import { Subscription } from '../entities/subscription.entity';
 import { SubscriptionPlan } from '../entities/subscription-plan.entity';
+import { LeadPricingConfig } from '../entities/lead-pricing-config.entity';
 import { User } from '../entities/user.entity';
 import { StripeService } from '../stripe/stripe.service';
 
@@ -30,6 +31,8 @@ export class SubscriptionsService {
     private readonly subscriptionRepo: Repository<Subscription>,
     @InjectRepository(SubscriptionPlan)
     private readonly planRepo: Repository<SubscriptionPlan>,
+    @InjectRepository(LeadPricingConfig)
+    private readonly leadPricingRepo: Repository<LeadPricingConfig>,
   ) {
     const secretKey = configService.get<string>('STRIPE_SECRET_KEY');
     if (!secretKey) {
@@ -85,6 +88,34 @@ export class SubscriptionsService {
       featureBullets: visibleFeatureBulletTexts(row.feature_bullets),
       stripeConfigured: !!this.stripePriceIdFor(row.plan_type),
     }));
+  }
+
+  /**
+   * Public pricing snapshot used by the buyer-facing UI (upgrade banners, plan cards).
+   * Reads the Pro plan price and shared lead prices from admin-editable DB tables.
+   */
+  async getPricing(): Promise<{
+    proMonthlyPriceCents: number;
+    proDisplayPrice: string;
+    sharedInboundPriceCents: number;
+    sharedOutboundPriceCents: number;
+  }> {
+    const [proPlan, inboundConfig, outboundConfig] = await Promise.all([
+      this.planRepo.findOne({ where: { plan_type: PlanType.PRO } }),
+      this.leadPricingRepo.findOne({ where: { lead_type: 'inbound' } }),
+      this.leadPricingRepo.findOne({ where: { lead_type: 'outbound' } }),
+    ]);
+
+    const proMonthlyPriceCents = proPlan ? Number(proPlan.monthly_price_cents) : 4900;
+    const proDisplayPrice = proPlan?.display_price ?? `$${Math.round(proMonthlyPriceCents / 100)}`;
+    const sharedInboundPriceCents = inboundConfig?.shared_price_cents
+      ? Number(inboundConfig.shared_price_cents)
+      : 3000;
+    const sharedOutboundPriceCents = outboundConfig?.shared_price_cents
+      ? Number(outboundConfig.shared_price_cents)
+      : 2000;
+
+    return { proMonthlyPriceCents, proDisplayPrice, sharedInboundPriceCents, sharedOutboundPriceCents };
   }
 
   async checkout(

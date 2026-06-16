@@ -37,6 +37,18 @@ export type DistributionEngineSettingsDto = {
   updated_at: string;
 };
 
+export type AdminLeadPricingConfigDto = {
+  id: string;
+  lead_type: string;
+  new_lead_price_cents: string;
+  shared_price_cents: string | null;
+  discount_after_days: number;
+  discount_amount_cents: string;
+  min_price_floor_cents: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export function getAdminExtendedMetrics() {
   return apiGet<AdminExtendedMetrics>('/admin/metrics/extended');
 }
@@ -57,6 +69,23 @@ export function getDistributionEngineSettings() {
   return apiGet<DistributionEngineSettingsDto>(
     '/admin/distribution-engine/settings',
   );
+}
+
+export function getAdminLeadPricing() {
+  return apiGet<AdminLeadPricingConfigDto[]>('/admin/lead-pricing');
+}
+
+export function patchAdminLeadPricing(
+  type: string,
+  body: Partial<{
+    new_lead_price_cents: number;
+    shared_price_cents: number | null;
+    discount_after_days: number;
+    discount_amount_cents: number;
+    min_price_floor_cents: number | null;
+  }>,
+) {
+  return apiPatch<AdminLeadPricingConfigDto>(`/admin/lead-pricing/${type}`, body);
 }
 
 export type VendorIntegrationDto = {
@@ -160,6 +189,12 @@ export type AdminLeadRow = {
   metadata: Record<string, unknown>;
   created_at: string;
   buyers: string[];
+  // Internal cost fields (admin only)
+  internal_cost_cents: string | null;
+  ping_post_cost_cents: string | null;
+  campaign_name: string | null;
+  ad_source: string | null;
+  cost_notes: string | null;
 };
 
 export type IntakePeriodStats = {
@@ -186,6 +221,43 @@ export type AdminVendorPayoutStats = {
   total_hits: number;
   accepted: number;
   rejected: number;
+};
+
+export type AdminVendorStatsRow = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  created_at: string;
+  total_hits: number;
+  accepted_hits: number;
+  total_leads: number;
+  purchased_leads: number;
+  total_revenue_cents: number;
+  conversion_rate: number;
+};
+
+export type AdminVendorDetail = {
+  vendor: VendorIntegrationDto;
+  summary: {
+    total_leads: number;
+    purchased_leads: number;
+    total_revenue_cents: number;
+    avg_revenue_per_lead: number;
+    conversion_rate: number;
+  };
+  webhook_hits: {
+    total: number;
+    accepted: number;
+    rejected: number;
+  };
+  recent_leads: Array<{
+    lead_id: string;
+    title: string;
+    market: string;
+    created_at: string;
+    purchase_count: number;
+    revenue_cents: number;
+  }>;
 };
 
 export function getAdminLeads(opts?: {
@@ -240,6 +312,15 @@ export function getAdminVendorWebhookHits(vendorId: string, limit = 50) {
 
 export function getAdminVendorPayoutStats(vendorId: string) {
   return apiGet<AdminVendorPayoutStats>(`/admin/vendors/${vendorId}/payout-stats`);
+}
+
+export function getAdminVendorStats(sort?: "newest" | "latest" | "leads" | "sold" | "revenue") {
+  const suffix = sort ? `?sort=${encodeURIComponent(sort)}` : "";
+  return apiGet<AdminVendorStatsRow[]>(`/admin/vendors/stats${suffix}`);
+}
+
+export function getAdminVendorDetail(vendorId: string) {
+  return apiGet<AdminVendorDetail>(`/admin/vendors/${vendorId}/stats`);
 }
 
 export function postAdminLeadDiscount(
@@ -303,6 +384,7 @@ export type AdminUserRow = {
   distribution_locked: boolean;
   email_verified: boolean;
   onboarding_completed: boolean;
+  account_status?: string;
   created_at: string;
 };
 
@@ -601,6 +683,78 @@ export function patchAdminUserDistributionLock(
     `/admin/users/${userId}/distribution-lock`,
     body,
   );
+}
+
+export function postAdminPauseDelivery(userId: string) {
+  return apiPost<{ ok: boolean; userId: string; delivery_paused: boolean }>(
+    `/admin/users/${userId}/pause-delivery`,
+    {},
+  );
+}
+
+export function postAdminResumeDelivery(userId: string) {
+  return apiPost<{ ok: boolean; userId: string; delivery_paused: boolean }>(
+    `/admin/users/${userId}/resume-delivery`,
+    {},
+  );
+}
+
+export function postAdminAssignLead(leadId: string, userId: string) {
+  return apiPost<{ ok: boolean; assignment_id: string }>(`/admin/leads/${leadId}/assign`, { user_id: userId });
+}
+
+export function deleteAdminAssignment(assignmentId: string) {
+  return apiDelete<{ ok: boolean }>(`/admin/assignments/${assignmentId}`);
+}
+
+export function postAdminReplaceAssignment(
+  assignmentId: string,
+  newLeadId: string,
+) {
+  return apiPost<{
+    ok: boolean;
+    revoked_assignment_id: string;
+    new_assignment?: { id: string } | null;
+  }>(`/admin/assignments/${assignmentId}/replace`, { new_lead_id: newLeadId });
+}
+
+export function postAdminMarkLeadBad(leadId: string, reason?: string) {
+  return apiPost<{ ok: boolean; id: string }>(`/admin/leads/${leadId}/mark-bad`, { reason });
+}
+
+export function patchAdminLeadInternalCost(
+  id: string,
+  body: {
+    internal_cost_cents?: number | null;
+    ping_post_cost_cents?: number | null;
+    campaign_name?: string | null;
+    ad_source?: string | null;
+    cost_notes?: string | null;
+  },
+) {
+  return apiPatch<{
+    id: string;
+    internal_cost_cents: string | null;
+    ping_post_cost_cents: string | null;
+    campaign_name: string | null;
+    ad_source: string | null;
+    cost_notes: string | null;
+  }>(`/admin/leads/${id}/internal-cost`, body);
+}
+
+export type RefundAbuseStats = {
+  total_purchases: number;
+  total_refund_requests: number;
+  approved: number;
+  denied: number;
+  pending: number;
+  abuse_review: number;
+  refund_rate_pct: number;
+  flagged: boolean;
+};
+
+export function getAdminRefundAbuseStats(userId: string) {
+  return apiGet<RefundAbuseStats>(`/admin/users/${userId}/refund-abuse-stats`);
 }
 
 export type AdminRefundRequestRow = {

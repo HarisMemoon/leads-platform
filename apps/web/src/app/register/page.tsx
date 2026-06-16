@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { setAccessToken } from "@/lib/token";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
+import PhoneInput from "react-phone-input-2";
+import "react-phone-input-2/lib/style.css";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [form, setForm] = useState({ email: "", password: "", confirm: "", full_name: "", company_name: "" });
+  const [form, setForm] = useState({ email: "", password: "", confirm: "", full_name: "", company_name: "", phone: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPw, setShowPw] = useState(false);
@@ -21,6 +23,7 @@ export default function RegisterPage() {
     e.preventDefault();
     if (form.password !== form.confirm) { setError("Passwords don't match"); return; }
     if (form.password.length < 8) { setError("Password must be at least 8 characters"); return; }
+    if (!form.phone || form.phone.length < 7) { setError("Please enter a valid phone number"); return; }
     setLoading(true);
     setError("");
     try {
@@ -40,6 +43,7 @@ export default function RegisterPage() {
           password: form.password,
           full_name: form.full_name,
           company_name: form.company_name,
+          phone: form.phone ? `+${form.phone}` : undefined,
           ...utm,
         }),
       });
@@ -350,6 +354,56 @@ export default function RegisterPage() {
           .card { padding: 36px 24px; }
           .row-2 { grid-template-columns: 1fr; }
         }
+
+        /* react-phone-input-2 dark theme overrides */
+        .react-tel-input .form-control {
+          width: 100% !important;
+          background: rgba(255,255,255,0.04) !important;
+          border: 1px solid rgba(255,255,255,0.1) !important;
+          border-radius: 10px !important;
+          color: #fff !important;
+          font-size: 14px !important;
+          font-family: 'DM Sans', sans-serif !important;
+          height: 44px !important;
+          padding-left: 52px !important;
+        }
+        .react-tel-input .form-control:focus {
+          border-color: rgba(99,102,241,0.5) !important;
+          box-shadow: none !important;
+          outline: none !important;
+        }
+        .react-tel-input .flag-dropdown {
+          background: rgba(255,255,255,0.06) !important;
+          border: 1px solid rgba(255,255,255,0.1) !important;
+          border-radius: 10px 0 0 10px !important;
+        }
+        .react-tel-input .flag-dropdown.open,
+        .react-tel-input .selected-flag:hover,
+        .react-tel-input .selected-flag:focus {
+          background: rgba(255,255,255,0.1) !important;
+        }
+        .react-tel-input .country-list {
+          background: #1a1d27 !important;
+          border: 1px solid rgba(255,255,255,0.1) !important;
+          border-radius: 10px !important;
+          color: #fff !important;
+        }
+        .react-tel-input .country-list .country:hover,
+        .react-tel-input .country-list .country.highlight {
+          background: rgba(99,102,241,0.15) !important;
+        }
+        .react-tel-input .country-list .search {
+          background: #1a1d27 !important;
+          border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+        }
+        .react-tel-input .country-list .search-box {
+          background: rgba(255,255,255,0.05) !important;
+          border: 1px solid rgba(255,255,255,0.1) !important;
+          color: #fff !important;
+          border-radius: 6px !important;
+        }
+        .react-tel-input .country-list .country-name { color: rgba(255,255,255,0.85) !important; }
+        .react-tel-input .country-list .dial-code { color: rgba(255,255,255,0.4) !important; }
       `}</style>
 
       <div className="reg-root">
@@ -451,6 +505,19 @@ export default function RegisterPage() {
                       <input type="text" placeholder="Acme Investments" value={form.company_name} onChange={set("company_name")} />
                     </div>
                   </div>
+                </div>
+                <div className="field">
+                  <label>Phone number <span style={{ color: "#ef4444", fontWeight: 400 }}>*</span> <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(required)</span></label>
+                  <PhoneInput
+                    country="us"
+                    value={form.phone}
+                    onChange={(phone) => setForm((f) => ({ ...f, phone }))}
+                    preferredCountries={["us", "ca", "gb"]}
+                    enableSearch
+                    searchPlaceholder="Search country..."
+                    inputStyle={{ width: "100%" }}
+                    isValid={(value) => value.length >= 7}
+                  />
                 </div>
                 <div className="btn-row">
                   <button type="button" className="back-btn" onClick={() => setStep(1)}>← Back</button>

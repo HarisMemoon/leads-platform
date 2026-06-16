@@ -8,10 +8,6 @@ const SENSITIVE_KEYS = new Set([
   'mobile',
   'address',
   'street',
-  'city',
-  'zip',
-  'postal',
-  'state',
 ]);
 
 export function redactLeadMetadata(meta: Record<string, unknown> | null | undefined) {

@@ -26,24 +26,6 @@ export class CreateLeadDto {
   @Min(0)
   quality_score!: number;
 
-  @IsInt()
-  @Min(0)
-  price_cents!: number;
-
-  /** Price when a single buyer takes this lead exclusively. Defaults to price_cents. */
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  exclusive_price_cents?: number;
-
-  /** Per-buyer price when multiple buyers share this lead. Defaults to price_cents. */
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  shared_price_cents?: number;
-
   /** Maximum shared buyers allowed. Defaults to 3. */
   @IsOptional()
   @Type(() => Number)

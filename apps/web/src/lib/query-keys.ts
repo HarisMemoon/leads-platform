@@ -40,6 +40,7 @@ export const queryKeys = {
     rules: ["distribution", "rules"] as const,
     me: ["distribution", "me"] as const,
     pricingRules: ["distribution", "pricing-rules"] as const,
+    launchChecklist: ["distribution", "launch-checklist"] as const,
   },
   marketAlerts: {
     me: ["market-alerts", "me"] as const,
@@ -70,10 +71,16 @@ export const queryKeys = {
     pings: ["admin", "pings"] as const,
     outboundBuyers: ["admin", "outbound", "buyers"] as const,
     outboundLogs: (opts?: { leadId?: string }) => ["admin", "outbound", "logs", opts ?? {}] as const,
+    leadPricing: ["admin", "lead-pricing"] as const,
+    vendorStats: (sort?: string) => ["admin", "vendor-stats", sort ?? "newest"] as const,
+    vendorDetail: (id: string) => ["admin", "vendor-detail", id] as const,
   },
   subscriptions: {
     me: ["subscriptions", "me"] as const,
     plans: ["subscriptions", "plans"] as const,
+  },
+  terms: {
+    status: ["terms", "status"] as const,
   },
   resources: {
     items: ["resources", "items"] as const,

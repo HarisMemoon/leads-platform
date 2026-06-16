@@ -6,7 +6,10 @@ describe('PingEligibilityService', () => {
     const ruleRepo = createRepositoryMock<any>();
     const walletRepo = createRepositoryMock<any>();
     const assignmentRepo = createRepositoryMock<any>();
-    const service = new PingEligibilityService(ruleRepo as any, walletRepo as any, assignmentRepo as any);
+    // Mock termsRepo to return an accepted record by default
+    const termsRepo = createRepositoryMock<any>();
+    termsRepo.findOne.mockResolvedValue({ id: 'terms-1', accepted_at: new Date() });
+    const service = new PingEligibilityService(ruleRepo as any, walletRepo as any, assignmentRepo as any, termsRepo as any);
     assignmentRepo.count.mockResolvedValue(0);
     assignmentRepo.createQueryBuilder.mockReturnValue(
       createQueryBuilderMock({ getRawOne: jest.fn().mockResolvedValue({ sum: '0' }) }),

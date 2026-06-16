@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
   buyLead,
+  exclusiveBuyout,
   getLeadDetail,
   getLeadQuote,
   listMarketplaceLeads,
@@ -12,39 +13,64 @@ import {
   type MarketplaceLeadRow,
 } from "@/lib/leads-api";
 import { getWalletMe, centsToNumber } from "@/lib/wallet-api";
-import { getMySubscription } from "@/lib/subscriptions-api";
+import { getMySubscription, getSubscriptionPricing } from "@/lib/subscriptions-api";
 import { queryKeys } from "@/lib/query-keys";
 import { ApiError } from "@/lib/api";
-import { LeadDetailModal, QualityBar } from "@/components/LeadDetailModal";
+import { LeadDetailModal } from "@/components/LeadDetailModal";
 
 const PAGE_SIZE = 24;
 
 const US_STATES: { abbr: string; name: string }[] = [
-  { abbr: "AL", name: "Alabama" }, { abbr: "AK", name: "Alaska" },
-  { abbr: "AZ", name: "Arizona" }, { abbr: "AR", name: "Arkansas" },
-  { abbr: "CA", name: "California" }, { abbr: "CO", name: "Colorado" },
-  { abbr: "CT", name: "Connecticut" }, { abbr: "DE", name: "Delaware" },
-  { abbr: "FL", name: "Florida" }, { abbr: "GA", name: "Georgia" },
-  { abbr: "HI", name: "Hawaii" }, { abbr: "ID", name: "Idaho" },
-  { abbr: "IL", name: "Illinois" }, { abbr: "IN", name: "Indiana" },
-  { abbr: "IA", name: "Iowa" }, { abbr: "KS", name: "Kansas" },
-  { abbr: "KY", name: "Kentucky" }, { abbr: "LA", name: "Louisiana" },
-  { abbr: "ME", name: "Maine" }, { abbr: "MD", name: "Maryland" },
-  { abbr: "MA", name: "Massachusetts" }, { abbr: "MI", name: "Michigan" },
-  { abbr: "MN", name: "Minnesota" }, { abbr: "MS", name: "Mississippi" },
-  { abbr: "MO", name: "Missouri" }, { abbr: "MT", name: "Montana" },
-  { abbr: "NE", name: "Nebraska" }, { abbr: "NV", name: "Nevada" },
-  { abbr: "NH", name: "New Hampshire" }, { abbr: "NJ", name: "New Jersey" },
-  { abbr: "NM", name: "New Mexico" }, { abbr: "NY", name: "New York" },
-  { abbr: "NC", name: "North Carolina" }, { abbr: "ND", name: "North Dakota" },
-  { abbr: "OH", name: "Ohio" }, { abbr: "OK", name: "Oklahoma" },
-  { abbr: "OR", name: "Oregon" }, { abbr: "PA", name: "Pennsylvania" },
-  { abbr: "RI", name: "Rhode Island" }, { abbr: "SC", name: "South Carolina" },
-  { abbr: "SD", name: "South Dakota" }, { abbr: "TN", name: "Tennessee" },
-  { abbr: "TX", name: "Texas" }, { abbr: "UT", name: "Utah" },
-  { abbr: "VT", name: "Vermont" }, { abbr: "VA", name: "Virginia" },
-  { abbr: "WA", name: "Washington" }, { abbr: "WV", name: "West Virginia" },
-  { abbr: "WI", name: "Wisconsin" }, { abbr: "WY", name: "Wyoming" },
+  { abbr: "AL", name: "Alabama" },
+  { abbr: "AK", name: "Alaska" },
+  { abbr: "AZ", name: "Arizona" },
+  { abbr: "AR", name: "Arkansas" },
+  { abbr: "CA", name: "California" },
+  { abbr: "CO", name: "Colorado" },
+  { abbr: "CT", name: "Connecticut" },
+  { abbr: "DE", name: "Delaware" },
+  { abbr: "FL", name: "Florida" },
+  { abbr: "GA", name: "Georgia" },
+  { abbr: "HI", name: "Hawaii" },
+  { abbr: "ID", name: "Idaho" },
+  { abbr: "IL", name: "Illinois" },
+  { abbr: "IN", name: "Indiana" },
+  { abbr: "IA", name: "Iowa" },
+  { abbr: "KS", name: "Kansas" },
+  { abbr: "KY", name: "Kentucky" },
+  { abbr: "LA", name: "Louisiana" },
+  { abbr: "ME", name: "Maine" },
+  { abbr: "MD", name: "Maryland" },
+  { abbr: "MA", name: "Massachusetts" },
+  { abbr: "MI", name: "Michigan" },
+  { abbr: "MN", name: "Minnesota" },
+  { abbr: "MS", name: "Mississippi" },
+  { abbr: "MO", name: "Missouri" },
+  { abbr: "MT", name: "Montana" },
+  { abbr: "NE", name: "Nebraska" },
+  { abbr: "NV", name: "Nevada" },
+  { abbr: "NH", name: "New Hampshire" },
+  { abbr: "NJ", name: "New Jersey" },
+  { abbr: "NM", name: "New Mexico" },
+  { abbr: "NY", name: "New York" },
+  { abbr: "NC", name: "North Carolina" },
+  { abbr: "ND", name: "North Dakota" },
+  { abbr: "OH", name: "Ohio" },
+  { abbr: "OK", name: "Oklahoma" },
+  { abbr: "OR", name: "Oregon" },
+  { abbr: "PA", name: "Pennsylvania" },
+  { abbr: "RI", name: "Rhode Island" },
+  { abbr: "SC", name: "South Carolina" },
+  { abbr: "SD", name: "South Dakota" },
+  { abbr: "TN", name: "Tennessee" },
+  { abbr: "TX", name: "Texas" },
+  { abbr: "UT", name: "Utah" },
+  { abbr: "VT", name: "Vermont" },
+  { abbr: "VA", name: "Virginia" },
+  { abbr: "WA", name: "Washington" },
+  { abbr: "WV", name: "West Virginia" },
+  { abbr: "WI", name: "Wisconsin" },
+  { abbr: "WY", name: "Wyoming" },
 ];
 
 const PRICE_OPTIONS = Array.from({ length: 101 }, (_, i) => i * 5);
@@ -87,7 +113,8 @@ function metaValue(lead: MarketplaceLeadRow, keys: string[], fallback = "—") {
   const meta = lead.metadata ?? {};
   for (const key of keys) {
     const value = meta[key];
-    if (value != null && String(value).trim() !== "") return String(value);
+    const text = value != null ? String(value).trim() : "";
+    if (text && !/^•+$/.test(text)) return text;
   }
   return fallback;
 }
@@ -105,11 +132,14 @@ let _tid = 0;
 
 function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const show = useCallback((msg: string, variant: Toast["variant"] = "success") => {
-    const id = ++_tid;
-    setToasts((t) => [...t, { id, msg, variant }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
-  }, []);
+  const show = useCallback(
+    (msg: string, variant: Toast["variant"] = "success") => {
+      const id = ++_tid;
+      setToasts((t) => [...t, { id, msg, variant }]);
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
+    },
+    [],
+  );
   return { toasts, show };
 }
 
@@ -130,14 +160,17 @@ export default function MarketplacePage() {
   const [zip, setZip] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<"" | "inbound" | "outbound">("");
+  const [sourceFilter, setSourceFilter] = useState<"" | "inbound" | "outbound">(
+    "",
+  );
   const [minPriceDollars, setMinPriceDollars] = useState("");
   const [maxPriceDollars, setMaxPriceDollars] = useState("");
   const [page, setPage] = useState(1);
 
   // modal state
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedListItem, setSelectedListItem] = useState<MarketplaceLeadRow | null>(null);
+  const [selectedListItem, setSelectedListItem] =
+    useState<MarketplaceLeadRow | null>(null);
   const [reserveUntil, setReserveUntil] = useState<string | null>(null);
   const [reserveTick, setReserveTick] = useState(0);
 
@@ -147,7 +180,10 @@ export default function MarketplacePage() {
   // close state dropdown when clicking outside
   useEffect(() => {
     function handleOutsideClick(e: MouseEvent) {
-      if (stateDropRef.current && !stateDropRef.current.contains(e.target as Node)) {
+      if (
+        stateDropRef.current &&
+        !stateDropRef.current.contains(e.target as Node)
+      ) {
         setStateDropOpen(false);
       }
     }
@@ -156,34 +192,59 @@ export default function MarketplacePage() {
   }, []);
 
   // ── 400ms debounce for query params ──────────────────────────────────────────
-  const rawParams = useMemo(() => ({
-    page,
-    limit: PAGE_SIZE,
-    type: type.trim() || undefined,
-    source: sourceFilter || undefined,
-    city: city.trim() || undefined,
-    state: selectedStates.length > 0 ? selectedStates.join(",") : undefined,
-    property_type: propertyType.trim() || undefined,
-    timeline: timeline.trim() || undefined,
-    condition: condition.trim() || undefined,
-    zip: zip.trim() || undefined,
-    date_from: dateFrom.trim() || undefined,
-    date_to: dateTo.trim() || undefined,
-    minPrice: minPriceDollars ? Math.round(parseFloat(minPriceDollars) * 100) : undefined,
-    maxPrice: maxPriceDollars ? Math.round(parseFloat(maxPriceDollars) * 100) : undefined,
-  }), [page, type, sourceFilter, city, selectedStates, propertyType, timeline, condition, zip, dateFrom, dateTo, minPriceDollars, maxPriceDollars]);
+  const rawParams = useMemo(
+    () => ({
+      page,
+      limit: PAGE_SIZE,
+      type: type.trim() || undefined,
+      source: sourceFilter || undefined,
+      city: city.trim() || undefined,
+      state: selectedStates.length > 0 ? selectedStates.join(",") : undefined,
+      property_type: propertyType.trim() || undefined,
+      timeline: timeline.trim() || undefined,
+      condition: condition.trim() || undefined,
+      zip: zip.trim() || undefined,
+      date_from: dateFrom.trim() || undefined,
+      date_to: dateTo.trim() || undefined,
+      minPrice: minPriceDollars
+        ? Math.round(parseFloat(minPriceDollars) * 100)
+        : undefined,
+      maxPrice: maxPriceDollars
+        ? Math.round(parseFloat(maxPriceDollars) * 100)
+        : undefined,
+    }),
+    [
+      page,
+      type,
+      sourceFilter,
+      city,
+      selectedStates,
+      propertyType,
+      timeline,
+      condition,
+      zip,
+      dateFrom,
+      dateTo,
+      minPriceDollars,
+      maxPriceDollars,
+    ],
+  );
 
   const [debouncedParams, setDebouncedParams] = useState(rawParams);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => setDebouncedParams(rawParams), 400);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [rawParams]);
 
   // ── queries ───────────────────────────────────────────────────────────────────
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: queryKeys.leads.marketplace(debouncedParams as unknown as Record<string, unknown>),
+    queryKey: queryKeys.leads.marketplace(
+      debouncedParams as unknown as Record<string, unknown>,
+    ),
     queryFn: () => listMarketplaceLeads(debouncedParams),
     placeholderData: (prev) => prev,
   });
@@ -199,6 +260,13 @@ export default function MarketplacePage() {
   });
   const isSubscribed = subscription?.status === "active";
 
+  const { data: subPricing } = useQuery({
+    queryKey: ["subscriptions", "pricing"],
+    queryFn: getSubscriptionPricing,
+    staleTime: 5 * 60 * 1000,
+  });
+  const proDisplayPrice = subPricing?.proDisplayPrice ?? "$49";
+
   const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: queryKeys.leads.detail(selectedId ?? ""),
     queryFn: () => getLeadDetail(selectedId!),
@@ -211,8 +279,18 @@ export default function MarketplacePage() {
   const total = data?.pagination.total ?? 0;
 
   const hasActiveFilters =
-    type || sourceFilter || city || selectedStates.length > 0 || propertyType || timeline ||
-    condition || zip || dateFrom.trim() || dateTo.trim() || minPriceDollars || maxPriceDollars;
+    type ||
+    sourceFilter ||
+    city ||
+    selectedStates.length > 0 ||
+    propertyType ||
+    timeline ||
+    condition ||
+    zip ||
+    dateFrom.trim() ||
+    dateTo.trim() ||
+    minPriceDollars ||
+    maxPriceDollars;
 
   // ── reserve timer ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -223,7 +301,10 @@ export default function MarketplacePage() {
 
   const secondsLeft = useMemo(() => {
     if (!reserveUntil) return 0;
-    return Math.max(0, Math.floor((new Date(reserveUntil).getTime() - Date.now()) / 1000));
+    return Math.max(
+      0,
+      Math.floor((new Date(reserveUntil).getTime() - Date.now()) / 1000),
+    );
   }, [reserveUntil, reserveTick]);
 
   // ── mutations ─────────────────────────────────────────────────────────────────
@@ -233,8 +314,13 @@ export default function MarketplacePage() {
   });
 
   const buyMutation = useMutation({
-    mutationFn: ({ id, choice }: { id: string; choice: "exclusive" | "non_exclusive" }) =>
-      buyLead(id, choice),
+    mutationFn: ({
+      id,
+      choice,
+    }: {
+      id: string;
+      choice: "exclusive" | "non_exclusive";
+    }) => buyLead(id, choice),
     onSuccess: async () => {
       setSelectedId(null);
       setSelectedListItem(null);
@@ -242,18 +328,31 @@ export default function MarketplacePage() {
       showToast("Lead purchased!", "success");
       await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
       await queryClient.invalidateQueries({ queryKey: ["leads", "my"] });
-      await queryClient.invalidateQueries({ queryKey: ["leads", "marketplace"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["leads", "marketplace"],
+      });
     },
     onError: (err: unknown, vars) => {
       if (err instanceof ApiError) {
         if (err.status === 403) {
           if (err.message.includes("subscription")) {
-            showToast("Subscribe to unlock shared lead pricing — $99/month", "error");
+            showToast(
+              `Subscribe to unlock shared lead pricing — ${proDisplayPrice}/month`,
+              "error",
+            );
           } else {
-            showToast("This lead is in early access — subscribers get first access", "error");
+            showToast(
+              "This lead is in early access — subscribers get first access",
+              "error",
+            );
           }
         } else if (err.status === 400) {
-          showToast(err.message.includes("wallet") ? "Insufficient wallet balance — top up your wallet" : err.message, "error");
+          showToast(
+            err.message.includes("wallet")
+              ? "Insufficient wallet balance — top up your wallet"
+              : err.message,
+            "error",
+          );
         } else if (err.status === 409) {
           showToast("This lead was just purchased by someone else", "error");
           setHiddenIds((s) => new Set([...s, vars.id]));
@@ -268,14 +367,42 @@ export default function MarketplacePage() {
     },
   });
 
+  const exclusiveBuyoutMutation = useMutation({
+    mutationFn: (id: string) => exclusiveBuyout(id),
+    onSuccess: async () => {
+      setSelectedId(null);
+      setSelectedListItem(null);
+      showToast(
+        "Exclusive buyout complete — this lead is now locked to you!",
+        "success",
+      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
+      await queryClient.invalidateQueries({ queryKey: ["leads", "my"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["leads", "marketplace"],
+      });
+    },
+    onError: (err: unknown) => {
+      showToast(
+        err instanceof ApiError
+          ? err.message
+          : ((err as Error).message ?? "Exclusive buyout failed"),
+        "error",
+      );
+    },
+  });
+
   // ── modal helpers ─────────────────────────────────────────────────────────────
-  const openModal = useCallback((lead: MarketplaceLeadRow) => {
-    setSelectedId(lead.id);
-    setSelectedListItem(lead);
-    setReserveUntil(null);
-    reserveMutation.reset();
-    buyMutation.reset();
-  }, [reserveMutation, buyMutation]);
+  const openModal = useCallback(
+    (lead: MarketplaceLeadRow) => {
+      setSelectedId(lead.id);
+      setSelectedListItem(lead);
+      setReserveUntil(null);
+      reserveMutation.reset();
+      buyMutation.reset();
+    },
+    [reserveMutation, buyMutation],
+  );
 
   const closeModal = useCallback(() => {
     setSelectedId(null);
@@ -284,9 +411,19 @@ export default function MarketplacePage() {
   }, []);
 
   function clearFilters() {
-    setType(""); setSourceFilter(""); setCity(""); setSelectedStates([]); setPropertyType("");
-    setTimeline(""); setCondition(""); setZip(""); setDateFrom(""); setDateTo("");
-    setMinPriceDollars(""); setMaxPriceDollars(""); setPage(1);
+    setType("");
+    setSourceFilter("");
+    setCity("");
+    setSelectedStates([]);
+    setPropertyType("");
+    setTimeline("");
+    setCondition("");
+    setZip("");
+    setDateFrom("");
+    setDateTo("");
+    setMinPriceDollars("");
+    setMaxPriceDollars("");
+    setPage(1);
   }
 
   return (
@@ -397,7 +534,7 @@ export default function MarketplacePage() {
         .lead-type-badge.outbound { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.22); color: #6ee7b7; }
 
         /* slot progress */
-        .slot-bar { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+        .slot-bar { display: flex; align-items: center; gap: 6px; margin-top: 4px; justify-content: center; }
         .slot-pips { display: flex; gap: 3px; }
         .slot-pip { width: 8px; height: 8px; border-radius: 50%; }
         .slot-pip.taken { background: #10b981; }
@@ -439,12 +576,17 @@ export default function MarketplacePage() {
             <section className="filters-shell" aria-label="Marketplace filters">
               <div className="filter-row">
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="source-filter">Lead Source</label>
+                  <label className="filter-label" htmlFor="source-filter">
+                    Lead Source
+                  </label>
                   <select
                     id="source-filter"
                     className="filter-select"
                     value={sourceFilter}
-                    onChange={(e) => { setSourceFilter(e.target.value as typeof sourceFilter); setPage(1); }}
+                    onChange={(e) => {
+                      setSourceFilter(e.target.value as typeof sourceFilter);
+                      setPage(1);
+                    }}
                   >
                     <option value="">Any</option>
                     <option value="inbound">Inbound</option>
@@ -453,9 +595,18 @@ export default function MarketplacePage() {
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="type-filter">Lead Type</label>
-                  <select id="type-filter" className="filter-select" value={type}
-                    onChange={(e) => { setType(e.target.value); setPage(1); }}>
+                  <label className="filter-label" htmlFor="type-filter">
+                    Lead Type
+                  </label>
+                  <select
+                    id="type-filter"
+                    className="filter-select"
+                    value={type}
+                    onChange={(e) => {
+                      setType(e.target.value);
+                      setPage(1);
+                    }}
+                  >
                     <option value="">Any</option>
                     <option value="Divorce">Divorce</option>
                     <option value="Foreclosure">Foreclosure</option>
@@ -478,15 +629,38 @@ export default function MarketplacePage() {
                       className="state-drop-btn"
                       onClick={() => setStateDropOpen((o) => !o)}
                     >
-                      <span style={{ color: selectedStates.length ? "#fff" : "rgba(255,255,255,0.3)" }}>
+                      <span
+                        style={{
+                          color: selectedStates.length
+                            ? "#fff"
+                            : "rgba(255,255,255,0.3)",
+                        }}
+                      >
                         {selectedStates.length === 0
                           ? "Any state"
                           : selectedStates.length === 1
-                          ? (US_STATES.find((s) => s.abbr === selectedStates[0])?.name ?? selectedStates[0])
-                          : `${selectedStates.length} states selected`}
+                            ? (US_STATES.find(
+                                (s) => s.abbr === selectedStates[0],
+                              )?.name ?? selectedStates[0])
+                            : `${selectedStates.length} states selected`}
                       </span>
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style={{ color: "rgba(255,255,255,0.35)", flexShrink: 0 }}>
-                        <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 12 12"
+                        fill="currentColor"
+                        style={{
+                          color: "rgba(255,255,255,0.35)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <path
+                          d="M2 4l4 4 4-4"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          fill="none"
+                          strokeLinecap="round"
+                        />
                       </svg>
                     </button>
                     {stateDropOpen && (
@@ -498,7 +672,9 @@ export default function MarketplacePage() {
                               checked={selectedStates.includes(s.abbr)}
                               onChange={() => {
                                 setSelectedStates((prev) =>
-                                  prev.includes(s.abbr) ? prev.filter((x) => x !== s.abbr) : [...prev, s.abbr]
+                                  prev.includes(s.abbr)
+                                    ? prev.filter((x) => x !== s.abbr)
+                                    : [...prev, s.abbr],
                                 );
                                 setPage(1);
                               }}
@@ -512,35 +688,80 @@ export default function MarketplacePage() {
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="city-filter">City</label>
-                  <input id="city-filter" className="filter-input" placeholder="Phoenix" value={city}
-                    onChange={(e) => { setCity(e.target.value); setPage(1); }} />
+                  <label className="filter-label" htmlFor="city-filter">
+                    City
+                  </label>
+                  <input
+                    id="city-filter"
+                    className="filter-input"
+                    placeholder="Phoenix"
+                    value={city}
+                    onChange={(e) => {
+                      setCity(e.target.value);
+                      setPage(1);
+                    }}
+                  />
                 </div>
               </div>
 
               <div className="filter-row">
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="minprice-filter">Min Price</label>
-                  <select id="minprice-filter" className="filter-select"
-                    value={minPriceDollars} onChange={(e) => { setMinPriceDollars(e.target.value); setPage(1); }}>
+                  <label className="filter-label" htmlFor="minprice-filter">
+                    Min Price
+                  </label>
+                  <select
+                    id="minprice-filter"
+                    className="filter-select"
+                    value={minPriceDollars}
+                    onChange={(e) => {
+                      setMinPriceDollars(e.target.value);
+                      setPage(1);
+                    }}
+                  >
                     <option value="">Any</option>
-                    {PRICE_OPTIONS.map((v) => <option key={v} value={v}>${v}</option>)}
+                    {PRICE_OPTIONS.map((v) => (
+                      <option key={v} value={v}>
+                        ${v}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="maxprice-filter">Max Price</label>
-                  <select id="maxprice-filter" className="filter-select"
-                    value={maxPriceDollars} onChange={(e) => { setMaxPriceDollars(e.target.value); setPage(1); }}>
+                  <label className="filter-label" htmlFor="maxprice-filter">
+                    Max Price
+                  </label>
+                  <select
+                    id="maxprice-filter"
+                    className="filter-select"
+                    value={maxPriceDollars}
+                    onChange={(e) => {
+                      setMaxPriceDollars(e.target.value);
+                      setPage(1);
+                    }}
+                  >
                     <option value="">Any</option>
-                    {PRICE_OPTIONS.map((v) => <option key={v} value={v}>${v}</option>)}
+                    {PRICE_OPTIONS.map((v) => (
+                      <option key={v} value={v}>
+                        ${v}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="property-filter">Property Type</label>
-                  <select id="property-filter" className="filter-select" value={propertyType}
-                    onChange={(e) => { setPropertyType(e.target.value); setPage(1); }}>
+                  <label className="filter-label" htmlFor="property-filter">
+                    Property Type
+                  </label>
+                  <select
+                    id="property-filter"
+                    className="filter-select"
+                    value={propertyType}
+                    onChange={(e) => {
+                      setPropertyType(e.target.value);
+                      setPage(1);
+                    }}
+                  >
                     <option value="">Any</option>
                     <option value="Single Family">Single Family</option>
                     <option value="Multifamily">Multifamily</option>
@@ -550,17 +771,39 @@ export default function MarketplacePage() {
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="zip-filter">ZIP Code</label>
-                  <input id="zip-filter" className="filter-input" placeholder="85001" value={zip}
-                    onChange={(e) => { setZip(e.target.value); setPage(1); }} />
+                  <label className="filter-label" htmlFor="zip-filter">
+                    ZIP Code
+                  </label>
+                  <input
+                    id="zip-filter"
+                    className="filter-input"
+                    placeholder="85001"
+                    value={zip}
+                    onChange={(e) => {
+                      setZip(e.target.value);
+                      setPage(1);
+                    }}
+                  />
                 </div>
               </div>
 
-              <div className="filter-row" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
+              <div
+                className="filter-row"
+                style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}
+              >
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="condition-filter">Condition</label>
-                  <select id="condition-filter" className="filter-select" value={condition}
-                    onChange={(e) => { setCondition(e.target.value); setPage(1); }}>
+                  <label className="filter-label" htmlFor="condition-filter">
+                    Condition
+                  </label>
+                  <select
+                    id="condition-filter"
+                    className="filter-select"
+                    value={condition}
+                    onChange={(e) => {
+                      setCondition(e.target.value);
+                      setPage(1);
+                    }}
+                  >
                     <option value="">Any</option>
                     <option value="Needs Repairs">Needs Repairs</option>
                     <option value="Move In Ready">Move In Ready</option>
@@ -569,9 +812,18 @@ export default function MarketplacePage() {
                 </div>
 
                 <div className="filter-group">
-                  <label className="filter-label" htmlFor="timeline-filter">Timeline</label>
-                  <select id="timeline-filter" className="filter-select" value={timeline}
-                    onChange={(e) => { setTimeline(e.target.value); setPage(1); }}>
+                  <label className="filter-label" htmlFor="timeline-filter">
+                    Timeline
+                  </label>
+                  <select
+                    id="timeline-filter"
+                    className="filter-select"
+                    value={timeline}
+                    onChange={(e) => {
+                      setTimeline(e.target.value);
+                      setPage(1);
+                    }}
+                  >
                     <option value="">Any</option>
                     <option value="ASAP">ASAP</option>
                     <option value="0 to 30 Days">0 to 30 Days</option>
@@ -583,7 +835,13 @@ export default function MarketplacePage() {
 
               {hasActiveFilters && (
                 <div className="filter-actions">
-                  <button type="button" className="clear-inline-btn" onClick={clearFilters}>Clear all filters</button>
+                  <button
+                    type="button"
+                    className="clear-inline-btn"
+                    onClick={clearFilters}
+                  >
+                    Clear all filters
+                  </button>
                 </div>
               )}
             </section>
@@ -591,157 +849,396 @@ export default function MarketplacePage() {
             {isError && (
               <div className="err">
                 {(error as Error)?.message ?? "Failed to load marketplace"}
-                <button type="button" style={{ marginLeft: 12, padding: "6px 12px", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, color: "#fff", cursor: "pointer" }} onClick={() => refetch()}>Retry</button>
+                <button
+                  type="button"
+                  style={{
+                    marginLeft: 12,
+                    padding: "6px 12px",
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 8,
+                    color: "#fff",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => refetch()}
+                >
+                  Retry
+                </button>
               </div>
             )}
 
             <div className="lead-grid">
               {!isLoading && items.length === 0 && (
                 <div className="empty-state">
-                  <p style={{ fontSize: 16, marginBottom: 8 }}>No leads match your filters.</p>
-                  <p style={{ fontSize: 13 }}>Try adjusting the filters or broadening your search.</p>
+                  <p style={{ fontSize: 16, marginBottom: 8 }}>
+                    No leads match your filters.
+                  </p>
+                  <p style={{ fontSize: 13 }}>
+                    Try adjusting the filters or broadening your search.
+                  </p>
                   {hasActiveFilters && (
-                    <button type="button" className="clear-filters-btn" onClick={clearFilters}>Clear filters</button>
+                    <button
+                      type="button"
+                      className="clear-filters-btn"
+                      onClick={clearFilters}
+                    >
+                      Clear filters
+                    </button>
                   )}
                 </div>
               )}
 
               {items.map((lead) => {
                 const leadType = (lead.lead_type ?? "inbound").toLowerCase();
-                const exclusivePrice = lead.exclusive_price_cents ?? lead.current_price;
+                const exclusivePrice =
+                  lead.exclusive_price_cents ?? lead.current_price;
                 const sharedTaken = lead.non_exclusive_buyers_count ?? 0;
-                const sharedCap = lead.max_non_exclusive_buyers ?? (leadType === "outbound" ? 3 : 5);
+                const sharedCap =
+                  lead.max_non_exclusive_buyers ??
+                  (leadType === "outbound" ? 3 : 5);
                 // Flat subscription price: $30 inbound / $20 outbound (from API)
-                const sharedPrice = getSharedDisplayCents(lead.shared_price_cents, leadType);
+                const sharedPrice = getSharedDisplayCents(
+                  lead.shared_price_cents,
+                  leadType,
+                );
                 const sharedAvailable = sharedTaken < sharedCap;
                 const exclusiveAvailable = sharedTaken === 0;
                 // Partially claimed: some slots taken but still open
-                const isPartiallyClaimed = sharedTaken > 0 && sharedTaken < sharedCap;
+                const isPartiallyClaimed =
+                  sharedTaken > 0 && sharedTaken < sharedCap;
                 const slotsLeft = sharedCap - sharedTaken;
 
                 const isInEarlyAccess =
                   lead.early_access_until != null &&
                   new Date(lead.early_access_until) > new Date();
-                const timeLeft = lead.early_access_until ? timeUntil(lead.early_access_until) : "";
+                const timeLeft = lead.early_access_until
+                  ? timeUntil(lead.early_access_until)
+                  : "";
 
                 const isBuying = buyMutation.isPending;
 
+                // Boost / discount badge from list_price_anchor_cents
+                const anchorCents = lead.list_price_anchor_cents
+                  ? Number(lead.list_price_anchor_cents)
+                  : null;
+                const currentExclCents = lead.exclusive_price_cents
+                  ? Number(lead.exclusive_price_cents)
+                  : null;
+                let priceBadge: { label: string; color: string; bg: string } | null = null;
+                if (anchorCents && currentExclCents && anchorCents !== currentExclCents) {
+                  const pct = Math.round(
+                    ((currentExclCents - anchorCents) / anchorCents) * 100,
+                  );
+                  if (pct > 0) {
+                    priceBadge = { label: `+${pct}% boost`, color: "#fbbf24", bg: "rgba(245,158,11,0.15)" };
+                  } else if (pct < 0) {
+                    priceBadge = { label: `${pct}% off`, color: "#34d399", bg: "rgba(16,185,129,0.12)" };
+                  }
+                }
+
+                // Visible property details
+                const marketParts = lead.market.split(",").map((part) => part.trim()).filter(Boolean);
+                const city = metaValue(lead, ["city"], marketParts[0] ?? "—");
+                const state = metaValue(lead, ["state"], marketParts[1] ?? "—");
+                const locationLabel = [city, state].filter((part) => part !== "—").join(", ") || lead.market;
+                const propType = metaValue(lead, [
+                  "property_type",
+                  "propertyType",
+                  "Propertytype",
+                ]);
+                const timeline = metaValue(lead, ["timeline", "howsoontosell"]);
+                const condition = metaValue(lead, [
+                  "condition",
+                  "property_condition",
+                ]);
+
                 return (
-                  <div key={lead.id} className="lead-card" onClick={() => openModal(lead)}>
-                    {/* Lead type + title */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
-                      <span className={`lead-type-badge ${leadType}`}>{leadType}</span>
+                  <div
+                    key={lead.id}
+                    className="lead-card"
+                    onClick={() => openModal(lead)}
+                  >
+                    {/* Header: type badge + early access */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 8,
+                      }}
+                    >
+                      <span className={`lead-type-badge ${leadType}`}>
+                        {leadType}
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        {priceBadge && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700,
+                            color: priceBadge.color,
+                            background: priceBadge.bg,
+                            border: `1px solid ${priceBadge.color}44`,
+                            borderRadius: 20, padding: "2px 8px",
+                          }}>
+                            {priceBadge.label}
+                          </span>
+                        )}
+                        {isInEarlyAccess && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, color: "#f59e0b",
+                            background: "rgba(245,158,11,0.12)",
+                            border: "1px solid rgba(245,158,11,0.25)",
+                            borderRadius: 20, padding: "2px 8px",
+                          }}>
+                            ⚡ Pro early access{timeLeft ? ` · ${timeLeft}` : ""}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="lead-title">{lead.title}</div>
-                    <div className="lead-address">{addressFromLead(lead)}</div>
 
-                    {/* Private fields (blurred) */}
-                    <div className="private-fields" aria-label="Private lead fields preview">
-                      <div className="private-row">
-                        <span className="private-label">Name</span>
-                        <span className="blur-field">{metaValue(lead, ["name", "full_name", "first_name"], "••••••")}</span>
-                      </div>
-                      <div className="private-row">
-                        <span className="private-label">Phone</span>
-                        <span className="blur-field">{metaValue(lead, ["phone", "mobile"], "••••••")}</span>
-                      </div>
-                      <div className="private-row">
-                        <span className="private-label">Email</span>
-                        <span className="blur-field">{metaValue(lead, ["email"], "••••••")}</span>
-                      </div>
-                    </div>
-
-                    {/* Meta tags */}
-                    <div>
-                      <span className="meta-tag">{lead.type}</span>
-                      {metaValue(lead, ["state"]) !== "—" && <span className="meta-tag">{metaValue(lead, ["state"])}</span>}
-                      {metaValue(lead, ["property_type", "propertyType"]) !== "—" && <span className="meta-tag">{metaValue(lead, ["property_type", "propertyType"])}</span>}
-                      {metaValue(lead, ["timeline"]) !== "—" && <span className="meta-tag">{metaValue(lead, ["timeline"])}</span>}
-                    </div>
-
-                    <QualityBar score={lead.quality_score} />
-
-                    {/* Early access badge */}
-                    {isInEarlyAccess && (
-                      <div className="early-access-badge">
-                        <span>⚡</span>
-                        <span>Subscribers only{timeLeft ? ` — opens to all in ${timeLeft}` : ""}</span>
-                      </div>
-                    )}
-
-                    {/* Dual-price options */}
-                    <div className="price-row" onClick={(e) => e.stopPropagation()}>
-                      {/* Exclusive */}
-                      <div className={`price-option exclusive${!exclusiveAvailable ? " opacity-40" : ""}`}>
-                        <div className="price-option-label">Exclusive</div>
-                        <div className="price-option-amount">{fmtDollars(exclusivePrice)}</div>
-                        <div className="price-option-sub">1 buyer only · sold once</div>
-                        {!isInEarlyAccess ? (
-                          <button
-                            type="button"
-                            className="price-option-btn exclusive"
-                            disabled={isBuying || !exclusiveAvailable}
-                            onClick={() => buyMutation.mutate({ id: lead.id, choice: "exclusive" })}
+                    {/* Visible property info — label:value rows */}
+                    <div
+                      style={{
+                        margin: "10px 0 14px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 0,
+                      }}
+                    >
+                      {[
+                        { label: "city", value: city },
+                        { label: "state", value: state },
+                        { label: "property type", value: propType },
+                        { label: "timeline", value: timeline },
+                        { label: "condition", value: condition },
+                      ].map(({ label, value }, i, arr) => (
+                        <div
+                          key={label}
+                          style={{
+                            display: "flex",
+                            alignItems: "baseline",
+                            justifyContent: "space-between",
+                            padding: "5px 0",
+                            borderBottom:
+                              i < arr.length - 1
+                                ? "1px solid rgba(255,255,255,0.04)"
+                                : "none",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: "rgba(255,255,255,0.38)",
+                              flexShrink: 0,
+                              marginRight: 8,
+                            }}
                           >
-                            {isBuying ? "…" : exclusiveAvailable ? "Buy" : "Locked"}
-                          </button>
+                            {label}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 500,
+                              color:
+                                value !== "—"
+                                  ? "rgba(255,255,255,0.9)"
+                                  : "rgba(255,255,255,0.2)",
+                              textAlign: "right",
+                            }}
+                          >
+                            {value !== "—" ? value : "—"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Price options */}
+                    <div
+                      className="price-row"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* Exclusive */}
+                      <div
+                        className={`price-option exclusive${!exclusiveAvailable && !isPartiallyClaimed ? " opacity-40" : ""}`}
+                      >
+                        <div className="price-option-label">Exclusive</div>
+                        <div className="price-option-amount">
+                          {fmtDollars(exclusivePrice)}
+                        </div>
+                        {isPartiallyClaimed ? (
+                          <>
+                            <div
+                              className="price-option-sub"
+                              style={{ color: "#f59e0b" }}
+                            >
+                              Lock it — remove from marketplace
+                            </div>
+                            {!isInEarlyAccess && (
+                              <button
+                                type="button"
+                                className="price-option-btn exclusive"
+                                disabled={exclusiveBuyoutMutation.isPending}
+                                onClick={() =>
+                                  exclusiveBuyoutMutation.mutate(lead.id)
+                                }
+                                style={{
+                                  fontSize: 11,
+                                }}
+                              >
+                                {exclusiveBuyoutMutation.isPending
+                                  ? "…"
+                                  : "Buy exclusive access"}
+                              </button>
+                            )}
+                          </>
                         ) : (
-                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Subscribers first</div>
+                          <>
+                            <div className="price-option-sub">
+                              You own it alone
+                            </div>
+                            {!isInEarlyAccess ? (
+                              <button
+                                type="button"
+                                className="price-option-btn exclusive"
+                                disabled={isBuying || !exclusiveAvailable}
+                                onClick={() =>
+                                  buyMutation.mutate({
+                                    id: lead.id,
+                                    choice: "exclusive",
+                                  })
+                                }
+                              >
+                                {isBuying
+                                  ? "…"
+                                  : exclusiveAvailable
+                                    ? "Buy exclusive"
+                                    : "Locked"}
+                              </button>
+                            ) : (
+                              <div
+                                style={{
+                                  fontSize: 10,
+                                  color: "rgba(255,255,255,0.35)",
+                                  marginTop: 6,
+                                }}
+                              >
+                                Pro subscribers first
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
 
-                      {/* Shared / subscription */}
-                      <div className={`price-option non-exclusive${!sharedAvailable ? " opacity-40" : ""}`}>
+                      {/* Non-exclusive */}
+                      <div
+                        className={`price-option non-exclusive${!sharedAvailable ? " opacity-40" : ""}`}
+                      >
                         <div className="price-option-label">
                           Non Exclusive
                           {isPartiallyClaimed && (
-                            <span style={{ marginLeft: 5, fontSize: 9, color: "#f59e0b", fontWeight: 700 }}>
+                            <span
+                              style={{
+                                marginLeft: 5,
+                                fontSize: 9,
+                                color: "#f59e0b",
+                                fontWeight: 700,
+                              }}
+                            >
                               PARTIAL
                             </span>
                           )}
                         </div>
-                        <div className="price-option-amount">
-                          {isSubscribed ? fmtDollars(sharedPrice) : <span style={{ fontSize: 13 }}>Subscribe</span>}
-                        </div>
-                        {/* Slot pips */}
-                        {sharedAvailable && (
-                          <div className="slot-bar">
-                            <div className="slot-pips">
-                              {Array.from({ length: sharedCap }).map((_, i) => (
-                                <span key={i} className={`slot-pip ${
-                                  i < sharedTaken
-                                    ? sharedTaken >= sharedCap - 1 ? "warn" : "taken"
-                                    : "open"
-                                }`} />
-                              ))}
+
+                        {isSubscribed ? (
+                          <>
+                            <div className="price-option-amount">
+                              {fmtDollars(sharedPrice)}
                             </div>
-                            <span className="slot-text">{slotsLeft}/{sharedCap} left</span>
-                          </div>
-                        )}
-                        {!sharedAvailable && (
-                          <div className="price-option-sub">All slots filled</div>
-                        )}
-                        {!isInEarlyAccess && sharedAvailable ? (
-                          isSubscribed ? (
-                            <button
-                              type="button"
-                              className="price-option-btn non-exclusive"
-                              disabled={isBuying}
-                              onClick={() => buyMutation.mutate({ id: lead.id, choice: "non_exclusive" })}
+                            {sharedAvailable && (
+                              <div className="slot-bar">
+                                <div className="slot-pips">
+                                  {Array.from({ length: sharedCap }).map(
+                                    (_, i) => (
+                                      <span
+                                        key={i}
+                                        className={`slot-pip ${
+                                          i < sharedTaken
+                                            ? sharedTaken >= sharedCap - 1
+                                              ? "warn"
+                                              : "taken"
+                                            : "open"
+                                        }`}
+                                      />
+                                    ),
+                                  )}
+                                </div>
+                                <span className="slot-text">
+                                  {slotsLeft}/{sharedCap} left
+                                </span>
+                              </div>
+                            )}
+                            {!sharedAvailable && (
+                              <div className="price-option-sub">
+                                All slots filled
+                              </div>
+                            )}
+                            {!isInEarlyAccess && sharedAvailable && (
+                              <button
+                                type="button"
+                                className="price-option-btn non-exclusive"
+                                disabled={isBuying}
+                                onClick={() =>
+                                  buyMutation.mutate({
+                                    id: lead.id,
+                                    choice: "non_exclusive",
+                                  })
+                                }
+                              >
+                                {isBuying ? "…" : "Buy"}
+                              </button>
+                            )}
+                            {isInEarlyAccess && (
+                              <div
+                                style={{
+                                  fontSize: 10,
+                                  color: "rgba(255,255,255,0.35)",
+                                  marginTop: 6,
+                                }}
+                              >
+                                Pro subscribers first
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="price-option-amount">
+                              {fmtDollars(sharedPrice)}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "rgba(255,255,255,0.4)",
+                                marginBottom: 8,
+                                lineHeight: 1.4,
+                              }}
                             >
-                              {isBuying ? "…" : "Buy"}
-                            </button>
-                          ) : (
-                            <div className="sub-lock">
-                              <span className="sub-lock-label">Subscribers only</span>
-                              <Link href="/subscriptions" className="sub-lock-cta" onClick={(e) => e.stopPropagation()}>
-                                Subscribe $99/mo →
-                              </Link>
+                              Pro members get shared leads at{" "}
+                              {fmtDollars(sharedPrice)} each
                             </div>
-                          )
-                        ) : isInEarlyAccess ? (
-                          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 6 }}>Subscribers first</div>
-                        ) : null}
+                            <Link
+                              href="/subscriptions"
+                              className="price-option-btn non-exclusive"
+                              style={{
+                                display: "block",
+                                textAlign: "center",
+                                textDecoration: "none",
+                                padding: "6px 0",
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Subscribe {proDisplayPrice}/mo →
+                            </Link>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -751,9 +1248,24 @@ export default function MarketplacePage() {
 
             {/* Pagination */}
             <div className="pager">
-              <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Previous</button>
-              <span className="pager-info">Page {page}{total > 0 ? ` of ${Math.ceil(total / PAGE_SIZE)}` : ""}</span>
-              <button type="button" disabled={page * PAGE_SIZE >= total} onClick={() => setPage((p) => p + 1)}>Next →</button>
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                ← Previous
+              </button>
+              <span className="pager-info">
+                Page {page}
+                {total > 0 ? ` of ${Math.ceil(total / PAGE_SIZE)}` : ""}
+              </span>
+              <button
+                type="button"
+                disabled={page * PAGE_SIZE >= total}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next →
+              </button>
             </div>
           </main>
         </div>
@@ -777,7 +1289,9 @@ export default function MarketplacePage() {
       {/* Toast stack */}
       <div className="toast-stack">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.variant}`}>{t.msg}</div>
+          <div key={t.id} className={`toast ${t.variant}`}>
+            {t.msg}
+          </div>
         ))}
       </div>
     </>

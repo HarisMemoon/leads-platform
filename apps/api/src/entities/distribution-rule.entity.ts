@@ -110,6 +110,11 @@ import {
     @Column({ type: 'bigint', nullable: true })
     max_lead_price_cents!: string | null
 
+    /** Timestamp when the customer completed setup and went "live".
+     *  Monthly lead cap resets every 30 days from this date (not subscription date). */
+    @Column({ type: 'timestamp with time zone', nullable: true })
+    launched_at!: Date | null
+
     // ─────────────────────────────────────────────────────────────────────────
 
     /*

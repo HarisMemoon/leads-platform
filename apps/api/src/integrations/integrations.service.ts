@@ -95,6 +95,7 @@ export class IntegrationsService {
     userId: string,
     event: string,
     payload: Record<string, unknown>,
+    opts?: { assignmentId?: string },
   ): Promise<{ delivered: boolean; skipped: boolean; status: number | null }> {
     const row = await this.getOrCreateWebhookRow(userId);
     const webhookUrl = (row.config?.webhookUrl as string | undefined)?.trim();
@@ -121,16 +122,39 @@ export class IntegrationsService {
       await this.integrationRepo.save(row);
       if (!res.ok) {
         this.logger.warn(`Webhook event "${event}" failed with HTTP ${res.status}`);
+        // Mark assignment for retry if we have its ID
+        if (opts?.assignmentId) {
+          await this.markAssignmentCrmFailed(opts.assignmentId, `HTTP ${res.status}`);
+        }
       }
       return { delivered: res.ok, skipped: false, status: res.status };
     } catch (e) {
       clearTimeout(t);
       row.status = IntegrationStatus.ERROR;
       await this.integrationRepo.save(row);
-      this.logger.warn(
-        `Webhook event "${event}" failed: ${e instanceof Error ? e.message : e}`,
-      );
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`Webhook event "${event}" failed: ${msg}`);
+      if (opts?.assignmentId) {
+        await this.markAssignmentCrmFailed(opts.assignmentId, msg);
+      }
       return { delivered: false, skipped: false, status: null };
+    }
+  }
+
+  private async markAssignmentCrmFailed(assignmentId: string, error: string) {
+    try {
+      // Delay in minutes for first retry attempt (5 minutes)
+      const firstRetryAt = new Date(Date.now() + 5 * 60 * 1000);
+      await this.integrationRepo.manager.query(
+        `UPDATE lead_assignments
+         SET crm_sync_status = 'failed',
+             crm_last_error = $1,
+             crm_next_retry_at = $2
+         WHERE id = $3 AND crm_sync_status != 'synced'`,
+        [error.slice(0, 500), firstRetryAt, assignmentId],
+      );
+    } catch (e) {
+      this.logger.warn(`Could not mark assignment ${assignmentId} as CRM failed: ${e instanceof Error ? e.message : e}`);
     }
   }
 }

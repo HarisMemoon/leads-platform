@@ -45,6 +45,12 @@ describe('AdminController', () => {
     const engineSettingsRepo = createRepositoryMock<any>()
     const userRepo = createRepositoryMock<any>()
     const resourcesRepo = createRepositoryMock<any>()
+    const leadRepo = createRepositoryMock<any>()
+    const vendorRepo = createRepositoryMock<any>()
+    const leadPricingRepo = createRepositoryMock<any>()
+    const leadsService = { listLeads: jest.fn(), patchLead: jest.fn() }
+    const outboundPingService = { pingAll: jest.fn(), listEndpoints: jest.fn() }
+    const leadPricingService = { invalidate: jest.fn(), getPricesForLead: jest.fn() }
     const controller = new AdminController(
       walletService as any,
       auditLogService as any,
@@ -54,9 +60,20 @@ describe('AdminController', () => {
       gradingService as any,
       integrationsHealthService as any,
       plansService as any,
+      leadsService as any,
+      outboundPingService as any,
       engineSettingsRepo as any,
       userRepo as any,
       resourcesRepo as any,
+      leadRepo as any,
+      vendorRepo as any,
+      leadPricingRepo as any,
+      leadPricingService as any,
+      { query: jest.fn().mockResolvedValue([]) } as any, // dataSource
+      { getRefundAbuseStats: jest.fn().mockResolvedValue({}) } as any, // refundRequestsService
+      createRepositoryMock<any>() as any, // assignmentRepo
+      createRepositoryMock<any>() as any, // distributionRuleRepo
+      { get: jest.fn().mockReturnValue('2025-01') } as any, // configService
     )
     return { controller, engineSettingsRepo, userRepo, resourcesRepo }
   }

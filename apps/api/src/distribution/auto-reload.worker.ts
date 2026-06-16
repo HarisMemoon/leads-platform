@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { StripeService } from '../stripe/stripe.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** Default: every 2 minutes. Override with AUTO_RELOAD_CRON (e.g. `* * * * *` every minute in dev). */
 const AUTO_RELOAD_CRON =
@@ -20,6 +21,8 @@ export class AutoReloadWorker {
     private readonly walletRepo: Repository<WalletAccount>,
     private readonly stripeService: StripeService,
     private readonly dataSource: DataSource,
+    @Inject(forwardRef(() => NotificationsService))
+    private readonly notificationsService: NotificationsService,
   ) {
     const raw = (process.env.AUTO_RELOAD_WORKER_ENABLED ?? '').trim().toLowerCase();
     if (raw === 'true' || raw === '1' || raw === 'yes') {
@@ -142,11 +145,26 @@ export class AutoReloadWorker {
           fresh.user.stripe_customer_id,
           { balanceCentsForIdempotency: fresh.balance_cents },
         );
+
+        // Success — notify user (fire-and-forget)
+        const estimatedNewBalance = Number(fresh.balance_cents) + amount;
+        void this.notificationsService
+          .notifyAutoRefillSuccess(fresh.user.id, amount, estimatedNewBalance)
+          .catch((e) => this.logger.warn(`Auto-refill success notification failed: ${e instanceof Error ? e.message : e}`));
+
       } catch (error) {
         const message = error instanceof Error ? error.message : 'unknown error';
         this.logger.warn(
           `Auto-reload failed for wallet ${wallet.id} (user ${wallet.user?.id ?? 'unknown'}): ${message}`,
         );
+
+        // Failure — notify user using outer wallet reference (fire-and-forget)
+        if (wallet.user?.id) {
+          const failAmount = Number(wallet.auto_reload_amount_cents ?? 0);
+          void this.notificationsService
+            .notifyAutoRefillFailed(wallet.user.id, failAmount)
+            .catch((e) => this.logger.warn(`Auto-refill failure notification failed: ${e instanceof Error ? e.message : e}`));
+        }
       } finally {
         if (hasLock) {
           try {

@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import RequireAuth from "@/components/RequireAuth";
 import LegacyPlanBanner from "@/components/LegacyPlanBanner";
+import TermsReacceptanceModal from "@/components/TermsReacceptanceModal";
 
 export default function DashboardLayout({
   children,
@@ -27,6 +28,7 @@ export default function DashboardLayout({
         >
           {!hideNavbar && <Navbar />}
           {!hideNavbar && <LegacyPlanBanner />}
+          <TermsReacceptanceModal />
           {children}
         </main>
     </RequireAuth>

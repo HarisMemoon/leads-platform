@@ -11,10 +11,15 @@ describe('PingService', () => {
     const postRepo = createRepositoryMock<any>();
     const auditRepo = createRepositoryMock<any>();
     const leadRepo = createRepositoryMock<any>();
+    const hitRepo = createRepositoryMock<any>();
     const matcher = { match: jest.fn() };
     const leadsService = { buyLead: jest.fn() };
     const leadPricingService = { applyTierToLead: jest.fn(async (lead) => lead) };
     const outboundPingService = { pingAll: jest.fn().mockResolvedValue({ sold: false, attempts: 0 }) };
+    const leadPricingConfigService = {
+      getPricesForLead: jest.fn().mockResolvedValue({ exclusive: '15000', shared: '2500' }),
+    };
+    const distributionService = { enqueueLeadDistribution: jest.fn().mockResolvedValue(undefined) };
     const service = new PingService(
       vendorRepo as any,
       pricingRuleRepo as any,
@@ -22,11 +27,14 @@ describe('PingService', () => {
       postRepo as any,
       auditRepo as any,
       leadRepo as any,
+      hitRepo as any,
       {} as any,
       matcher as any,
       leadsService as any,
       leadPricingService as any,
       outboundPingService as any,
+      leadPricingConfigService as any,
+      distributionService as any,
     );
 
     vendorRepo.findOne.mockResolvedValue({
@@ -46,6 +54,8 @@ describe('PingService', () => {
     leadRepo.createQueryBuilder.mockReturnValue(
       createQueryBuilderMock({ getOne: jest.fn().mockResolvedValue(null) }),
     );
+    hitRepo.create.mockImplementation((value) => value);
+    hitRepo.save.mockImplementation(async (value) => ({ ...value, id: value.id ?? 'hit-1' }));
 
     return {
       service,
@@ -53,8 +63,10 @@ describe('PingService', () => {
       pingRepo,
       postRepo,
       leadRepo,
+      hitRepo,
       matcher,
       leadsService,
+      distributionService,
     };
   }
 

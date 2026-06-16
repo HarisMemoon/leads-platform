@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -11,9 +12,14 @@ import { LeadStatus } from '../../common/enums/lead-status.enum';
 import { ExclusivityLevel } from '../../common/enums/exclusivity-level.enum';
 import { hashApiKey } from '../common/utils/hash-api-key.util';
 import { InboundLeadDto } from './dto/inbound-lead.dto';
+import { LeadPricingService } from '../lead-pricing/lead-pricing.service';
+import { DistributionService } from '../distribution/distribution.service';
+import { OutboundPingService } from '../outbound/outbound-ping.service';
 
 @Injectable()
 export class InboundService {
+  private readonly logger = new Logger(InboundService.name);
+
   constructor(
     @InjectRepository(Lead)
     private readonly leadRepo: Repository<Lead>,
@@ -21,6 +27,9 @@ export class InboundService {
     private readonly vendorRepo: Repository<VendorIntegration>,
     @InjectRepository(VendorWebhookHit)
     private readonly hitRepo: Repository<VendorWebhookHit>,
+    private readonly leadPricingService: LeadPricingService,
+    private readonly distributionService: DistributionService,
+    private readonly outboundPingService: OutboundPingService,
   ) {}
 
   async authenticateVendor(apiKey: string): Promise<VendorIntegration> {
@@ -40,7 +49,8 @@ export class InboundService {
     ipAddress: string,
     rawPayload: Record<string, unknown>,
   ): Promise<Lead> {
-    const priceCents = dto.price_cents ?? dto.exclusive_price_cents ?? dto.shared_price_cents ?? 0;
+    // Pricing always from admin-controlled lead_pricing_config
+    const { exclusive, shared } = await this.leadPricingService.getPricesForLead(dto.lead_type);
 
     const lead = this.leadRepo.create({
       source: 'inbound',
@@ -48,13 +58,14 @@ export class InboundService {
       market: dto.market,
       lead_type: dto.lead_type,
       title: dto.title ?? `${dto.lead_type} — ${dto.market}`,
-      status: LeadStatus.NEW,
+      // Goes directly to marketplace — no admin approval step
+      status: LeadStatus.AVAILABLE,
       exclusivity_level: ExclusivityLevel.SHARED,
       quality_score: dto.quality_score ?? 70,
-      price_cents: String(priceCents),
-      list_price_anchor_cents: String(priceCents),
-      exclusive_price_cents: dto.exclusive_price_cents != null ? String(dto.exclusive_price_cents) : null,
-      shared_price_cents: dto.shared_price_cents != null ? String(dto.shared_price_cents) : null,
+      price_cents: exclusive,
+      list_price_anchor_cents: exclusive,
+      exclusive_price_cents: exclusive,
+      shared_price_cents: shared,
       metadata: dto.metadata ?? {},
       utm: {},
     });
@@ -70,6 +81,16 @@ export class InboundService {
         payload_snapshot: rawPayload,
       }),
     );
+
+    // Enqueue auto-distribution to buyers who match this lead's criteria
+    void this.distributionService
+      .enqueueLeadDistribution(saved.id)
+      .catch((e) => this.logger.warn(`Distribution enqueue failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`));
+
+    // Fire outbound buyer pings (e.g. Juiced) — highest bidder wins
+    void this.outboundPingService
+      .pingAll(saved)
+      .catch((e) => this.logger.warn(`Outbound ping failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`));
 
     return saved;
   }

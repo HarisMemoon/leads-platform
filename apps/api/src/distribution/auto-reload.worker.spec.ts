@@ -22,10 +22,15 @@ describe('AutoReloadWorker', () => {
     const walletRepo = createRepositoryMock<any>()
     const queryRunner = createQueryRunnerMock()
     const dataSource = createDataSourceMock(queryRunner)
+    const notificationsService = {
+      notifyAutoRefillSuccess: jest.fn().mockResolvedValue(undefined),
+      notifyAutoRefillFailed: jest.fn().mockResolvedValue(undefined),
+    }
     const worker = new AutoReloadWorker(
       walletRepo as any,
       stripeService as any,
       dataSource as any,
+      notificationsService as any,
     )
 
     return { worker, walletRepo, queryRunner }

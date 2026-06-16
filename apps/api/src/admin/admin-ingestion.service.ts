@@ -12,6 +12,9 @@ import {
   CreateIngestionBatchDto,
   IngestionRowDto,
 } from './dto/admin-ingestion.dto';
+import { LeadPricingService } from '../lead-pricing/lead-pricing.service';
+import { DistributionService } from '../distribution/distribution.service';
+import { OutboundPingService } from '../outbound/outbound-ping.service';
 
 const FAILURE_SAMPLE_LIMIT = 25;
 
@@ -24,6 +27,9 @@ export class AdminIngestionService {
     private readonly batchRepo: Repository<LeadIngestionBatch>,
     @InjectRepository(Lead)
     private readonly leadRepo: Repository<Lead>,
+    private readonly leadPricingService: LeadPricingService,
+    private readonly distributionService: DistributionService,
+    private readonly outboundPingService: OutboundPingService,
   ) {}
 
   async createBatch(uploadedByUserId: string, dto: CreateIngestionBatchDto) {
@@ -85,8 +91,9 @@ export class AdminIngestionService {
 
     const isExclusive = row.exclusivity_level === 'exclusive';
     const exclusivityLevel = isExclusive ? ExclusivityLevel.EXCLUSIVE : ExclusivityLevel.SHARED;
-    // For non-exclusive: display exclusive price = per-buyer price × 3
-    const exclusivePriceCents = isExclusive ? row.price_cents : row.price_cents * 3;
+    // Pricing always from admin-controlled lead_pricing_config — ignore any price in the row
+    const { exclusive: exclusivePriceCents, shared: sharedPriceCents } =
+      await this.leadPricingService.getPricesForLead(row.lead_type?.trim() ?? 'inbound');
 
     const lead = this.leadRepo.create({
       title: row.title?.trim() || `${row.lead_type} · ${row.market}`,
@@ -96,9 +103,10 @@ export class AdminIngestionService {
       status: LeadStatus.AVAILABLE,
       exclusivity_level: exclusivityLevel,
       quality_score: score,
-      price_cents: String(row.price_cents),
-      list_price_anchor_cents: String(row.price_cents),
-      exclusive_price_cents: String(exclusivePriceCents),
+      price_cents: exclusivePriceCents,
+      list_price_anchor_cents: exclusivePriceCents,
+      exclusive_price_cents: exclusivePriceCents,
+      shared_price_cents: isExclusive ? null : sharedPriceCents,
       max_non_exclusive_buyers: isExclusive ? 1 : (row.lead_type?.trim() === 'outbound' ? 3 : 5),
       metadata: {
         // contact
@@ -120,7 +128,13 @@ export class AdminIngestionService {
         ingestion_source: 'admin_csv',
       },
     });
-    await this.leadRepo.save(lead);
+    const saved = await this.leadRepo.save(lead);
+
+    // Enqueue auto-distribution + outbound pings — no admin approval needed
+    void this.distributionService.enqueueLeadDistribution(saved.id)
+      .catch((e) => this.logger.warn(`Distribution enqueue failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`));
+    void this.outboundPingService.pingAll(saved)
+      .catch((e) => this.logger.warn(`Outbound ping failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`));
   }
 
   async listBatches(limit = 25) {

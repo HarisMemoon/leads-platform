@@ -4,9 +4,17 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { UseMutationResult } from "@tanstack/react-query";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { LeadDetailResponse, LeadQuoteResponse, MarketplaceLeadRow } from "@/lib/leads-api";
+import type {
+  LeadDetailResponse,
+  LeadQuoteResponse,
+  MarketplaceLeadRow,
+} from "@/lib/leads-api";
 import { ApiError } from "@/lib/api";
-import { createRefundRequest, patchAssignmentLifecycle } from "@/lib/leads-api";
+import {
+  createRefundRequest,
+  patchAssignmentLifecycle,
+} from "@/lib/leads-api";
+import { getSubscriptionPricing } from "@/lib/subscriptions-api";
 import { queryKeys } from "@/lib/query-keys";
 
 const PIPELINE_PHASES = [
@@ -39,7 +47,9 @@ function MyLeadPipelineBlock({
       : "",
   );
   const [sell, setSell] = useState(
-    assignment.sell_price_cents != null ? String(Number(assignment.sell_price_cents) / 100) : "",
+    assignment.sell_price_cents != null
+      ? String(Number(assignment.sell_price_cents) / 100)
+      : "",
   );
   const [notes, setNotes] = useState(assignment.buyer_notes ?? "");
   const [refundReason, setRefundReason] = useState("");
@@ -53,7 +63,9 @@ function MyLeadPipelineBlock({
         : "",
     );
     setSell(
-      assignment.sell_price_cents != null ? String(Number(assignment.sell_price_cents) / 100) : "",
+      assignment.sell_price_cents != null
+        ? String(Number(assignment.sell_price_cents) / 100)
+        : "",
     );
     setNotes(assignment.buyer_notes ?? "");
   }, [assignment]);
@@ -62,8 +74,10 @@ function MyLeadPipelineBlock({
     mutationFn: () =>
       patchAssignmentLifecycle(aid, {
         lifecycle_phase: phase,
-        contract_price_cents: contract.trim() === "" ? null : Math.round(Number(contract) * 100),
-        sell_price_cents: sell.trim() === "" ? null : Math.round(Number(sell) * 100),
+        contract_price_cents:
+          contract.trim() === "" ? null : Math.round(Number(contract) * 100),
+        sell_price_cents:
+          sell.trim() === "" ? null : Math.round(Number(sell) * 100),
         buyer_notes: notes.trim() === "" ? null : notes.trim(),
       }),
     onSuccess: async () => {
@@ -85,7 +99,13 @@ function MyLeadPipelineBlock({
   });
 
   return (
-    <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+    <div
+      style={{
+        marginTop: 18,
+        paddingTop: 18,
+        borderTop: "1px solid rgba(255,255,255,0.08)",
+      }}
+    >
       <div className="ldm-section-h">Pipeline &amp; deal</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <label style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
@@ -211,41 +231,49 @@ function MyLeadPipelineBlock({
       >
         {refundMut.isPending ? "Submitting…" : "Submit refund request"}
       </button>
-      {msg ? <p className="ldm-err" style={{ marginTop: 10, color: "#a5b4fc" }}>{msg}</p> : null}
+      {msg ? (
+        <p className="ldm-err" style={{ marginTop: 10, color: "#a5b4fc" }}>
+          {msg}
+        </p>
+      ) : null}
     </div>
   );
 }
 
 export function exclusivityLabel(e: string) {
   return (
-    {
-      exclusive: "Exclusive",
-      semi_exclusive: "Semi-Exclusive",
-      shared: "Shared",
-    } as Record<string, string>
-  )[e] ?? e;
+    (
+      {
+        exclusive: "Exclusive",
+        semi_exclusive: "Semi-Exclusive",
+        shared: "Shared",
+      } as Record<string, string>
+    )[e] ?? e
+  );
 }
 
 export function exclusivityColor(e: string) {
   return (
-    {
-      exclusive: {
-        bg: "rgba(139,92,246,0.15)",
-        color: "#c4b5fd",
-        border: "rgba(139,92,246,0.35)",
-      },
-      semi_exclusive: {
-        bg: "rgba(245,158,11,0.12)",
-        color: "#fcd34d",
-        border: "rgba(245,158,11,0.3)",
-      },
-      shared: {
-        bg: "rgba(255,255,255,0.06)",
-        color: "rgba(255,255,255,0.45)",
-        border: "rgba(255,255,255,0.1)",
-      },
-    } as Record<string, { bg: string; color: string; border: string }>
-  )[e] ?? { bg: "", color: "#fff", border: "" };
+    (
+      {
+        exclusive: {
+          bg: "rgba(139,92,246,0.15)",
+          color: "#c4b5fd",
+          border: "rgba(139,92,246,0.35)",
+        },
+        semi_exclusive: {
+          bg: "rgba(245,158,11,0.12)",
+          color: "#fcd34d",
+          border: "rgba(245,158,11,0.3)",
+        },
+        shared: {
+          bg: "rgba(255,255,255,0.06)",
+          color: "rgba(255,255,255,0.45)",
+          border: "rgba(255,255,255,0.1)",
+        },
+      } as Record<string, { bg: string; color: string; border: string }>
+    )[e] ?? { bg: "", color: "#fff", border: "" }
+  );
 }
 
 export function fmtDollarsModal(cents: string | number) {
@@ -283,7 +311,8 @@ function modalMetaValue(
 ) {
   for (const key of keys) {
     const value = meta?.[key];
-    if (value != null && String(value).trim() !== "") return String(value);
+    const text = value != null ? String(value).trim() : "";
+    if (text && !/^•+$/.test(text)) return text;
   }
   return fallback;
 }
@@ -292,8 +321,23 @@ export function QualityBar({ score }: { score: number }) {
   const pct = Math.min(100, Math.max(0, score));
   const color = pct >= 75 ? "#10b981" : pct >= 50 ? "#f59e0b" : "#ef4444";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, marginBottom: 4 }}>
-      <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)" }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        marginTop: 8,
+        marginBottom: 4,
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          height: 4,
+          borderRadius: 2,
+          background: "rgba(255,255,255,0.08)",
+        }}
+      >
         <div
           style={{
             height: "100%",
@@ -304,17 +348,37 @@ export function QualityBar({ score }: { score: number }) {
           }}
         />
       </div>
-      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", width: 28, textAlign: "right", flexShrink: 0 }}>
+      <span
+        style={{
+          fontSize: 11,
+          color: "rgba(255,255,255,0.4)",
+          width: 28,
+          textAlign: "right",
+          flexShrink: 0,
+        }}
+      >
         {pct}
       </span>
     </div>
   );
 }
 
-function PriceHistoryTable({ rows }: { rows: LeadDetailResponse["lead_price_history"] }) {
+function PriceHistoryTable({
+  rows,
+}: {
+  rows: LeadDetailResponse["lead_price_history"];
+}) {
   if (!rows.length) {
     return (
-      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", padding: "8px 0" }}>No price changes recorded.</p>
+      <p
+        style={{
+          fontSize: 12,
+          color: "rgba(255,255,255,0.3)",
+          padding: "8px 0",
+        }}
+      >
+        No price changes recorded.
+      </p>
     );
   }
   return (
@@ -322,7 +386,15 @@ function PriceHistoryTable({ rows }: { rows: LeadDetailResponse["lead_price_hist
       <thead>
         <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
           {["Date", "From", "To", "Reason"].map((h) => (
-            <th key={h} style={{ padding: "4px 6px", textAlign: "left", color: "rgba(255,255,255,0.3)", fontWeight: 500 }}>
+            <th
+              key={h}
+              style={{
+                padding: "4px 6px",
+                textAlign: "left",
+                color: "rgba(255,255,255,0.3)",
+                fontWeight: 500,
+              }}
+            >
               {h}
             </th>
           ))}
@@ -330,13 +402,30 @@ function PriceHistoryTable({ rows }: { rows: LeadDetailResponse["lead_price_hist
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-            <td style={{ padding: "5px 6px", color: "rgba(255,255,255,0.5)" }}>{fmtDateModal(r.changed_at)}</td>
-            <td style={{ padding: "5px 6px", color: "rgba(255,255,255,0.55)", textDecoration: "line-through" }}>
+          <tr
+            key={r.id}
+            style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+          >
+            <td style={{ padding: "5px 6px", color: "rgba(255,255,255,0.5)" }}>
+              {fmtDateModal(r.changed_at)}
+            </td>
+            <td
+              style={{
+                padding: "5px 6px",
+                color: "rgba(255,255,255,0.55)",
+                textDecoration: "line-through",
+              }}
+            >
               {fmtDollarsModal(r.old_price_cents)}
             </td>
-            <td style={{ padding: "5px 6px", color: "#a5b4fc", fontWeight: 600 }}>{fmtDollarsModal(r.new_price_cents)}</td>
-            <td style={{ padding: "5px 6px", color: "rgba(255,255,255,0.4)" }}>{r.reason || "—"}</td>
+            <td
+              style={{ padding: "5px 6px", color: "#a5b4fc", fontWeight: 600 }}
+            >
+              {fmtDollarsModal(r.new_price_cents)}
+            </td>
+            <td style={{ padding: "5px 6px", color: "rgba(255,255,255,0.4)" }}>
+              {r.reason || "—"}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -392,10 +481,17 @@ export type LeadDetailModalProps = {
     unknown,
     string
   >;
-  buyMutation?: UseMutationResult<{ id: string }, unknown, { id: string; choice: "exclusive" | "non_exclusive" }>;
+  buyMutation?: UseMutationResult<
+    { id: string },
+    unknown,
+    { id: string; choice: "exclusive" | "non_exclusive" }
+  >;
   reserveUntil?: string | null;
   secondsLeft?: number;
-  getLeadQuote?: (leadId: string, choice: "exclusive" | "non_exclusive") => Promise<LeadQuoteResponse>;
+  getLeadQuote?: (
+    leadId: string,
+    choice: "exclusive" | "non_exclusive",
+  ) => Promise<LeadQuoteResponse>;
 };
 
 export function LeadDetailModal({
@@ -414,7 +510,9 @@ export function LeadDetailModal({
   secondsLeft = 0,
   getLeadQuote,
 }: LeadDetailModalProps) {
-  const [exclusivityChoice, setExclusivityChoice] = useState<"exclusive" | "non_exclusive">("non_exclusive");
+  const [exclusivityChoice, setExclusivityChoice] = useState<
+    "exclusive" | "non_exclusive"
+  >("non_exclusive");
 
   const { data: quoteData } = useQuery({
     queryKey: queryKeys.leads.quote(leadId ?? "", exclusivityChoice),
@@ -422,6 +520,22 @@ export function LeadDetailModal({
     enabled: !!leadId && !!getLeadQuote && purchaseActions,
     staleTime: 30_000,
   });
+
+  const { data: subPricing } = useQuery({
+    queryKey: ["subscriptions", "pricing"],
+    queryFn: getSubscriptionPricing,
+    staleTime: 5 * 60 * 1000,
+  });
+  const leadSharedPrice =
+    listPreview?.shared_price_cents != null && Number(listPreview.shared_price_cents) > 0
+      ? `$${Math.round(Number(listPreview.shared_price_cents) / 100)}`
+      : null;
+  const leadExclusivePrice =
+    listPreview?.exclusive_price_cents != null && Number(listPreview.exclusive_price_cents) > 0
+      ? `$${Math.round(Number(listPreview.exclusive_price_cents) / 100)}`
+      : listPreview?.current_price != null && Number(listPreview.current_price) > 0
+        ? `$${Math.round(Number(listPreview.current_price) / 100)}`
+        : null;
 
   if (!leadId) return null;
 
@@ -432,17 +546,30 @@ export function LeadDetailModal({
       (a) => a.assignment_id === myLeadPreview?.assignment_id,
     ) ?? detail?.lead_assignments?.[0];
 
-  const exclusivePrice = listPreview?.exclusive_price_cents ?? listPreview?.current_price ?? "0";
+  const exclusivePrice =
+    listPreview?.exclusive_price_cents ?? listPreview?.current_price ?? "0";
   const _leadTypeForCap = (listPreview as any)?.lead_type ?? "inbound";
-  const sharedCap = listPreview?.max_non_exclusive_buyers ?? (_leadTypeForCap === "outbound" ? 3 : 5);
-  const sharedPrice = computeSharedDisplayCents(exclusivePrice, sharedCap);
-  const rawPrice = exclusivityChoice === "exclusive" ? Number(exclusivePrice) : Number(sharedPrice);
+  const sharedCap =
+    listPreview?.max_non_exclusive_buyers ??
+    (_leadTypeForCap === "outbound" ? 3 : 5);
+  const sharedPrice =
+    listPreview?.shared_price_cents != null && Number(listPreview.shared_price_cents) > 0
+      ? Number(listPreview.shared_price_cents)
+      : computeSharedDisplayCents(exclusivePrice, sharedCap);
+  const rawPrice =
+    exclusivityChoice === "exclusive"
+      ? Number(exclusivePrice)
+      : Number(sharedPrice);
   const isPro = quoteData?.is_pro ?? false;
   const isSubscribed = quoteData?.is_subscribed ?? false;
-  const subscriptionRequiredForShared = quoteData?.subscription_required_for_shared ?? false;
+  const subscriptionRequiredForShared =
+    quoteData?.subscription_required_for_shared ?? false;
   const canBuyNow = quoteData?.can_buy_now ?? true;
-  const sharedBlocked = exclusivityChoice === "non_exclusive" && subscriptionRequiredForShared;
-  const effectivePrice = quoteData ? Number(quoteData.effective_price_cents) : rawPrice;
+  const sharedBlocked =
+    exclusivityChoice === "non_exclusive" && subscriptionRequiredForShared;
+  const effectivePrice = quoteData
+    ? Number(quoteData.effective_price_cents)
+    : rawPrice;
 
   const modalAnchorCents = modalLead?.list_price_anchor_cents
     ? Number(modalLead.list_price_anchor_cents)
@@ -450,13 +577,30 @@ export function LeadDetailModal({
       ? Number(listPreview.list_price_anchor_cents)
       : null;
   const modalMeta = modalLead?.metadata ?? listPreview?.metadata ?? {};
+  const modalMarket = modalLead?.market ?? listPreview?.market ?? "";
+  const modalMarketParts = modalMarket
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const modalCity = modalMetaValue(
+    modalMeta,
+    ["city"],
+    modalMarketParts[0] ?? "—",
+  );
+  const modalState = modalMetaValue(
+    modalMeta,
+    ["state"],
+    modalMarketParts[1] ?? "—",
+  );
+  const modalZip = modalMetaValue(modalMeta, ["zip", "postal"]);
   const shouldBlurPrivate = purchaseActions;
   const privateClass = shouldBlurPrivate ? " ldm-blur" : "";
 
   const sharedTaken = listPreview?.non_exclusive_buyers_count ?? 0;
   const slotsLeft = sharedCap - sharedTaken;
   const earlyAccessUntil = listPreview?.early_access_until ?? null;
-  const isInEarlyAccess = earlyAccessUntil != null && new Date(earlyAccessUntil) > new Date();
+  const isInEarlyAccess =
+    earlyAccessUntil != null && new Date(earlyAccessUntil) > new Date();
 
   return (
     <>
@@ -469,71 +613,157 @@ export function LeadDetailModal({
         .ldm-pro-badge { display: inline-block; font-size: 10px; font-weight: 700; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border-radius: 100px; padding: 2px 7px; margin-left: 6px; vertical-align: middle; }
       `}</style>
       <div className="ldm-overlay" onClick={onClose} role="presentation">
-        <div className="ldm-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div
+          className="ldm-modal"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="ldm-header">
             <div className="ldm-title">
               {modalLead?.title ?? listPreview?.title ?? "Lead detail"}
               {isPro && <span className="ldm-pro-badge">Pro</span>}
             </div>
-            <button type="button" className="ldm-close" onClick={onClose} aria-label="Close">×</button>
+            <button
+              type="button"
+              className="ldm-close"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              ×
+            </button>
           </div>
 
           {detailLoading && !listPreview ? (
             <>
               {[100, 80, 120, 90].map((w, i) => (
-                <div key={i} className="ldm-skeleton" style={{ height: 52, marginBottom: 10, width: `${w}%` }} />
+                <div
+                  key={i}
+                  className="ldm-skeleton"
+                  style={{ height: 52, marginBottom: 10, width: `${w}%` }}
+                />
               ))}
             </>
           ) : (
             <>
+              {/* ── Visible property details ── */}
               <div className="ldm-grid">
                 <div className="ldm-item">
-                  <div className="ldm-label">Date</div>
-                  <div className="ldm-value">{fmtDateModal(modalLead?.created_at ?? listPreview?.created_at ?? "")}</div>
-                </div>
-                <div className="ldm-item">
-                  <div className="ldm-label">Lead type</div>
-                  <div className="ldm-value">{modalLead?.type ?? listPreview?.type}</div>
-                </div>
-                <div className="ldm-item">
                   <div className="ldm-label">City</div>
-                  <div className="ldm-value">{modalMetaValue(modalMeta, ["city"])}</div>
+                  <div className="ldm-value">{modalCity}</div>
                 </div>
                 <div className="ldm-item">
                   <div className="ldm-label">State</div>
-                  <div className="ldm-value">{modalMetaValue(modalMeta, ["state"])}</div>
-                </div>
-                <div className="ldm-item">
-                  <div className="ldm-label">Property type</div>
-                  <div className="ldm-value">{modalMetaValue(modalMeta, ["property_type", "propertyType"])}</div>
-                </div>
-                <div className="ldm-item">
-                  <div className="ldm-label">Timeline</div>
-                  <div className="ldm-value">{modalMetaValue(modalMeta, ["timeline"])}</div>
-                </div>
-                <div className="ldm-item">
-                  <div className="ldm-label">Condition</div>
-                  <div className="ldm-value">{modalMetaValue(modalMeta, ["condition"])}</div>
+                  <div className="ldm-value">{modalState}</div>
                 </div>
                 <div className="ldm-item">
                   <div className="ldm-label">ZIP</div>
-                  <div className="ldm-value">{modalMetaValue(modalMeta, ["zip", "postal"])}</div>
-                </div>
-                <div className="ldm-item full">
-                  <div className="ldm-label">Name</div>
-                  <div className={`ldm-value${privateClass}`}>{modalMetaValue(modalMeta, ["name", "full_name", "first_name"])}</div>
+                  <div className="ldm-value">{modalZip}</div>
                 </div>
                 <div className="ldm-item">
-                  <div className="ldm-label">Phone</div>
-                  <div className={`ldm-value${privateClass}`}>{modalMetaValue(modalMeta, ["phone", "mobile"])}</div>
+                  <div className="ldm-label">Lead type</div>
+                  <div className="ldm-value">
+                    {modalLead?.type ?? listPreview?.type}
+                  </div>
                 </div>
                 <div className="ldm-item">
-                  <div className="ldm-label">Email</div>
-                  <div className={`ldm-value${privateClass}`}>{modalMetaValue(modalMeta, ["email"])}</div>
+                  <div className="ldm-label">Property type</div>
+                  <div className="ldm-value">
+                    {modalMetaValue(modalMeta, [
+                      "property_type",
+                      "propertyType",
+                    ])}
+                  </div>
                 </div>
-                <div className="ldm-item full">
-                  <div className="ldm-label">Full address</div>
-                  <div className={`ldm-value${privateClass}`}>{modalMetaValue(modalMeta, ["address", "full_address", "street"], modalLead?.market ?? listPreview?.market ?? "—")}</div>
+                <div className="ldm-item">
+                  <div className="ldm-label">Timeline</div>
+                  <div className="ldm-value">
+                    {modalMetaValue(modalMeta, ["timeline"])}
+                  </div>
+                </div>
+                <div className="ldm-item">
+                  <div className="ldm-label">Condition</div>
+                  <div className="ldm-value">
+                    {modalMetaValue(modalMeta, ["condition"])}
+                  </div>
+                </div>
+                <div className="ldm-item">
+                  <div className="ldm-label">Received</div>
+                  <div className="ldm-value">
+                    {fmtDateModal(
+                      modalLead?.created_at ?? listPreview?.created_at ?? "",
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Private contact details — revealed after purchase ── */}
+              <div
+                style={{
+                  marginTop: 14,
+                  borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.07)",
+                  background: "rgba(255,255,255,0.02)",
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    padding: "8px 14px",
+                    background: "rgba(99,102,241,0.08)",
+                    borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    fontSize: 11,
+                    color: shouldBlurPrivate
+                      ? "rgba(255,255,255,0.4)"
+                      : "rgba(255,255,255,0.6)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  {shouldBlurPrivate ? (
+                    <>
+                      <span>🔒</span> Contact details — revealed after purchase
+                    </>
+                  ) : (
+                    <>
+                      <span>✓</span> Contact details
+                    </>
+                  )}
+                </div>
+                <div className="ldm-grid" style={{ padding: "10px 0 4px" }}>
+                  <div className="ldm-item full">
+                    <div className="ldm-label">Name</div>
+                    <div className={`ldm-value${privateClass}`}>
+                      {modalMetaValue(modalMeta, [
+                        "name",
+                        "full_name",
+                        "first_name",
+                      ])}
+                    </div>
+                  </div>
+                  <div className="ldm-item">
+                    <div className="ldm-label">Phone</div>
+                    <div className={`ldm-value${privateClass}`}>
+                      {modalMetaValue(modalMeta, ["phone", "mobile"])}
+                    </div>
+                  </div>
+                  <div className="ldm-item">
+                    <div className="ldm-label">Email</div>
+                    <div className={`ldm-value${privateClass}`}>
+                      {modalMetaValue(modalMeta, ["email"])}
+                    </div>
+                  </div>
+                  <div className="ldm-item full">
+                    <div className="ldm-label">Full address</div>
+                    <div className={`ldm-value${privateClass}`}>
+                      {modalMetaValue(
+                        modalMeta,
+                        ["address", "full_address", "street"],
+                        modalLead?.market ?? listPreview?.market ?? "—",
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -541,7 +771,8 @@ export function LeadDetailModal({
                 <>
                   {isInEarlyAccess && (
                     <div className="ldm-early-access">
-                      ⚡ Subscriber early access — this lead opens to all buyers soon
+                      ⚡ Subscriber early access — this lead opens to all buyers
+                      soon
                     </div>
                   )}
 
@@ -554,22 +785,58 @@ export function LeadDetailModal({
                       onClick={() => setExclusivityChoice("exclusive")}
                     >
                       Exclusive — {fmtDollarsModal(exclusivePrice)}
-                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>1 buyer · sold once · available to all</div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: "rgba(255,255,255,0.4)",
+                          marginTop: 2,
+                        }}
+                      >
+                        1 buyer · sold once · available to all
+                      </div>
                     </button>
                     <button
                       type="button"
                       className={`ldm-seg-btn${exclusivityChoice === "non_exclusive" ? " active-shared" : ""}`}
                       onClick={() => setExclusivityChoice("non_exclusive")}
                     >
-                      Non Exclusive — {isSubscribed ? fmtDollarsModal(sharedPrice) : "Subscribe"}
-                      <div style={{ display: "flex", gap: 4, justifyContent: "center", marginTop: 4 }}>
+                      Non Exclusive —{" "}
+                      {isSubscribed
+                        ? fmtDollarsModal(sharedPrice)
+                        : "Subscribe"}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 4,
+                          justifyContent: "center",
+                          marginTop: 4,
+                        }}
+                      >
                         {Array.from({ length: sharedCap }).map((_, i) => {
                           let bg = "rgba(255,255,255,0.18)";
-                          if (i < sharedTaken) bg = i >= sharedCap - 1 ? "#f59e0b" : "#10b981";
-                          return <span key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: bg, display: "inline-block" }} />;
+                          if (i < sharedTaken)
+                            bg = i >= sharedCap - 1 ? "#f59e0b" : "#10b981";
+                          return (
+                            <span
+                              key={i}
+                              style={{
+                                width: 7,
+                                height: 7,
+                                borderRadius: "50%",
+                                background: bg,
+                                display: "inline-block",
+                              }}
+                            />
+                          );
                         })}
                       </div>
-                      <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 3 }}>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: "rgba(255,255,255,0.35)",
+                          marginTop: 3,
+                        }}
+                      >
                         {slotsLeft}/{sharedCap} slots · subscribers only
                       </div>
                     </button>
@@ -577,32 +844,66 @@ export function LeadDetailModal({
 
                   {/* Subscription required notice */}
                   {sharedBlocked && (
-                    <div style={{
-                      padding: "14px 16px", borderRadius: 12, marginTop: 8,
-                      background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.22)",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+                    <div
+                      style={{
+                        padding: "14px 16px",
+                        borderRadius: 12,
+                        marginTop: 8,
+                        background: "rgba(99,102,241,0.07)",
+                        border: "1px solid rgba(99,102,241,0.22)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 10,
+                          marginBottom: 12,
+                        }}
+                      >
                         <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
                         <div>
-                          <div style={{ fontSize: 13, fontWeight: 600, color: "#c4b5fd", marginBottom: 3 }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              color: "#c4b5fd",
+                              marginBottom: 3,
+                            }}
+                          >
                             Subscription required for Non Exclusive
                           </div>
-                          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5 }}>
-                            Only active $99/month subscribers can purchase shared leads at the per-buyer price.
-                            Switch to <strong style={{ color: "rgba(255,255,255,0.7)" }}>Exclusive</strong> to buy now, or subscribe to unlock shared pricing.
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "rgba(255,255,255,0.45)",
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            Only active {subPricing?.proDisplayPrice ?? "$49"}/month subscribers can purchase shared leads at{leadSharedPrice ? ` ${leadSharedPrice}` : " this price"} each.
+                            Switch to <strong style={{ color: "rgba(255,255,255,0.7)" }}>Exclusive</strong> to buy now{leadExclusivePrice ? ` at ${leadExclusivePrice}` : ""}, or subscribe to unlock shared pricing.
                           </div>
                         </div>
                       </div>
                       <Link
                         href="/subscriptions"
                         style={{
-                          display: "inline-flex", alignItems: "center", gap: 6,
-                          padding: "9px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700,
-                          background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                          color: "#fff", textDecoration: "none",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          alignSelf: "end",
+                          justifyContent: "center",
+                          gap: 6,
+                          padding: "9px 16px",
+                          borderRadius: 10,
+                          fontSize: 13,
+                          fontWeight: 700,
+                          background:
+                            "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                          color: "#fff",
+                          textDecoration: "none",
                         }}
                       >
-                        Subscribe — $99/mo →
+                        Subscribe now at {subPricing?.proDisplayPrice ?? "$49"}
                       </Link>
                     </div>
                   )}
@@ -611,11 +912,27 @@ export function LeadDetailModal({
 
               <div className="ldm-price-row">
                 <div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 4 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "rgba(255,255,255,0.4)",
+                      marginBottom: 4,
+                    }}
+                  >
                     {purchaseActions ? "Your price" : "Price"}
-                    {isSubscribed && purchaseActions && exclusivityChoice === "non_exclusive" && (
-                      <span style={{ fontSize: 11, color: "#86efac", marginLeft: 6 }}>Subscriber rate</span>
-                    )}
+                    {isSubscribed &&
+                      purchaseActions &&
+                      exclusivityChoice === "non_exclusive" && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "#86efac",
+                            marginLeft: 6,
+                          }}
+                        >
+                          Subscriber rate
+                        </span>
+                      )}
                   </div>
                   <div className="ldm-price-big">
                     {fmtDollarsModal(
@@ -625,86 +942,155 @@ export function LeadDetailModal({
                           ? Number(matchedAssignment.charged_amount)
                           : myLeadPreview?.charged_amount != null
                             ? Number(myLeadPreview.charged_amount)
-                          : modalLead
-                            ? Number(modalLead.current_price)
-                            : rawPrice,
+                            : modalLead
+                              ? Number(modalLead.current_price)
+                              : rawPrice,
                     )}
                   </div>
-                  {modalAnchorCents != null && modalAnchorCents > effectivePrice && (
-                    <div className="ldm-was">Was {fmtDollarsModal(modalAnchorCents)}</div>
-                  )}
-                  {!purchaseActions && (matchedAssignment?.purchase_type || myLeadPreview?.purchase_type) && (
-                    <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 4 }}>
-                      Purchased as{" "}
-                      {matchedAssignment?.exclusivity_choice === "exclusive"
-                        ? "Exclusive"
-                        : matchedAssignment?.exclusivity_choice === "non_exclusive"
-                          ? "Non Exclusive"
-                          : myLeadPreview?.exclusivity_choice === "exclusive"
-                            ? "Exclusive"
-                            : myLeadPreview?.exclusivity_choice === "non_exclusive"
-                              ? "Non Exclusive"
-                          : (matchedAssignment?.purchase_type ?? myLeadPreview?.purchase_type ?? "")
-                              .replace(/_/g, " ")
-                              .replace(/\b\w/g, (c) => c.toUpperCase())}
-                    </div>
-                  )}
+                  {modalAnchorCents != null &&
+                    modalAnchorCents > effectivePrice && (
+                      <div className="ldm-was">
+                        Was {fmtDollarsModal(modalAnchorCents)}
+                      </div>
+                    )}
+                  {!purchaseActions &&
+                    (matchedAssignment?.purchase_type ||
+                      myLeadPreview?.purchase_type) && (
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "rgba(255,255,255,0.45)",
+                          marginTop: 4,
+                        }}
+                      >
+                        Purchased as{" "}
+                        {matchedAssignment?.exclusivity_choice === "exclusive"
+                          ? "Exclusive"
+                          : matchedAssignment?.exclusivity_choice ===
+                              "non_exclusive"
+                            ? "Non Exclusive"
+                            : myLeadPreview?.exclusivity_choice === "exclusive"
+                              ? "Exclusive"
+                              : myLeadPreview?.exclusivity_choice ===
+                                  "non_exclusive"
+                                ? "Non Exclusive"
+                                : (
+                                    matchedAssignment?.purchase_type ??
+                                    myLeadPreview?.purchase_type ??
+                                    ""
+                                  )
+                                    .replace(/_/g, " ")
+                                    .replace(/\b\w/g, (c) => c.toUpperCase())}
+                      </div>
+                    )}
                 </div>
                 {purchaseActions && (
                   <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 4 }}>Balance after</div>
-                    <div style={{
-                      fontFamily: "Syne, sans-serif", fontSize: 18, fontWeight: 700,
-                      color: walletBalanceCents >= effectivePrice ? "#6ee7b7" : "#fca5a5",
-                    }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "rgba(255,255,255,0.4)",
+                        marginBottom: 4,
+                      }}
+                    >
+                      Balance after
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "Syne, sans-serif",
+                        fontSize: 18,
+                        fontWeight: 700,
+                        color:
+                          walletBalanceCents >= effectivePrice
+                            ? "#6ee7b7"
+                            : "#fca5a5",
+                      }}
+                    >
                       {fmtDollarsModal(walletBalanceCents - effectivePrice)}
                     </div>
                   </div>
                 )}
               </div>
 
-              {!purchaseActions && (modalPriceHistory.length > 0 || detailLoading) && (
-                <>
-                  <div className="ldm-section-h">Price history</div>
-                  {detailLoading ? (
-                    <div className="ldm-skeleton" style={{ height: 40, borderRadius: 8 }} />
-                  ) : (
-                    <PriceHistoryTable rows={modalPriceHistory} />
-                  )}
-                </>
-              )}
+              {!purchaseActions &&
+                (modalPriceHistory.length > 0 || detailLoading) && (
+                  <>
+                    <div className="ldm-section-h">Price history</div>
+                    {detailLoading ? (
+                      <div
+                        className="ldm-skeleton"
+                        style={{ height: 40, borderRadius: 8 }}
+                      />
+                    ) : (
+                      <PriceHistoryTable rows={modalPriceHistory} />
+                    )}
+                  </>
+                )}
 
-              {!purchaseActions && detail?.lead_assignments && detail.lead_assignments.length > 0 && (
-                <>
-                  <div className="ldm-section-h">Your purchase</div>
-                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "rgba(255,255,255,0.65)" }}>
-                    {detail.lead_assignments.map((a) => (
-                      <li key={a.assignment_id} style={{ marginBottom: 6 }}>
-                        {new Date(a.assigned_at).toLocaleString("en-US", {
-                          month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
-                        })}{" "}· Paid {fmtDollarsModal(a.charged_amount)} · {a.purchase_type.replace(/_/g, " ")}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
+              {!purchaseActions &&
+                detail?.lead_assignments &&
+                detail.lead_assignments.length > 0 && (
+                  <>
+                    <div className="ldm-section-h">Your purchase</div>
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingLeft: 18,
+                        fontSize: 13,
+                        color: "rgba(255,255,255,0.65)",
+                      }}
+                    >
+                      {detail.lead_assignments.map((a) => (
+                        <li key={a.assignment_id} style={{ marginBottom: 6 }}>
+                          {new Date(a.assigned_at).toLocaleString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}{" "}
+                          · Paid {fmtDollarsModal(a.charged_amount)} ·{" "}
+                          {a.purchase_type.replace(/_/g, " ")}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
 
-              {!purchaseActions && enableAssignmentPipeline && detail?.lead_assignments && detail.lead_assignments.length > 0 && leadId && (
-                <MyLeadPipelineBlock leadId={leadId} assignment={detail.lead_assignments[0]} />
-              )}
+              {!purchaseActions &&
+                enableAssignmentPipeline &&
+                detail?.lead_assignments &&
+                detail.lead_assignments.length > 0 &&
+                leadId && (
+                  <MyLeadPipelineBlock
+                    leadId={leadId}
+                    assignment={detail.lead_assignments[0]}
+                  />
+                )}
 
               {purchaseActions && reserveMutation?.isError && (
-                <div className="ldm-err">{(reserveMutation.error as Error).message}</div>
+                <div className="ldm-err">
+                  {(reserveMutation.error as Error).message}
+                </div>
               )}
               {purchaseActions && buyMutation?.isError && (
                 <div className="ldm-err">
-                  {buyMutation.error instanceof ApiError && buyMutation.error.status === 403
-                    ? (buyMutation.error as ApiError).message.includes("subscription")
-                      ? "A $99/month subscription is required to purchase shared leads"
+                  {buyMutation.error instanceof ApiError &&
+                  buyMutation.error.status === 403
+                    ? (buyMutation.error as ApiError).message.includes(
+                        "subscription",
+                      )
+                      ? "A $49/month subscription is required to purchase shared leads"
                       : "This lead is in subscriber early access — subscribe to purchase now"
-                    : buyMutation.error instanceof ApiError && buyMutation.error.status === 400
-                      ? (buyMutation.error as ApiError).message.includes("wallet") ? "Insufficient wallet balance — top up your wallet" : (buyMutation.error as ApiError).message
-                      : buyMutation.error instanceof ApiError && buyMutation.error.status === 409
+                    : buyMutation.error instanceof ApiError &&
+                        buyMutation.error.status === 400
+                      ? (buyMutation.error as ApiError).message.includes(
+                          "wallet",
+                        )
+                        ? "Insufficient wallet balance — top up your wallet"
+                        : (buyMutation.error as ApiError).message
+                      : buyMutation.error instanceof ApiError &&
+                          buyMutation.error.status === 409
                         ? "This lead was just purchased by someone else"
                         : (buyMutation.error as Error).message}
                 </div>
@@ -712,14 +1098,21 @@ export function LeadDetailModal({
 
               {purchaseActions && reserveUntil && secondsLeft > 0 && (
                 <div className="ldm-timer">
-                  Checkout hold: {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, "0")} remaining
+                  Checkout hold: {Math.floor(secondsLeft / 60)}:
+                  {String(secondsLeft % 60).padStart(2, "0")} remaining
                 </div>
               )}
 
               {purchaseActions && !reserveUntil && reserveMutation && (
-                <button type="button" className="ldm-hold" disabled={reserveMutation.isPending}
-                  onClick={() => leadId && reserveMutation.mutate(leadId)}>
-                  {reserveMutation.isPending ? "Reserving…" : "Start checkout hold (15 min)"}
+                <button
+                  type="button"
+                  className="ldm-hold"
+                  disabled={reserveMutation.isPending}
+                  onClick={() => leadId && reserveMutation.mutate(leadId)}
+                >
+                  {reserveMutation.isPending
+                    ? "Reserving…"
+                    : "Start checkout hold (15 min)"}
                 </button>
               )}
 
@@ -727,8 +1120,19 @@ export function LeadDetailModal({
                 <button
                   type="button"
                   className="ldm-buy"
-                  disabled={buyMutation.isPending || (!!reserveUntil && secondsLeft <= 0) || !canBuyNow || sharedBlocked}
-                  onClick={() => leadId && buyMutation.mutate({ id: leadId, choice: exclusivityChoice })}
+                  disabled={
+                    buyMutation.isPending ||
+                    (!!reserveUntil && secondsLeft <= 0) ||
+                    !canBuyNow ||
+                    sharedBlocked
+                  }
+                  onClick={() =>
+                    leadId &&
+                    buyMutation.mutate({
+                      id: leadId,
+                      choice: exclusivityChoice,
+                    })
+                  }
                 >
                   {!canBuyNow
                     ? "Subscriber early access only"
@@ -741,8 +1145,17 @@ export function LeadDetailModal({
               )}
 
               {purchaseActions && (
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 10, textAlign: "center", lineHeight: 1.5 }}>
-                  You can buy without a hold if the lead is still available. A hold blocks other buyers for 15 minutes.
+                <p
+                  style={{
+                    fontSize: 11,
+                    color: "rgba(255,255,255,0.25)",
+                    marginTop: 10,
+                    textAlign: "center",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  You can buy without a hold if the lead is still available. A
+                  hold blocks other buyers for 15 minutes.
                 </p>
               )}
             </>

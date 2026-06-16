@@ -24,6 +24,9 @@ import {
   SUBSCRIPTION_PRICE_INBOUND_CENTS,
   SUBSCRIPTION_PRICE_OUTBOUND_CENTS,
 } from '../subscriptions/pro-entitlement.service';
+import { TermsAcceptance } from '../entities/terms-acceptance.entity';
+
+const CURRENT_TERMS_VERSION = process.env.TERMS_VERSION ?? '2025-01';
 
 type ProcessLeadPayload = {
   leadId: string;
@@ -47,6 +50,8 @@ export class LeadDistributionProcessor {
     private readonly leadAssignmentRepo: Repository<LeadAssignment>,
     @InjectRepository(DistributionEngineSettings)
     private readonly engineSettingsRepo: Repository<DistributionEngineSettings>,
+    @InjectRepository(TermsAcceptance)
+    private readonly termsRepo: Repository<TermsAcceptance>,
     @Inject(forwardRef(() => LeadsService))
     private readonly leadsService: LeadsService,
     private readonly distributionService: DistributionService,
@@ -165,14 +170,26 @@ export class LeadDistributionProcessor {
         if (!isPro) return false;
       }
 
+      // ── Terms accepted check ────────────────────────────────────────────────
+      const termsAccepted = await this.termsRepo.findOne({
+        where: { user: { id: userId }, terms_version: CURRENT_TERMS_VERSION },
+      });
+      if (!termsAccepted) return false;
+
+      // ── Setup completeness: buyer must have set at least one filter ────────
+      // A buyer with zero market filters AND zero lead-type filters has not
+      // completed setup. Skip them rather than blasting every lead to everyone.
+      const mFilters = rule.market_filters || [];
+      const tFilters = rule.lead_type_filters || [];
+      if (mFilters.length === 0 && tFilters.length === 0) return false;
+
       // ── Market + type filters ───────────────────────────────────────────
       const hasMarketMatch =
-        (rule.market_filters || []).length === 0 ||
-        (rule.market_filters || []).includes(lead.market);
+        mFilters.length === 0 ||
+        mFilters.includes(lead.market);
       if (!hasMarketMatch) return false;
 
-      const typeFilters = rule.lead_type_filters || [];
-      if (typeFilters.length > 0 && !typeFilters.includes(lead.lead_type)) {
+      if (tFilters.length > 0 && !tFilters.includes(lead.lead_type)) {
         return false;
       }
 
@@ -294,6 +311,10 @@ export class LeadDistributionProcessor {
           0,
         );
         rule.rotation_position = maxPos + 1;
+        // Set launched_at on first successful delivery for inbound-path buyers
+        if (!rule.launched_at) {
+          rule.launched_at = new Date();
+        }
         await this.distributionRuleRepo.save(rule);
 
         this.logger.log(
