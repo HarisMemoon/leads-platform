@@ -4,16 +4,14 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { UseMutationResult } from "@tanstack/react-query";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Lock } from "lucide-react";
 import type {
   LeadDetailResponse,
   LeadQuoteResponse,
   MarketplaceLeadRow,
 } from "@/lib/leads-api";
 import { ApiError } from "@/lib/api";
-import {
-  createRefundRequest,
-  patchAssignmentLifecycle,
-} from "@/lib/leads-api";
+import { createRefundRequest, patchAssignmentLifecycle } from "@/lib/leads-api";
 import { getSubscriptionPricing } from "@/lib/subscriptions-api";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -527,13 +525,16 @@ export function LeadDetailModal({
     staleTime: 5 * 60 * 1000,
   });
   const leadSharedPrice =
-    listPreview?.shared_price_cents != null && Number(listPreview.shared_price_cents) > 0
+    listPreview?.shared_price_cents != null &&
+    Number(listPreview.shared_price_cents) > 0
       ? `$${Math.round(Number(listPreview.shared_price_cents) / 100)}`
       : null;
   const leadExclusivePrice =
-    listPreview?.exclusive_price_cents != null && Number(listPreview.exclusive_price_cents) > 0
+    listPreview?.exclusive_price_cents != null &&
+    Number(listPreview.exclusive_price_cents) > 0
       ? `$${Math.round(Number(listPreview.exclusive_price_cents) / 100)}`
-      : listPreview?.current_price != null && Number(listPreview.current_price) > 0
+      : listPreview?.current_price != null &&
+          Number(listPreview.current_price) > 0
         ? `$${Math.round(Number(listPreview.current_price) / 100)}`
         : null;
 
@@ -553,7 +554,8 @@ export function LeadDetailModal({
     listPreview?.max_non_exclusive_buyers ??
     (_leadTypeForCap === "outbound" ? 3 : 5);
   const sharedPrice =
-    listPreview?.shared_price_cents != null && Number(listPreview.shared_price_cents) > 0
+    listPreview?.shared_price_cents != null &&
+    Number(listPreview.shared_price_cents) > 0
       ? Number(listPreview.shared_price_cents)
       : computeSharedDisplayCents(exclusivePrice, sharedCap);
   const rawPrice =
@@ -723,7 +725,8 @@ export function LeadDetailModal({
                 >
                   {shouldBlurPrivate ? (
                     <>
-                      <span>🔒</span> Contact details — revealed after purchase
+                      <Lock size={14} color="#f59e0b" /> Contact details —
+                      revealed after purchase
                     </>
                   ) : (
                     <>
@@ -861,7 +864,11 @@ export function LeadDetailModal({
                           marginBottom: 12,
                         }}
                       >
-                        <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
+                        <Lock
+                          size={48}
+                          color="#f59e0b"
+                          style={{ marginTop: -10 }}
+                        />
                         <div>
                           <div
                             style={{
@@ -880,8 +887,20 @@ export function LeadDetailModal({
                               lineHeight: 1.5,
                             }}
                           >
-                            Only active {subPricing?.proDisplayPrice ?? "$49"}/month subscribers can purchase shared leads at{leadSharedPrice ? ` ${leadSharedPrice}` : " this price"} each.
-                            Switch to <strong style={{ color: "rgba(255,255,255,0.7)" }}>Exclusive</strong> to buy now{leadExclusivePrice ? ` at ${leadExclusivePrice}` : ""}, or subscribe to unlock shared pricing.
+                            Only active {subPricing?.proDisplayPrice ?? "$49"}
+                            /month subscribers can purchase shared leads at
+                            {leadSharedPrice
+                              ? ` ${leadSharedPrice}`
+                              : " this price"}{" "}
+                            each. Switch to{" "}
+                            <strong style={{ color: "rgba(255,255,255,0.7)" }}>
+                              Exclusive
+                            </strong>{" "}
+                            to buy now
+                            {leadExclusivePrice
+                              ? ` at ${leadExclusivePrice}`
+                              : ""}
+                            , or subscribe to unlock shared pricing.
                           </div>
                         </div>
                       </div>

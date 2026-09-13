@@ -62,6 +62,9 @@ export class User {
   email_verified!: boolean;
 
   @Column({ default: false })
+  phone_verified!: boolean;
+
+  @Column({ default: false })
   onboarding_completed!: boolean;
 
   @Column({ default: true })

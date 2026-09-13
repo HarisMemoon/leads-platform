@@ -8,6 +8,7 @@ export type DistributionRuleDto = {
   max_per_day: number;
   market: string;
   market_filters: string[];
+  property_type_filters: string[];
   is_active: boolean;
   max_leads_per_day: number | null;
   max_leads_per_week: number | null;
@@ -21,6 +22,9 @@ export type DistributionRuleDto = {
   rotation_position: number;
   exclusivity_preference: ExclusivityPreference;
   max_lead_price_cents: string | null;
+  autobuy_disclaimer_accepted_at: string | null;
+  /** True when the buyer has active Pro access — non-Pro buyers may only autobuy exclusive leads, at full price. */
+  pro_auto_purchase_eligible: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -39,9 +43,12 @@ export type PatchDistributionBody = Partial<{
   cooldown_minutes: number;
   rotation_position: number;
   market_filters: string[];
+  property_type_filters: string[];
   is_active: boolean;
   exclusivity_preference: ExclusivityPreference;
   max_lead_price_cents: number | null;
+  /** Set true when the buyer accepts the full-price autobuy disclaimer (non-Pro only). */
+  autobuy_disclaimer_accepted: boolean;
 }>;
 
 export function getDistributionRulesMe() {

@@ -522,6 +522,13 @@ function DistributionForm({
     exclusivity_preference: exclusivity,
   };
 
+  const isProEligible = initial.pro_auto_purchase_eligible === true;
+  const disclaimerAlreadyAccepted = initial.autobuy_disclaimer_accepted_at != null;
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [showDisclaimer, setShowDisclaimer] = useState(false);
+  const needsDisclaimer =
+    participation && !isProEligible && !disclaimerAlreadyAccepted && !disclaimerAccepted;
+
   const mutation = useMutation({
     mutationFn: () =>
       patchDistributionMe({
@@ -537,15 +544,25 @@ function DistributionForm({
         lead_type_filters: leadTypes,
         cooldown_minutes: parseInt(cooldown, 10) || 0,
         exclusivity_preference: exclusivity,
+        ...(disclaimerAccepted ? { autobuy_disclaimer_accepted: true } : {}),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.distribution.me });
     },
   });
 
+  function handleSaveClick() {
+    if (needsDisclaimer) {
+      setShowDisclaimer(true);
+      return;
+    }
+    mutation.mutate();
+  }
+
   const readOnly = distributionLocked;
 
   return (
+    <>
     <div>
       <StatusBanner rule={liveRule} walletBalanceCents={walletBalanceCents} />
       <WalletWidget balanceCents={walletBalanceCents} />
@@ -592,13 +609,27 @@ function DistributionForm({
         accentColor="#6366f1"
         icon={<Activity size={15} color="#a5b4fc" aria-hidden />}
         title="Participation"
-        subtitle="Enable to be included in the automatic lead distribution rotation."
+        subtitle={
+          isProEligible
+            ? "Enable to be included in the automatic lead distribution rotation."
+            : "Available to everyone. Unlock $25 discounted autobuy leads and early access with a paid subscription."
+        }
       >
         <Toggle
           checked={participation}
-          onChange={setParticipation}
+          onChange={(next) => {
+            if (next && !isProEligible && !disclaimerAlreadyAccepted && !disclaimerAccepted) {
+              setShowDisclaimer(true);
+              return;
+            }
+            setParticipation(next);
+          }}
           label="Participate in lead distribution"
-          sub="Receive leads automatically when they match your criteria"
+          sub={
+            isProEligible
+              ? "Receive leads automatically when they match your criteria"
+              : "Receive leads automatically at full exclusive price — subscribe to Pro for $25 discounted pricing"
+          }
         />
       </SectionCard>
 
@@ -812,7 +843,7 @@ function DistributionForm({
       <div style={{ display: "flex", alignItems: "center", gap: 14, paddingTop: 4 }}>
         <button
           type="button"
-          onClick={() => mutation.mutate()}
+          onClick={handleSaveClick}
           disabled={mutation.isPending || readOnly}
           style={{
             display: "inline-flex", alignItems: "center", gap: 8,
@@ -858,6 +889,70 @@ function DistributionForm({
       </div>
       </div>
     </div>
+
+    {showDisclaimer && (
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: "fixed", inset: 0, zIndex: 200,
+          background: "rgba(4,6,12,0.72)", backdropFilter: "blur(6px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20,
+        }}
+        onClick={() => setShowDisclaimer(false)}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            width: "100%", maxWidth: 440, borderRadius: 18,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "#0f111a", padding: 26,
+            boxShadow: "0 24px 70px rgba(0,0,0,0.5)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <AlertTriangle size={20} color="#facc15" />
+            <strong style={{ fontSize: 16, color: "#fff" }}>You're not subscribed</strong>
+          </div>
+          <p style={{ fontSize: 13.5, color: "rgba(255,255,255,0.72)", lineHeight: 1.65, marginBottom: 20 }}>
+            You are not currently subscribed. If you turn on autobuy, you agree
+            to be charged the full lead price for each lead purchased
+            automatically. Subscribers unlock $25 discounted autobuy pricing,
+            early access, and non-exclusive leads.
+          </p>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => setShowDisclaimer(false)}
+              style={{
+                flex: 1, padding: "11px 16px", borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.7)", fontSize: 13, cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDisclaimerAccepted(true);
+                setParticipation(true);
+                setShowDisclaimer(false);
+              }}
+              style={{
+                flex: 1, padding: "11px 16px", borderRadius: 10, border: "none",
+                background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
+                color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer",
+              }}
+            >
+              I agree, turn on autobuy
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  BookOpen,
   Check,
   CheckCircle2,
   CreditCard,
@@ -1535,6 +1536,34 @@ export default function SettingsPage() {
           {/* ══════════════════════════════════════════════
               AUTOMATION / AUTO-BUY
           ══════════════════════════════════════════════ */}
+          <section className="fs" style={{ "--c": "#6366f1" } as CSSProperties}>
+            <div className="fs-head">
+              <div className="fs-head-left">
+                <div className="fs-icon">
+                  <BookOpen size={18} strokeWidth={1.8} />
+                </div>
+                <div>
+                  <div className="fs-title">Resources &amp; guides</div>
+                  <p className="fs-desc">
+                    Browse guides, videos, and FAQs from the Newleey team
+                  </p>
+                </div>
+              </div>
+              <div className="fs-link-div">
+                <Link href="/resources" className="fs-link-btn">
+                  Open resources
+                </Link>
+                <Link
+                  href="/resources"
+                  className="fs-link-btn"
+                  aria-label="Open resources"
+                >
+                  <ArrowRight size={18} strokeWidth={2} />
+                </Link>
+              </div>
+            </div>
+          </section>
+
           <section className="fs" style={{ "--c": "#06b6d4" } as CSSProperties}>
             <div className="fs-head">
               <div className="fs-head-left">

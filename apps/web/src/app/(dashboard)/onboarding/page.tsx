@@ -13,14 +13,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Bell,
   BookOpen,
   Bot,
+  Building2,
   Check,
   CheckCircle,
   ChevronDown,
   CircleHelp,
   CreditCard,
   Handshake,
+  Home,
   Link2,
   Map,
   MapPin,
@@ -33,8 +36,10 @@ import {
   Sparkles,
   Star,
   Target,
+  Trees,
   Video,
   Wallet,
+  Warehouse,
   X,
   Zap,
 } from "lucide-react";
@@ -70,6 +75,7 @@ import {
   patchWebhookIntegration,
   testWebhookIntegration,
 } from "@/lib/integrations-api";
+import { getAuthMe, sendPhoneVerificationCode, verifyPhoneVerificationCode } from "@/lib/auth-api";
 
 type ObIcon = ComponentType<{
   size?: number;
@@ -77,7 +83,39 @@ type ObIcon = ComponentType<{
   className?: string;
 }>;
 
-const TOTAL_STEPS = 8;
+const TOTAL_STEPS = 9;
+
+const PROPERTY_TYPE_OPTIONS: ReadonlyArray<{
+  value: string;
+  label: string;
+  desc: string;
+  Icon: ObIcon;
+}> = [
+  {
+    value: "single_family",
+    label: "Single Family",
+    desc: "Detached, single-unit homes",
+    Icon: Home,
+  },
+  {
+    value: "mobile_home",
+    label: "Mobile Home",
+    desc: "Manufactured or mobile properties",
+    Icon: Warehouse,
+  },
+  {
+    value: "multifamily",
+    label: "Multifamily",
+    desc: "Duplexes, triplexes, small apartment buildings",
+    Icon: Building2,
+  },
+  {
+    value: "land",
+    label: "Land",
+    desc: "Vacant lots and undeveloped land",
+    Icon: Trees,
+  },
+];
 
 function buildMarketsFromGeo(d: Record<string, unknown>): string[] {
   if (d.nationwide) {
@@ -103,8 +141,23 @@ const stripePromise = loadStripe(
 const STEP_META: ReadonlyArray<{ Icon: ObIcon; title: string; sub: string }> = [
   {
     Icon: Handshake,
-    title: "Welcome to Newleey",
-    sub: "Resume setup any time and keep the platform focused on buying and managing leads.",
+    title: "Set Up Your Account",
+    sub: "Find your leads. Scale your business.",
+  },
+  {
+    Icon: MapPin,
+    title: "Lead Coverage",
+    sub: "Choose by state, county, search, or a nationwide toggle.",
+  },
+  {
+    Icon: Target,
+    title: "Property Type",
+    sub: "Pick the kinds of properties you want to buy leads for.",
+  },
+  {
+    Icon: Link2,
+    title: "CRM webhook",
+    sub: "Connect Lead Connector, Zapier, GoHighLevel, or any HTTPS webhook.",
   },
   {
     Icon: Package,
@@ -117,19 +170,9 @@ const STEP_META: ReadonlyArray<{ Icon: ObIcon; title: string; sub: string }> = [
     sub: "Add cash with Stripe now or come back later from Settings.",
   },
   {
-    Icon: MapPin,
-    title: "Markets",
-    sub: "Choose by state, county, search, or a nationwide toggle.",
-  },
-  {
     Icon: Bot,
-    title: "Auto-buy settings",
-    sub: "Available for Pro buyers after you choose the markets you want to target.",
-  },
-  {
-    Icon: Link2,
-    title: "CRM webhook",
-    sub: "Connect Lead Connector, Zapier, GoHighLevel, or any HTTPS webhook.",
+    title: "Lead Delivery Limits",
+    sub: "Set daily, weekly, and monthly caps so autobuy never overspends.",
   },
   {
     Icon: BookOpen,
@@ -374,10 +417,16 @@ function OnboardingPageContent() {
   const [data, setData] = useState<Record<string, any>>({
     markets: [] as string[],
     lead_types: [] as string[],
+    property_types: [] as string[],
     crm: "",
+    crm_provider: "",
     budget: "",
     auto_buy: false,
+    autobuy_disclaimer_accepted: false,
     max_per_day: 3,
+    max_leads_per_day: null as number | null,
+    max_leads_per_week: null as number | null,
+    max_leads_per_month: null as number | null,
     min_balance: 500,
     purchase_path: null as null | "subscription" | "exclusive",
     selected_state: "",
@@ -405,6 +454,31 @@ function OnboardingPageContent() {
   const [selectedSubscriptionPlan, setSelectedSubscriptionPlan] = useState<
     SubscriptionDto["plan_type"] | null
   >(null);
+  const [showAutobuyDisclaimer, setShowAutobuyDisclaimer] = useState(false);
+
+  // ── Legacy-account phone verification fallback ──────────────────────────
+  // New signups already verify inline on the register form. This only ever
+  // shows for accounts created before phone verification existed.
+  const { data: authMe } = useQuery({
+    queryKey: ["auth", "me"],
+    queryFn: getAuthMe,
+  });
+  const [phoneOtp, setPhoneOtp] = useState("");
+  const [phoneVerifyError, setPhoneVerifyError] = useState<string | null>(null);
+  const [phoneVerifySent, setPhoneVerifySent] = useState(false);
+  const sendPhoneCodeMutation = useMutation({
+    mutationFn: sendPhoneVerificationCode,
+    onSuccess: () => setPhoneVerifySent(true),
+    onError: (e: Error) => setPhoneVerifyError(e.message),
+  });
+  const verifyPhoneCodeMutation = useMutation({
+    mutationFn: () => verifyPhoneVerificationCode(phoneOtp),
+    onSuccess: () => {
+      setPhoneVerifyError(null);
+      void queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    },
+    onError: (e: Error) => setPhoneVerifyError(e.message),
+  });
 
   const {
     data: row,
@@ -428,7 +502,6 @@ function OnboardingPageContent() {
   useEffect(() => {
     if (onboardingLoading) return;
     if (!row?.completed_at) return;
-    if (row.current_step < TOTAL_STEPS) return;
     if (skippedFlag && resumeRequested) return;
     router.replace("/marketplace");
   }, [
@@ -605,13 +678,13 @@ function OnboardingPageContent() {
   async function saveStep(nextStep: number) {
     try {
       const payloadData =
-        step === 4
+        step === 2
           ? {
               ...data,
               markets: buildMarketsFromGeo(data),
             }
           : data;
-      if (step === 6 && String(data.webhook_url ?? "").trim()) {
+      if (step === 4 && String(data.webhook_url ?? "").trim()) {
         try {
           await patchWebhookIntegration(String(data.webhook_url).trim());
         } catch {
@@ -1397,6 +1470,68 @@ function OnboardingPageContent() {
 
 
 
+/* property type cards */
+
+.ptype-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 36px; }
+
+.ptype-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  text-align: left;
+  background: rgba(255,255,255,0.03);
+  border: 2px solid rgba(255,255,255,0.07);
+  border-radius: 16px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.ptype-card:hover { border-color: rgba(99,102,241,0.4); background: rgba(99,102,241,0.05); }
+
+.ptype-card.selected { border-color: #6366f1; background: rgba(99,102,241,0.1); }
+
+.ptype-icon-wrap {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.65);
+  transition: background 0.2s, color 0.2s;
+}
+
+.ptype-card.selected .ptype-icon-wrap { background: rgba(99,102,241,0.25); color: #a5b4fc; }
+
+.ptype-title { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 3px; }
+
+.ptype-desc { font-size: 12px; color: rgba(255,255,255,0.4); line-height: 1.5; }
+
+.ptype-check {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #6366f1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px rgba(99,102,241,0.4);
+}
+
+@media (max-width: 560px) {
+  .ptype-grid { grid-template-columns: 1fr; }
+}
+
+
+
 /* wallet */
 
 .wallet-display {
@@ -1823,6 +1958,83 @@ input[type=range]::-webkit-slider-thumb {
 
 `}</style>
 
+      {/* Autobuy disclaimer modal — non-Pro users only */}
+      {showAutobuyDisclaimer && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowAutobuyDisclaimer(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 200,
+            background: "rgba(4,6,12,0.72)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              borderRadius: 18,
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "#0f111a",
+              padding: 26,
+              boxShadow: "0 24px 70px rgba(0,0,0,0.5)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <AlertTriangle size={20} color="#facc15" />
+              <strong style={{ fontSize: 16, color: "#fff" }}>You&apos;re not subscribed</strong>
+            </div>
+            <p style={{ fontSize: 13.5, color: "rgba(255,255,255,0.72)", lineHeight: 1.65, marginBottom: 20 }}>
+              You are not currently subscribed. If you turn on autobuy, you agree
+              to be charged the full lead price for each lead purchased
+              automatically. Subscribers unlock $25 discounted autobuy pricing,
+              early access, and non-exclusive leads.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowAutobuyDisclaimer(false)}
+                style={{
+                  flex: 1,
+                  padding: "11px 16px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.7)",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-next"
+                style={{ flex: 1, justifyContent: "center" }}
+                onClick={() => {
+                  setData((d) => ({
+                    ...d,
+                    auto_buy: true,
+                    autobuy_disclaimer_accepted: true,
+                  }));
+                  setShowAutobuyDisclaimer(false);
+                }}
+              >
+                I agree, turn on autobuy
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Info Modal */}
       {infoModal.open &&
         (() => {
@@ -2035,7 +2247,113 @@ input[type=range]::-webkit-slider-thumb {
 
               {/* Step 1 - Welcome */}
               {step === 1 && (
-                <div className="how-grid">
+                <>
+                  {authMe && authMe.phone_verified === false && (
+                    <div
+                      style={{
+                        background: "rgba(245,158,11,0.08)",
+                        border: "1px solid rgba(245,158,11,0.24)",
+                        borderRadius: 14,
+                        padding: "16px 18px",
+                        marginBottom: 24,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 10,
+                        }}
+                      >
+                        <Bell size={16} color="#facc15" />
+                        <strong style={{ fontSize: 14, color: "#fff" }}>
+                          Verify your phone number
+                        </strong>
+                      </div>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: "rgba(255,255,255,0.6)",
+                          lineHeight: 1.6,
+                          marginBottom: 12,
+                        }}
+                      >
+                        We need this so you can receive lead alerts, wallet
+                        alerts, and account notifications.
+                      </p>
+                      {phoneVerifyError && (
+                        <p style={{ fontSize: 12, color: "#fca5a5", marginBottom: 10 }}>
+                          {phoneVerifyError}
+                        </p>
+                      )}
+                      {!phoneVerifySent ? (
+                        <button
+                          type="button"
+                          className="btn-next"
+                          style={{ padding: "10px 18px", fontSize: 13 }}
+                          disabled={sendPhoneCodeMutation.isPending}
+                          onClick={() => void sendPhoneCodeMutation.mutateAsync()}
+                        >
+                          {sendPhoneCodeMutation.isPending ? "Sending…" : "Send verification code"}
+                        </button>
+                      ) : (
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="Enter code"
+                            value={phoneOtp}
+                            onChange={(e) => setPhoneOtp(e.target.value)}
+                            style={{
+                              background: "rgba(255,255,255,0.05)",
+                              border: "1px solid rgba(255,255,255,0.12)",
+                              borderRadius: 10,
+                              padding: "10px 14px",
+                              color: "#fff",
+                              fontSize: 14,
+                              outline: "none",
+                              maxWidth: 160,
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="btn-next"
+                            style={{ padding: "10px 18px", fontSize: 13 }}
+                            disabled={verifyPhoneCodeMutation.isPending}
+                            onClick={() => void verifyPhoneCodeMutation.mutateAsync()}
+                          >
+                            {verifyPhoneCodeMutation.isPending ? "Verifying…" : "Verify"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-back"
+                            style={{ padding: "10px 18px", fontSize: 13 }}
+                            disabled={sendPhoneCodeMutation.isPending}
+                            onClick={() => void sendPhoneCodeMutation.mutateAsync()}
+                          >
+                            Resend
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {authMe && authMe.phone_verified === true && (
+                    <div
+                      style={{
+                        background: "rgba(16,185,129,0.07)",
+                        border: "1px solid rgba(16,185,129,0.2)",
+                        borderRadius: 12,
+                        padding: "10px 14px",
+                        marginBottom: 24,
+                        fontSize: 12,
+                        color: "#34d399",
+                      }}
+                    >
+                      ✓ Phone verified
+                    </div>
+                  )}
+                  <div className="how-grid">
                   {[
                     {
                       Icon: Search,
@@ -2069,7 +2387,8 @@ input[type=range]::-webkit-slider-thumb {
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                </>
               )}
 
               {/* Step 2 — hidden for now, kept for future use */}
@@ -2183,8 +2502,8 @@ input[type=range]::-webkit-slider-thumb {
                 </div>
               )}
 
-              {/* Step 2 — Pro Plan vs Free Plan */}
-              {step === 2 && (
+              {/* Step 5 — Pro Plan vs Free Plan */}
+              {step === 5 && (
                 <>
                   <div
                     className="plan-grid"
@@ -2461,14 +2780,14 @@ input[type=range]::-webkit-slider-thumb {
                 </>
               )}
 
-              {/* Step 4 - Wallet (real Stripe payment) */}
-              {step === 3 && (
+              {/* Step 6 - Wallet (real Stripe payment) */}
+              {step === 6 && (
                 <Elements stripe={stripePromise}>
                   <WalletFundForm
                     onSuccess={async (fundedDollars) => {
                       await saveMutation.mutateAsync({
-                        current_step: 4,
-                        completed_steps: [3],
+                        current_step: 7,
+                        completed_steps: [6],
                         data: {
                           ...data,
                           wallet_amount: String(fundedDollars),
@@ -2482,46 +2801,42 @@ input[type=range]::-webkit-slider-thumb {
                         initial_funding_applied: true,
                         stripe_onboarding_funded: true,
                       }));
-                      setStep(4);
+                      setStep(7);
                     }}
-                    onSkip={() => void saveStep(4)}
+                    onSkip={() => void saveStep(7)}
                     isSaving={saveMutation.isPending}
                   />
                 </Elements>
               )}
 
-              {/* Step 5 - Auto-buy */}
-              {step === 5 && (
+              {/* Step 7 - Distribution limits (Auto-buy) */}
+              {step === 7 && (
                 <>
                   <div className="toggle-row">
                     <div className="toggle-info">
                       <div className="toggle-title">Enable Auto Purchase</div>
                       <div className="toggle-desc">
-                        Choose your target markets first, then turn this on if
-                        you are subscribed to Pro.
+                        {hasProAutoPurchaseAccess
+                          ? "Choose your target markets first, then turn this on to auto-buy exclusive and non-exclusive leads at your discounted Pro price."
+                          : "Available to everyone. Free Plan buyers auto-buy exclusive leads at full price — subscribe to Pro for $25 discounted non-exclusive pricing and early access."}
                       </div>
                     </div>
-                    {hasProAutoPurchaseAccess ? (
-                      <button
-                        className={`toggle ${data.auto_buy ? "on" : ""}`}
-                        onClick={() =>
-                          setData((d) => ({ ...d, auto_buy: !d.auto_buy }))
+                    <button
+                      className={`toggle ${data.auto_buy ? "on" : ""}`}
+                      onClick={() => {
+                        if (
+                          !data.auto_buy &&
+                          !hasProAutoPurchaseAccess &&
+                          !data.autobuy_disclaimer_accepted
+                        ) {
+                          setShowAutobuyDisclaimer(true);
+                          return;
                         }
-                      >
-                        <div className="toggle-thumb" />
-                      </button>
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "rgba(255,255,255,0.32)",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.05em",
-                        }}
-                      >
-                        Pro subscription required
-                      </span>
-                    )}
+                        setData((d) => ({ ...d, auto_buy: !d.auto_buy }));
+                      }}
+                    >
+                      <div className="toggle-thumb" />
+                    </button>
                   </div>
                   {!hasProAutoPurchaseAccess ? (
                     <div
@@ -2551,13 +2866,14 @@ input[type=range]::-webkit-slider-thumb {
                           lineHeight: 1.6,
                         }}
                       >
-                        Auto Purchase is tied to Pro. Free Plan buyers can
-                        continue setup, fund the wallet when ready, and buy
-                        manually from marketplace.
+                        Auto Purchase is available to everyone. Free Plan
+                        buyers auto-buy at the full exclusive price; Pro
+                        subscribers unlock $25 discounted non-exclusive
+                        pricing and early access on top.
                       </p>
                     </div>
                   ) : null}
-                  {hasProAutoPurchaseAccess && !hasWalletFunding ? (
+                  {data.auto_buy && !hasWalletFunding ? (
                     <div
                       style={{
                         background: "rgba(245,158,11,0.08)",
@@ -2591,7 +2907,60 @@ input[type=range]::-webkit-slider-thumb {
                     </div>
                   ) : null}
 
-                  {hasProAutoPurchaseAccess && data.auto_buy && (
+                  {/* Daily/weekly/monthly caps — collected regardless of Pro status so the
+                      readiness gate (autobuy eligibility) has real numbers to check. */}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                      gap: 12,
+                      marginBottom: 20,
+                    }}
+                  >
+                    {[
+                      { key: "max_leads_per_day", label: "Daily limit" },
+                      { key: "max_leads_per_week", label: "Weekly limit" },
+                      { key: "max_leads_per_month", label: "Monthly limit" },
+                    ].map(({ key, label }) => (
+                      <div key={key} className="field">
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: 12,
+                            color: "rgba(255,255,255,0.5)",
+                            marginBottom: 6,
+                          }}
+                        >
+                          {label}
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          placeholder="No limit"
+                          value={data[key] ?? ""}
+                          onChange={(e) =>
+                            setData((d) => ({
+                              ...d,
+                              [key]: e.target.value === "" ? null : +e.target.value,
+                            }))
+                          }
+                          style={{
+                            width: "100%",
+                            background: "rgba(255,255,255,0.05)",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: 10,
+                            padding: "10px 12px",
+                            color: "#fff",
+                            fontSize: 14,
+                            outline: "none",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {data.auto_buy && (
                     <>
                       <div className="range-field">
                         <div className="range-label">
@@ -2635,8 +3004,8 @@ input[type=range]::-webkit-slider-thumb {
                 </>
               )}
 
-              {/* Step 4 - Multi-state / counties / nationwide */}
-              {step === 4 && (
+              {/* Step 2 - Lead coverage: multi-state / counties / nationwide */}
+              {step === 2 && (
                 <div className="geo-panel">
                   {/* Nationwide toggle */}
                   <div className="geo-switch-row">
@@ -2939,8 +3308,51 @@ input[type=range]::-webkit-slider-thumb {
                 </div>
               )}
 
-              {/* Step 7 - Webhook CRM */}
-              {step === 6 && (
+              {/* Step 3 - Property type */}
+              {step === 3 && (
+                <div className="ptype-grid">
+                  {PROPERTY_TYPE_OPTIONS.map((opt) => {
+                    const selected = (data.property_types || []).includes(opt.value);
+                    const Icon = opt.Icon;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`ptype-card ${selected ? "selected" : ""}`}
+                        onClick={() =>
+                          setData((d) => {
+                            const arr: string[] = d.property_types || [];
+                            return {
+                              ...d,
+                              property_types: arr.includes(opt.value)
+                                ? arr.filter((v) => v !== opt.value)
+                                : [...arr, opt.value],
+                            };
+                          })
+                        }
+                      >
+                        {selected && (
+                          <span className="ptype-check">
+                            <Check size={12} strokeWidth={3} color="#fff" />
+                          </span>
+                        )}
+                        <span className="ptype-icon-wrap">
+                          <Icon size={20} strokeWidth={1.75} />
+                        </span>
+                        <span>
+                          <span className="ptype-title" style={{ display: "block" }}>
+                            {opt.label}
+                          </span>
+                          <span className="ptype-desc">{opt.desc}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Step 4 - Webhook CRM */}
+              {step === 4 && (
                 <div
                   style={{ display: "flex", flexDirection: "column", gap: 18 }}
                 >
@@ -3072,6 +3484,40 @@ input[type=range]::-webkit-slider-thumb {
                     </div>
                   </div>
 
+                  {/* Provider picker */}
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: 13,
+                        color: "rgba(255,255,255,0.5)",
+                        marginBottom: 8,
+                      }}
+                    >
+                      Which CRM are you connecting?
+                    </label>
+                    <div className="tag-grid" style={{ marginBottom: 0 }}>
+                      {[
+                        { value: "gohighlevel", label: "GoHighLevel" },
+                        { value: "leadconnector", label: "LeadConnector" },
+                        { value: "webhook", label: "Webhook" },
+                        { value: "zapier", label: "Zapier" },
+                        { value: "skip", label: "Skip for now" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className={`tag ${data.crm_provider === opt.value ? "selected" : ""}`}
+                          onClick={() =>
+                            setData((d) => ({ ...d, crm_provider: opt.value }))
+                          }
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   {/* URL input */}
                   <div>
                     <label
@@ -3185,7 +3631,7 @@ input[type=range]::-webkit-slider-thumb {
               )}
 
               {/* Step 8 - Resources */}
-              {step === 7 && (
+              {step === 8 && (
                 <div className="resource-grid">
                   {[
                     {
@@ -3234,7 +3680,7 @@ input[type=range]::-webkit-slider-thumb {
               )}
 
               {/* Step 9 - Done */}
-              {step === 8 &&
+              {step === 9 &&
                 (() => {
                   const geoCount =
                     Array.isArray(data.markets) && data.markets.length > 0
@@ -3292,6 +3738,48 @@ input[type=range]::-webkit-slider-thumb {
                         ? "Leads will be delivered automatically"
                         : "Optional — add anytime in Settings",
                       ok: !!data.webhook_url,
+                    },
+                    {
+                      Icon: Target,
+                      label: "Property Types",
+                      value:
+                        (data.property_types || []).length > 0
+                          ? `${data.property_types.length} selected`
+                          : "Not set",
+                      sub:
+                        (data.property_types || []).length > 0
+                          ? PROPERTY_TYPE_OPTIONS.filter((o) =>
+                              (data.property_types || []).includes(o.value),
+                            )
+                              .map((o) => o.label)
+                              .join(", ")
+                          : "Add property types in Settings",
+                      ok: (data.property_types || []).length > 0,
+                    },
+                    {
+                      Icon: Bell,
+                      label: "Phone Verified",
+                      value: authMe?.phone_verified ? "Verified" : "Not verified",
+                      sub: authMe?.phone_verified
+                        ? "You'll receive SMS alerts for new leads"
+                        : "Verify from the Welcome step",
+                      ok: !!authMe?.phone_verified,
+                    },
+                    {
+                      Icon: Package,
+                      label: "Delivery Limits",
+                      value:
+                        data.max_leads_per_day || data.max_leads_per_week || data.max_leads_per_month
+                          ? [
+                              data.max_leads_per_day ? `${data.max_leads_per_day}/day` : null,
+                              data.max_leads_per_week ? `${data.max_leads_per_week}/week` : null,
+                              data.max_leads_per_month ? `${data.max_leads_per_month}/month` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(", ")
+                          : "Not set",
+                      sub: "Prevents autobuy from overspending your wallet",
+                      ok: !!(data.max_leads_per_day || data.max_leads_per_week || data.max_leads_per_month),
                     },
                   ];
                   return (
@@ -3477,8 +3965,8 @@ input[type=range]::-webkit-slider-thumb {
               >
                 Skip for now
               </button>
-              {/* Step 3 drives its own navigation via WalletFundForm — no global Continue button */}
-              {step !== 3 && (
+              {/* Step 6 (Wallet) drives its own navigation via WalletFundForm — no global Continue button */}
+              {step !== 6 && (
                 <button
                   type="button"
                   className="btn-next"
@@ -3486,24 +3974,25 @@ input[type=range]::-webkit-slider-thumb {
                     saveMutation.isPending ||
                     subscriptionCheckoutMutation.isPending ||
                     (step === 2 &&
-                      (!data.purchase_path ||
-                        (data.purchase_path === "subscription" &&
-                          !selectedSubscriptionPlan))) ||
-                    (step === 5 &&
                       !data.nationwide &&
                       (!(data.selected_states || []).length ||
-                        !(data.selected_counties || []).length))
+                        !(data.selected_counties || []).length)) ||
+                    (step === 3 && (data.property_types || []).length === 0) ||
+                    (step === 5 &&
+                      (!data.purchase_path ||
+                        (data.purchase_path === "subscription" &&
+                          !selectedSubscriptionPlan)))
                   }
                   onClick={() => {
-                    if (step === 2 && data.purchase_path === "subscription") {
+                    if (step === 5 && data.purchase_path === "subscription") {
                       if (!selectedSubscriptionPlan) return;
                       void subscriptionCheckoutMutation.mutateAsync(
                         selectedSubscriptionPlan,
                       );
                       return;
                     }
-                    if (step === 2 && data.purchase_path === "exclusive") {
-                      void saveStep(3);
+                    if (step === 5 && data.purchase_path === "exclusive") {
+                      void saveStep(6);
                       return;
                     }
                     void saveStep(step + 1);
@@ -3517,7 +4006,7 @@ input[type=range]::-webkit-slider-thumb {
                     <>
                       <span className="spinner" /> Saving…
                     </>
-                  ) : step === 2 && data.purchase_path === "subscription" ? (
+                  ) : step === 5 && data.purchase_path === "subscription" ? (
                     "Continue to Stripe checkout →"
                   ) : step === TOTAL_STEPS ? (
                     "Go to marketplace →"

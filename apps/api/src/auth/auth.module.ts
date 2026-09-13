@@ -9,6 +9,7 @@ import { WalletAccount } from '../entities/wallet-account.entity';
 import { WalletTransaction } from '../entities/wallet-transaction.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { PhoneVerificationService } from './phone-verification.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
@@ -30,7 +31,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, PhoneVerificationService, JwtStrategy],
   exports: [AuthService],
 })
 export class AuthModule {}

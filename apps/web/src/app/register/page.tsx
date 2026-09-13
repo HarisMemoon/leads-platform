@@ -5,32 +5,62 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { setAccessToken } from "@/lib/token";
 import { GoogleSignInButton } from "@/components/GoogleSignInButton";
+import {
+  sendPhoneVerificationCode,
+  verifyPhoneVerificationCode,
+} from "@/lib/auth-api";
 import PhoneInput from "react-phone-input-2";
-import "react-phone-input-2/lib/style.css";
+// import "react-phone-input-2/lib/style.css";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const [form, setForm] = useState({ email: "", password: "", confirm: "", full_name: "", company_name: "", phone: "" });
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+    confirm: "",
+    full_name: "",
+    company_name: "",
+    phone: "",
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (form.password !== form.confirm) { setError("Passwords don't match"); return; }
-    if (form.password.length < 8) { setError("Password must be at least 8 characters"); return; }
-    if (!form.phone || form.phone.length < 7) { setError("Please enter a valid phone number"); return; }
+    if (form.password !== form.confirm) {
+      setError("Passwords don't match");
+      return;
+    }
+    if (form.password.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
+    if (!form.phone || form.phone.length < 7) {
+      setError("Please enter a valid phone number");
+      return;
+    }
     setLoading(true);
     setError("");
     try {
       const utm: Record<string, string> = {};
       if (typeof window !== "undefined") {
         const sp = new URLSearchParams(window.location.search);
-        for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"]) {
+        for (const k of [
+          "utm_source",
+          "utm_medium",
+          "utm_campaign",
+          "utm_content",
+          "utm_term",
+        ]) {
           const v = sp.get(k);
           if (v) utm[k] = v;
         }
@@ -48,16 +78,54 @@ export default function RegisterPage() {
         }),
       });
       if (!res.ok) {
-        const data = await res.json() as { message: string };
+        const data = (await res.json()) as { message: string };
         throw new Error(data.message || "Registration failed");
       }
-      const data = await res.json() as { access_token: string } | { message: string };
-      setAccessToken((data as { access_token: string })?.access_token as string);
-      router.push("/onboarding");
+      const data = (await res.json()) as
+        | { access_token: string }
+        | { message: string };
+      setAccessToken(
+        (data as { access_token: string })?.access_token as string,
+      );
+      try {
+        await sendPhoneVerificationCode();
+      } catch (otpErr: any) {
+        // Non-blocking: if sending fails (e.g. Twilio not configured), still let the
+        // user through to onboarding rather than trap them on this screen.
+        router.push("/onboarding");
+        return;
+      }
+      setStep(3);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleVerifyCode(e: React.FormEvent) {
+    e.preventDefault();
+    setOtpError("");
+    setOtpLoading(true);
+    try {
+      await verifyPhoneVerificationCode(otpCode);
+      router.push("/onboarding");
+    } catch (err: any) {
+      setOtpError(err.message || "Incorrect or expired code");
+    } finally {
+      setOtpLoading(false);
+    }
+  }
+
+  async function handleResendCode() {
+    setOtpError("");
+    setResending(true);
+    try {
+      await sendPhoneVerificationCode();
+    } catch (err: any) {
+      setOtpError(err.message || "Could not resend code");
+    } finally {
+      setResending(false);
     }
   }
 
@@ -73,7 +141,9 @@ export default function RegisterPage() {
   })();
 
   const strengthLabel = ["", "Weak", "Fair", "Good", "Strong"][strength];
-  const strengthColor = ["", "#ef4444", "#f59e0b", "#10b981", "#6366f1"][strength];
+  const strengthColor = ["", "#ef4444", "#f59e0b", "#10b981", "#6366f1"][
+    strength
+  ];
 
   return (
     <>
@@ -323,7 +393,7 @@ export default function RegisterPage() {
           display: flex;
           align-items: center;
           gap: 12px;
-          margin: 8px 0 20px;
+          margin: 20px 0 20px;
         }
         .divider-or span {
           flex: 1;
@@ -421,93 +491,190 @@ export default function RegisterPage() {
           </div>
 
           <div className="step-indicator">
-            <div className={`step-dot ${step >= 1 ? (step > 1 ? "done" : "active") : ""}`} />
-            <div className={`step-dot ${step >= 2 ? "active" : ""}`} />
+            <div
+              className={`step-dot ${step >= 1 ? (step > 1 ? "done" : "active") : ""}`}
+            />
+            <div
+              className={`step-dot ${step >= 2 ? (step > 2 ? "done" : "active") : ""}`}
+            />
+            <div className={`step-dot ${step >= 3 ? "active" : ""}`} />
           </div>
 
           <h2 className="form-title">
-            {step === 1 ? "Create your account" : "Your details"}
+            {step === 1
+              ? "Create your account"
+              : step === 2
+                ? "Your details"
+                : "Verify your phone"}
           </h2>
           <p className="form-sub">
             {step === 1 ? (
-              <>Already have one? <Link href="/login">Sign in</Link></>
-            ) : (
+              <>
+                Already have one? <Link href="/login">Sign in</Link>
+              </>
+            ) : step === 2 ? (
               "Tell us a bit about yourself"
+            ) : (
+              <>
+                We sent a code to {form.phone ? `+${form.phone}` : "your phone"}
+              </>
             )}
           </p>
 
-          {error && <div className="error-box">{error}</div>}
-
-          {step === 1 && (
-            <>
-              <GoogleSignInButton variant="signup" onError={setError} />
-              <div className="divider-or" aria-hidden="true">
-                <span />
-                <p>or use email</p>
-                <span />
-              </div>
-            </>
+          {step !== 3 && error && <div className="error-box">{error}</div>}
+          {step === 3 && otpError && (
+            <div className="error-box">{otpError}</div>
           )}
 
-          <form onSubmit={step === 1 ? (e) => { e.preventDefault(); setError(""); setStep(2); } : handleSubmit}>
+          <form
+            onSubmit={
+              step === 1
+                ? (e) => {
+                    e.preventDefault();
+                    setError("");
+                    setStep(2);
+                  }
+                : step === 2
+                  ? handleSubmit
+                  : handleVerifyCode
+            }
+          >
             {step === 1 ? (
               <div className="fields">
                 <div className="field">
                   <label>Email address</label>
                   <div className="input-wrap">
-                    <input type="email" placeholder="you@company.com" value={form.email} onChange={set("email")} required autoComplete="email" />
+                    <input
+                      type="email"
+                      placeholder="you@company.com"
+                      value={form.email}
+                      onChange={set("email")}
+                      required
+                      autoComplete="email"
+                    />
                   </div>
                 </div>
                 <div className="field">
                   <label>Password</label>
                   <div className="input-wrap">
-                    <input type={showPw ? "text" : "password"} placeholder="Min. 8 characters" value={form.password} onChange={set("password")} required minLength={8} />
-                    <button type="button" className="eye-btn" onClick={() => setShowPw(!showPw)}>
-                      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    <input
+                      type={showPw ? "text" : "password"}
+                      placeholder="Min. 8 characters"
+                      value={form.password}
+                      onChange={set("password")}
+                      required
+                      minLength={8}
+                    />
+                    <button
+                      type="button"
+                      className="eye-btn"
+                      onClick={() => setShowPw(!showPw)}
+                    >
+                      <svg
+                        width="15"
+                        height="15"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                        />
                       </svg>
                     </button>
                   </div>
                   {form.password && (
                     <>
                       <div className="strength-bar">
-                        {[1,2,3,4].map(i => (
-                          <div key={i} className="strength-seg" style={{ background: i <= strength ? strengthColor : undefined }} />
+                        {[1, 2, 3, 4].map((i) => (
+                          <div
+                            key={i}
+                            className="strength-seg"
+                            style={{
+                              background:
+                                i <= strength ? strengthColor : undefined,
+                            }}
+                          />
                         ))}
                       </div>
-                      <div className="strength-label" style={{ color: strengthColor }}>{strengthLabel}</div>
+                      <div
+                        className="strength-label"
+                        style={{ color: strengthColor }}
+                      >
+                        {strengthLabel}
+                      </div>
                     </>
                   )}
                 </div>
                 <div className="field">
                   <label>Confirm password</label>
                   <div className="input-wrap">
-                    <input type="password" placeholder="Repeat password" value={form.confirm} onChange={set("confirm")} required />
+                    <input
+                      type="password"
+                      placeholder="Repeat password"
+                      value={form.confirm}
+                      onChange={set("confirm")}
+                      required
+                    />
                   </div>
                 </div>
-                <button type="submit" className="submit-btn" style={{ marginTop: 14 }}>
+                <button
+                  type="submit"
+                  className="submit-btn"
+                  style={{ marginTop: 14 }}
+                >
                   Continue →
                 </button>
               </div>
-            ) : (
+            ) : step === 2 ? (
               <div className="fields">
                 <div className="row-2">
                   <div className="field">
                     <label>Full name</label>
                     <div className="input-wrap">
-                      <input type="text" placeholder="John Smith" value={form.full_name} onChange={set("full_name")} required />
+                      <input
+                        type="text"
+                        placeholder="John Smith"
+                        value={form.full_name}
+                        onChange={set("full_name")}
+                        required
+                      />
                     </div>
                   </div>
                   <div className="field">
                     <label>Company</label>
                     <div className="input-wrap">
-                      <input type="text" placeholder="Acme Investments" value={form.company_name} onChange={set("company_name")} />
+                      <input
+                        type="text"
+                        placeholder="Acme Investments"
+                        value={form.company_name}
+                        onChange={set("company_name")}
+                      />
                     </div>
                   </div>
                 </div>
                 <div className="field">
-                  <label>Phone number <span style={{ color: "#ef4444", fontWeight: 400 }}>*</span> <span style={{ color: "rgba(255,255,255,0.3)", fontWeight: 400 }}>(required)</span></label>
+                  <label>
+                    Phone number{" "}
+                    <span style={{ color: "#ef4444", fontWeight: 400 }}>*</span>{" "}
+                    <span
+                      style={{
+                        color: "rgba(255,255,255,0.3)",
+                        fontWeight: 400,
+                      }}
+                    >
+                      (required)
+                    </span>
+                  </label>
                   <PhoneInput
                     country="us"
                     value={form.phone}
@@ -520,19 +687,90 @@ export default function RegisterPage() {
                   />
                 </div>
                 <div className="btn-row">
-                  <button type="button" className="back-btn" onClick={() => setStep(1)}>← Back</button>
-                  <button type="submit" className="submit-btn" disabled={loading}>
-                    {loading ? <><span className="spinner" />Creating…</> : "Create account"}
+                  <button
+                    type="button"
+                    className="back-btn"
+                    onClick={() => setStep(1)}
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="submit"
+                    className="submit-btn"
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <>
+                        <span className="spinner" />
+                        Creating…
+                      </>
+                    ) : (
+                      "Create account"
+                    )}
                   </button>
                 </div>
               </div>
+            ) : (
+              <div className="fields">
+                <div className="field">
+                  <label>Verification code</label>
+                  <div className="input-wrap">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="123456"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value)}
+                      required
+                      maxLength={8}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  className="submit-btn"
+                  disabled={otpLoading}
+                  style={{ marginTop: 14 }}
+                >
+                  {otpLoading ? (
+                    <>
+                      <span className="spinner" />
+                      Verifying…
+                    </>
+                  ) : (
+                    "Verify & continue →"
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="back-btn"
+                  disabled={resending}
+                  onClick={handleResendCode}
+                  style={{ marginTop: 4 }}
+                >
+                  {resending ? "Resending…" : "Resend code"}
+                </button>
+              </div>
             )}
           </form>
-
-          <p className="terms">
-            By creating an account you agree to our{" "}
-            <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>.
-          </p>
+          {step === 1 && (
+            <>
+              <div className="divider-or" aria-hidden="true">
+                <span />
+                <p>or use gmail</p>
+                <span />
+              </div>
+              <GoogleSignInButton variant="signup" onError={setError} />
+            </>
+          )}
+          {step !== 3 && (
+            <p className="terms">
+              By creating an account you agree to our{" "}
+              <a href="#">Terms of Service</a> and{" "}
+              <a href="#">Privacy Policy</a>.
+            </p>
+          )}
         </div>
       </div>
     </>

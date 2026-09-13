@@ -183,7 +183,19 @@ export class LeadDistributionProcessor {
       const tFilters = rule.lead_type_filters || [];
       if (mFilters.length === 0 && tFilters.length === 0) return false;
 
-      // ── Market + type filters ───────────────────────────────────────────
+      // ── Readiness gate: phone verified, property type + distribution limits set ──
+      // Manual marketplace purchases are unaffected by this — it only governs
+      // whether autobuy will deliver to this buyer.
+      if (!rule.user.phone_verified) return false;
+      const pFilters = rule.property_type_filters || [];
+      if (pFilters.length === 0) return false;
+      const hasDistributionLimits =
+        rule.max_leads_per_day != null ||
+        rule.max_leads_per_week != null ||
+        rule.max_leads_per_month != null;
+      if (!hasDistributionLimits) return false;
+
+      // ── Market + type + property-type filters ───────────────────────────
       const hasMarketMatch =
         mFilters.length === 0 ||
         mFilters.includes(lead.market);
@@ -192,6 +204,14 @@ export class LeadDistributionProcessor {
       if (tFilters.length > 0 && !tFilters.includes(lead.lead_type)) {
         return false;
       }
+
+      const leadPropertyType = String(
+        (lead.metadata as Record<string, unknown> | null)?.property_type ?? '',
+      ).toLowerCase();
+      const hasPropertyTypeMatch = pFilters.some(
+        (p) => p.toLowerCase() === leadPropertyType,
+      );
+      if (!hasPropertyTypeMatch) return false;
 
       // ── Slot availability checks ────────────────────────────────────────
       if (exclusivityChoice === 'exclusive' && lead.non_exclusive_buyers_count > 0) {

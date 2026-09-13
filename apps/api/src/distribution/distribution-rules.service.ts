@@ -61,6 +61,30 @@ export class DistributionRulesService {
     };
   }
 
+  /**
+   * Non-Pro users may enable autobuy, but only after accepting the full-price
+   * disclaimer at least once. Pro users never need to accept it — they get
+   * discounted non-exclusive pricing, not the full exclusive price.
+   */
+  private applyAutobuyDisclaimer(
+    rule: DistributionRule,
+    dto: UpdateDistributionRuleDto,
+    proAutoPurchaseEligible: boolean,
+  ) {
+    const turningOn = dto.participation_enabled === true && !rule.participation_enabled;
+    if (turningOn && !proAutoPurchaseEligible) {
+      const alreadyAccepted = rule.autobuy_disclaimer_accepted_at != null;
+      if (!alreadyAccepted && dto.autobuy_disclaimer_accepted !== true) {
+        throw new ForbiddenException(
+          'You are not currently subscribed. If you turn on autobuy, you agree to be charged the full lead price for each lead purchased automatically. Please accept the disclaimer to continue.',
+        );
+      }
+    }
+    if (dto.autobuy_disclaimer_accepted === true) {
+      rule.autobuy_disclaimer_accepted_at = new Date();
+    }
+  }
+
   async listForUser(userId: string) {
     const [rules, proAutoPurchaseEligible] = await Promise.all([
       this.ruleRepo.find({
@@ -110,11 +134,14 @@ export class DistributionRulesService {
         max_per_day: 5,
         market_filters: [],
         lead_type_filters: [],
+        property_type_filters: [],
         min_wallet_balance_cents: '0',
         cooldown_minutes: 0,
         rotation_position: 0,
       });
     }
+
+    this.applyAutobuyDisclaimer(rule, dto, proAutoPurchaseEligible);
 
     if (dto.participation_enabled !== undefined) rule.participation_enabled = dto.participation_enabled;
     if (dto.max_per_day !== undefined) rule.max_per_day = dto.max_per_day;
@@ -135,6 +162,7 @@ export class DistributionRulesService {
     if (dto.cooldown_minutes !== undefined) rule.cooldown_minutes = dto.cooldown_minutes;
     if (dto.rotation_position !== undefined) rule.rotation_position = dto.rotation_position;
     if (dto.market_filters !== undefined) rule.market_filters = dto.market_filters;
+    if (dto.property_type_filters !== undefined) rule.property_type_filters = dto.property_type_filters;
     if (dto.is_active !== undefined) rule.is_active = dto.is_active;
     if (dto.exclusivity_preference !== undefined) rule.exclusivity_preference = dto.exclusivity_preference;
     if (dto.max_lead_price_cents !== undefined) {
@@ -146,7 +174,35 @@ export class DistributionRulesService {
   }
 
   /**
-   * Verifies all 5 prerequisites and sets launched_at on the user's rule.
+   * Builds the readiness checklist shared by getLaunchChecklist and
+   * launchDistribution. CRM connection is deliberately NOT part of this list —
+   * the client's own rule allows skipping CRM setup.
+   */
+  private async buildChecklist(userId: string, rule: DistributionRule | null) {
+    const termsVersion = this.config.get<string>('TERMS_VERSION') ?? '2025-01';
+    const [termsRecord, wallet, user] = await Promise.all([
+      this.termsRepo.findOne({ where: { user: { id: userId }, terms_version: termsVersion } }),
+      this.walletRepo.findOne({ where: { user: { id: userId } } }),
+      this.userRepo.findOne({ where: { id: userId } }),
+    ]);
+
+    return {
+      terms_accepted: termsRecord !== null,
+      wallet_funded: Number(wallet?.balance_cents ?? 0) > 0,
+      has_filters:
+        (rule?.market_filters?.length ?? 0) > 0 || (rule?.lead_type_filters?.length ?? 0) > 0,
+      property_type_selected: (rule?.property_type_filters?.length ?? 0) > 0,
+      phone_verified: user?.phone_verified === true,
+      distribution_limits_set:
+        rule?.max_leads_per_day != null ||
+        rule?.max_leads_per_week != null ||
+        rule?.max_leads_per_month != null,
+      participation_enabled: rule?.participation_enabled === true,
+    };
+  }
+
+  /**
+   * Verifies all prerequisites and sets launched_at on the user's rule.
    * Returns a checklist so the frontend can show which gates passed/failed.
    */
   async launchDistribution(userId: string): Promise<{
@@ -160,18 +216,7 @@ export class DistributionRulesService {
     });
     if (!rule) throw new NotFoundException('No distribution rule found — complete onboarding first');
 
-    const termsVersion = this.config.get<string>('TERMS_VERSION') ?? '2025-01';
-    const [termsRecord, wallet] = await Promise.all([
-      this.termsRepo.findOne({ where: { user: { id: userId }, terms_version: termsVersion } }),
-      this.walletRepo.findOne({ where: { user: { id: userId } } }),
-    ]);
-
-    const checklist = {
-      terms_accepted: termsRecord !== null,
-      wallet_funded: Number(wallet?.balance_cents ?? 0) > 0,
-      has_filters: (rule.market_filters?.length ?? 0) > 0 || (rule.lead_type_filters?.length ?? 0) > 0,
-      participation_enabled: rule.participation_enabled === true,
-    };
+    const checklist = await this.buildChecklist(userId, rule);
 
     const allPassed = Object.values(checklist).every(Boolean);
     if (!allPassed) {
@@ -193,33 +238,9 @@ export class DistributionRulesService {
       where: { user: { id: userId } },
       order: { created_at: 'ASC' },
     });
-    if (!rule) {
-      return {
-        launched_at: null,
-        checklist: {
-          terms_accepted: false,
-          wallet_funded: false,
-          has_filters: false,
-          participation_enabled: false,
-        },
-      };
-    }
 
-    const termsVersion = this.config.get<string>('TERMS_VERSION') ?? '2025-01';
-    const [termsRecord, wallet] = await Promise.all([
-      this.termsRepo.findOne({ where: { user: { id: userId }, terms_version: termsVersion } }),
-      this.walletRepo.findOne({ where: { user: { id: userId } } }),
-    ]);
-
-    return {
-      launched_at: rule.launched_at,
-      checklist: {
-        terms_accepted: termsRecord !== null,
-        wallet_funded: Number(wallet?.balance_cents ?? 0) > 0,
-        has_filters: (rule.market_filters?.length ?? 0) > 0 || (rule.lead_type_filters?.length ?? 0) > 0,
-        participation_enabled: rule.participation_enabled === true,
-      },
-    };
+    const checklist = await this.buildChecklist(userId, rule);
+    return { launched_at: rule?.launched_at ?? null, checklist };
   }
 
   async updateOwnRule(userId: string, ruleId: string, dto: UpdateDistributionRuleDto) {
@@ -240,6 +261,8 @@ export class DistributionRulesService {
     });
     if (!rule) throw new NotFoundException('Rule not found');
     if (rule.user.id !== userId) throw new ForbiddenException('Not your rule');
+
+    this.applyAutobuyDisclaimer(rule, dto, proAutoPurchaseEligible);
 
     if (dto.participation_enabled !== undefined) {
       rule.participation_enabled = dto.participation_enabled;
@@ -286,6 +309,9 @@ export class DistributionRulesService {
     }
     if (dto.market_filters !== undefined) {
       rule.market_filters = dto.market_filters;
+    }
+    if (dto.property_type_filters !== undefined) {
+      rule.property_type_filters = dto.property_type_filters;
     }
     if (dto.is_active !== undefined) rule.is_active = dto.is_active;
     if (dto.exclusivity_preference !== undefined) rule.exclusivity_preference = dto.exclusivity_preference;

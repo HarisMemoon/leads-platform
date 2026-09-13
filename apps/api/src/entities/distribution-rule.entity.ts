@@ -115,6 +115,20 @@ import {
     @Column({ type: 'timestamp with time zone', nullable: true })
     launched_at!: Date | null
 
+    /** Buyer's property-type preferences (e.g. residential, mobile_home, multifamily, land).
+     *  Empty array = no restriction, same convention as market_filters/lead_type_filters. */
+    @Column({
+      type: 'text',
+      array: true,
+      default: () => 'ARRAY[]::text[]'
+    })
+    property_type_filters!: string[]
+
+    /** Set when a non-Pro buyer accepts the full-price autobuy disclaimer.
+     *  Required before participation_enabled can be turned on for non-Pro users. */
+    @Column({ type: 'timestamp with time zone', nullable: true })
+    autobuy_disclaimer_accepted_at!: Date | null
+
     // ─────────────────────────────────────────────────────────────────────────
 
     /*

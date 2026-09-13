@@ -32,6 +32,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         full_name: null as string | null,
         company_name: null as string | null,
         distribution_locked: false,
+        phone_verified: false,
       };
     }
     if (!user.is_active) throw new UnauthorizedException('Account is disabled');
@@ -42,6 +43,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       full_name: user.full_name,
       company_name: user.company_name,
       distribution_locked: Boolean(user.distribution_locked),
+      phone_verified: Boolean(user.phone_verified),
     };
   }
 }

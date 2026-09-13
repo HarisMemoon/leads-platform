@@ -26,7 +26,7 @@ export class OnboardingService {
 
     return row;
   }
-
+  
   async update(userId: string, dto: UpdateOnboardingDto) {
     return this.dataSource.transaction(async (manager) => {
       const row = await manager
@@ -76,12 +76,17 @@ export class OnboardingService {
         );
       }
 
+      /*
+      Distribution limits are collected at onboarding step 7 (Distribution)
+      in the current step order — reordering the wizard means changing this
+      threshold, not the number 5 which no longer means anything.
+      */
       const shouldSyncDistributionRule =
-        row.current_step >= 5 ||
-        (row.completed_steps || []).includes(5);
+        row.current_step >= 7 ||
+        (row.completed_steps || []).includes(7);
 
       if (shouldSyncDistributionRule && dto.data) {
-        await this.syncDistributionRuleFromStepFive(
+        await this.syncDistributionRuleFromOnboardingData(
           userId,
           row.data || {},
           manager,
@@ -148,7 +153,7 @@ export class OnboardingService {
     };
   }
 
-  private async syncDistributionRuleFromStepFive(
+  private async syncDistributionRuleFromOnboardingData(
     userId: string,
     formData: Record<string, any>,
     manager: EntityManager,
@@ -193,8 +198,19 @@ export class OnboardingService {
     const leadTypeFilters = Array.isArray(formData.lead_types)
       ? formData.lead_types.filter((v) => typeof v === 'string')
       : [];
+    const propertyTypeFilters = Array.isArray(formData.property_types)
+      ? formData.property_types.filter((v) => typeof v === 'string')
+      : [];
+
+    const maxLeadsPerDayRaw = Number.parseInt(formData.max_leads_per_day, 10);
+    const maxLeadsPerWeekRaw = Number.parseInt(formData.max_leads_per_week, 10);
+    const maxLeadsPerMonthRaw = Number.parseInt(formData.max_leads_per_month, 10);
+    const maxLeadsPerDay = Number.isFinite(maxLeadsPerDayRaw) && maxLeadsPerDayRaw > 0 ? maxLeadsPerDayRaw : null;
+    const maxLeadsPerWeek = Number.isFinite(maxLeadsPerWeekRaw) && maxLeadsPerWeekRaw > 0 ? maxLeadsPerWeekRaw : null;
+    const maxLeadsPerMonth = Number.isFinite(maxLeadsPerMonthRaw) && maxLeadsPerMonthRaw > 0 ? maxLeadsPerMonthRaw : null;
 
     const market = marketFilters[0] ?? 'default';
+    const disclaimerAccepted = Boolean(formData.autobuy_disclaimer_accepted);
 
     await manager.query(
       `
@@ -205,12 +221,17 @@ export class OnboardingService {
         min_wallet_balance_cents,
         market_filters,
         lead_type_filters,
+        property_type_filters,
+        max_leads_per_day,
+        max_leads_per_week,
+        max_leads_per_month,
         max_spend_per_day_cents,
         max_spend_per_week_cents,
         max_spend_per_month_cents,
         cooldown_minutes,
         market,
-        is_active
+        is_active,
+        autobuy_disclaimer_accepted_at
       )
       VALUES (
         $1,
@@ -219,12 +240,17 @@ export class OnboardingService {
         $4,
         $5::text[],
         $6::text[],
-        $7,
+        $7::text[],
         $8,
         $9,
-        0,
         $10,
-        true
+        $11,
+        $12,
+        $13,
+        0,
+        $14,
+        true,
+        CASE WHEN $15 THEN now() ELSE NULL END
       )
       ON CONFLICT (user_id)
       DO UPDATE SET
@@ -233,9 +259,17 @@ export class OnboardingService {
         min_wallet_balance_cents = EXCLUDED.min_wallet_balance_cents,
         market_filters = EXCLUDED.market_filters,
         lead_type_filters = EXCLUDED.lead_type_filters,
+        property_type_filters = EXCLUDED.property_type_filters,
+        max_leads_per_day = EXCLUDED.max_leads_per_day,
+        max_leads_per_week = EXCLUDED.max_leads_per_week,
+        max_leads_per_month = EXCLUDED.max_leads_per_month,
         max_spend_per_day_cents = EXCLUDED.max_spend_per_day_cents,
         max_spend_per_week_cents = EXCLUDED.max_spend_per_week_cents,
         max_spend_per_month_cents = EXCLUDED.max_spend_per_month_cents,
+        autobuy_disclaimer_accepted_at = COALESCE(
+          distribution_rules.autobuy_disclaimer_accepted_at,
+          EXCLUDED.autobuy_disclaimer_accepted_at
+        ),
         cooldown_minutes = EXCLUDED.cooldown_minutes,
         market = EXCLUDED.market,
         is_active = EXCLUDED.is_active
@@ -247,10 +281,15 @@ export class OnboardingService {
         String(minWalletBalanceCents),
         marketFilters,
         leadTypeFilters,
+        propertyTypeFilters,
+        maxLeadsPerDay,
+        maxLeadsPerWeek,
+        maxLeadsPerMonth,
         String(maxSpendPerDayCents),
         String(maxSpendPerWeekCents),
         String(maxSpendPerMonthCents),
         market,
+        disclaimerAccepted,
       ],
     );
   }

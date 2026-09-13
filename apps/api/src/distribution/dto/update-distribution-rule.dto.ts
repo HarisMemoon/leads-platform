@@ -85,6 +85,16 @@ export class UpdateDistributionRuleDto {
   market_filters?: string[];
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  property_type_filters?: string[];
+
+  /** Set true when a non-Pro buyer accepts the full-price autobuy disclaimer. */
+  @IsOptional()
+  @IsBoolean()
+  autobuy_disclaimer_accepted?: boolean;
+
+  @IsOptional()
   @IsBoolean()
   is_active?: boolean;
 
