@@ -35,6 +35,7 @@ export default function MarketingNavbar() {
           display: flex;
           justify-content: center;
           pointer-events: none;
+         
         }
         .nav-float-shell {
           pointer-events: auto;
@@ -48,6 +49,7 @@ export default function MarketingNavbar() {
           box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 1px 0 rgba(255, 255, 255, 0.06) inset;
           display: flex;
           flex-direction: column;
+          
         }
         .nav-float-shell::before {
           content: "";

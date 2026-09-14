@@ -1,22 +1,8 @@
 "use client";
 
-/**
- * Newleey — marketing homepage (v2.1 - Enhanced UI)
- * Next.js App Router, single-file page component.
- * Features:
- * - Upgraded inline navbar blending with hero backgrounds.
- * - Auto-buy & Ping/Post feature section with mockups.
- * - Completely revamped, highly-engaging bottom CTA section.
- * - Sleek bento-box styling for data presentations.
- */
-
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import MarketingNavbar from "@/components/MarketingNavbar";
-
-/* ---------------------------------------------------------------------- */
-/* Icons — minimal single-weight line icons, one visual family throughout */
-/* ---------------------------------------------------------------------- */
 
 type IconProps = { className?: string };
 const iconBase = "shrink-0";
@@ -584,7 +570,7 @@ function chipTone(label: string) {
 /* ---------------------------------------------------------------------- */
 function MarketingHeader() {
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 border-b border-white/[0.06] bg-[#0A0B10]/60 backdrop-blur-xl">
+    <header className="fixed top-0 left-0 right-0 z-50  ">
       <MarketingNavbar />
     </header>
   );
@@ -738,7 +724,7 @@ export default function Home() {
               </div>
 
               {/* Wallet Micro-Metrics */}
-              <div className="relative mt-5 grid grid-cols-4 gap-2">
+              <div className="relative mt-5 grid grid-cols-2 lg:grid-cols-4 gap-2">
                 {[
                   { label: "Funded", val: "$2,000" },
                   { label: "Spent", val: "$71", alert: true },
@@ -753,7 +739,7 @@ export default function Home() {
                     key={idx}
                     className="rounded-lg border border-white/5 bg-[#12141C] p-2.5 text-center flex flex-col justify-center"
                   >
-                    <span className="text-[8px] uppercase tracking-widest text-white/35 mb-1 block">
+                    <span className="text-[8px] uppercase tracking-widest text-white/35 mb-1 block whitespace-nowrap overflow-hidden text-ellipsis">
                       {stat.label}
                     </span>
                     <span
@@ -1057,26 +1043,30 @@ export default function Home() {
                   {/* Grid Lines */}
                   <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5 mix-blend-overlay" />
 
-                  <div className="relative w-full h-full max-w-[280px]">
-                    {/* SVG Connecting Lines */}
+                  {/* Strict bounds (300px wide) perfectly centered to prevent side clipping */}
+                  <div className="relative w-full h-full max-w-[300px] mx-auto">
+                    {/* SVG Connecting Lines - Precisely mapped to the center of each icon */}
                     <svg
                       className="absolute inset-0 w-full h-full pointer-events-none"
                       style={{ overflow: "visible" }}
                     >
+                      {/* Top Left to Center */}
                       <path
-                        d="M 30 40 C 100 40, 100 120, 140 120"
+                        d="M 8 40 C 50 40, 70 120, 120 120"
                         fill="none"
                         stroke="rgba(255,255,255,0.1)"
                         strokeWidth="2"
                       />
+                      {/* Bottom Left to Center */}
                       <path
-                        d="M 30 200 C 100 200, 100 120, 140 120"
+                        d="M 8 200 C 50 200, 70 120, 120 120"
                         fill="none"
                         stroke="rgba(255,255,255,0.1)"
                         strokeWidth="2"
                       />
+                      {/* Center to Right */}
                       <path
-                        d="M 140 120 C 180 120, 200 120, 250 120"
+                        d="M 120 120 C 145 120, 165 120, 196 120"
                         fill="none"
                         stroke="#6C5CE7"
                         strokeWidth="2"
@@ -1086,45 +1076,48 @@ export default function Home() {
                     </svg>
 
                     {/* Left Nodes (Vendors Pinging) */}
+                    {/* Removed -translate-x-1/2 so it starts exactly at 0px */}
                     <div className="absolute left-0 top-[40px] -translate-y-1/2 flex items-center gap-2">
-                      <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center">
+                      <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
                         <div className="h-1.5 w-1.5 rounded-full bg-white/60 animate-ping" />
                       </div>
-                      <span className="text-[9px] text-white/40 uppercase tracking-widest font-mono">
+                      <span className="text-[9px] text-white/40 uppercase tracking-widest font-mono whitespace-nowrap">
                         Ping: FL
                       </span>
                     </div>
 
                     <div className="absolute left-0 top-[200px] -translate-y-1/2 flex items-center gap-2">
-                      <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center">
+                      <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
                         <div
                           className="h-1.5 w-1.5 rounded-full bg-white/60 animate-ping"
                           style={{ animationDelay: "0.5s" }}
                         />
                       </div>
-                      <span className="text-[9px] text-white/40 uppercase tracking-widest font-mono">
+                      <span className="text-[9px] text-white/40 uppercase tracking-widest font-mono whitespace-nowrap">
                         Ping: TX
                       </span>
                     </div>
 
                     {/* Center Node (Distribution Engine) */}
-                    <div className="absolute left-[140px] top-[130px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-2">
-                      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-[#6C5CE7] to-[#10b981] p-[1px] shadow-[0_0_30px_rgba(108,92,231,0.3)]">
+                    {/* Remains centered at the 120px mark */}
+                    <div className="absolute left-[120px] top-[130px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-2">
+                      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-[#6C5CE7] to-[#10b981] p-[1px] shadow-[0_0_30px_rgba(108,92,231,0.3)] shrink-0">
                         <div className="h-full w-full rounded-[11px] bg-[#12141C] flex items-center justify-center">
                           <IconGrid className="h-6 w-6 text-white [animation:node-pulse_2s_ease-in-out_infinite]" />
                         </div>
                       </div>
-                      <span className="text-[10px] font-bold text-white tracking-widest uppercase">
+                      <span className="text-[10px] font-bold text-white tracking-widest uppercase whitespace-nowrap">
                         Engine
                       </span>
                     </div>
 
                     {/* Right Node (Your CRM Post) */}
-                    <div className="absolute right-0 top-[120px] translate-x-4 -translate-y-1/2 flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full bg-[#2FD699]/20 border border-[#2FD699]/50 flex items-center justify-center shadow-[0_0_20px_rgba(47,214,153,0.2)]">
+                    {/* Positioned at 180px so the whole text group ends around ~290px, perfectly within bounds */}
+                    <div className="absolute left-[180px] top-[120px] -translate-y-1/2 flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-full bg-[#2FD699]/20 border border-[#2FD699]/50 flex items-center justify-center shadow-[0_0_20px_rgba(47,214,153,0.2)] shrink-0">
                         <IconCheck className="h-4 w-4 text-[#2FD699]" />
                       </div>
-                      <div className="flex flex-col">
+                      <div className="flex flex-col whitespace-nowrap">
                         <span className="text-[10px] font-bold text-[#2FD699] uppercase tracking-wider">
                           Post
                         </span>
@@ -1576,7 +1569,9 @@ export default function Home() {
           <Reveal index={1}>
             <div className="rounded-[2rem] border border-white/10 bg-[#12141C] p-10 relative">
               <div className="absolute inset-0 bg-gradient-to-tr from-[#2FD699]/[0.02] to-transparent pointer-events-none rounded-[2rem]" />
-              <div className="flex items-center justify-center gap-4 mb-10">
+
+              {/* Connection Animation */}
+              <div className="flex items-center justify-center gap-4 mb-8">
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1A1C29] border border-white/10 shadow-lg">
                   <IconTarget className="h-6 w-6 text-[#A9A0FF]" />
                 </div>
@@ -1589,10 +1584,72 @@ export default function Home() {
               </div>
 
               <p className="text-center text-sm font-medium text-white/40 uppercase tracking-wide mb-6">
-                Automated Pipeline Tracking
+                Instant CRM Delivery
               </p>
-              <div className="bg-[#1A1C29] border border-white/5 p-6 rounded-2xl">
-                <PipelineStepper current="Contacted" />
+
+              {/* Simulated CRM Inbox UI (Non-Technical) */}
+              <div className="bg-[#0A0B10] border border-white/5 p-4 rounded-2xl shadow-inner relative overflow-hidden">
+                {/* Subtle background glow */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-[#2FD699]/5 blur-[50px] rounded-full pointer-events-none" />
+
+                {/* Mock CRM Header */}
+                <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/5 relative z-10">
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-[#2FD699] animate-pulse" />
+                    <span className="text-[11px] text-white/60 font-medium uppercase tracking-wider">
+                      Lead Inbox
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-white/40 bg-white/5 px-2 py-1 rounded-md">
+                    Just now
+                  </span>
+                </div>
+
+                {/* Mock Lead Card */}
+                <div className="bg-[#12141C] border border-white/10 rounded-xl p-4 flex items-start gap-4 relative z-10 shadow-lg transform transition-transform hover:-translate-y-0.5 duration-300">
+                  <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[#2FD699] to-[#059669] flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-[0_0_15px_rgba(47,214,153,0.2)]">
+                    SJ
+                  </div>
+
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-2">
+                      <h4 className="text-white text-sm font-semibold">
+                        Sarah Jenkins
+                      </h4>
+                      <span className="bg-[#2FD699]/10 text-[#2FD699] text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold border border-[#2FD699]/20">
+                        Exclusive
+                      </span>
+                    </div>
+
+                    {/* Lead Attributes (Structured Data) */}
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      <span className="text-white/40 text-[9px] bg-white/5 border border-white/5 px-2 py-1 rounded-md uppercase tracking-wider">
+                        Source: Ping/Post
+                      </span>
+
+                      <span className="text-white/40 text-[9px] bg-white/5 border border-white/5 px-2 py-1 rounded-md uppercase tracking-wider">
+                        State: TX
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <span className="text-white/40 text-[11px] flex items-center gap-1.5 font-mono">
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="h-3 w-3"
+                        >
+                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+                        </svg>
+                        (555) 123-****
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </Reveal>

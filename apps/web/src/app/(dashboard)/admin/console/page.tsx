@@ -126,7 +126,7 @@ const TABS: TabDef[] = [
 export default function AdminConsolePage() {
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("overview");
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // Mobile Nav State
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const { data: user } = useQuery({
     queryKey: queryKeys.auth.me,

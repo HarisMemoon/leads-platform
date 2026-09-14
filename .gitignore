@@ -19,3 +19,4 @@ apps/web/pnpm-lock.yaml
 
 # Track lockfile for reproducible installs on other machines
 # (pnpm-lock.yaml was previously ignored; run: git add -f pnpm-lock.yaml)
+.vercel
