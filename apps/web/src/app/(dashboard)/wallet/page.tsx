@@ -18,7 +18,12 @@ import {
   Star,
   Wallet,
 } from "lucide-react";
-import { CardElement, Elements, useElements, useStripe } from "@stripe/react-stripe-js";
+import {
+  CardElement,
+  Elements,
+  useElements,
+  useStripe,
+} from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import {
   type WalletAccountDto,
@@ -39,7 +44,9 @@ import { getPricingConfig, type PricingConfigEntry } from "@/lib/leads-api";
 
 const TOP_UP_AMOUNTS = [50, 100, 250, 500, 1000, 2500];
 const TX_PAGE_SIZE = 10;
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "");
+const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "",
+);
 
 function formatCardBrand(brand: string) {
   const b = brand.toLowerCase();
@@ -111,21 +118,16 @@ function WalletTopupForm({
 
   return (
     <>
-      <div style={{ marginBottom: 14 }}>
-        <div
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 11,
-            padding: "13px 14px",
-          }}
-        >
+      <div style={{ marginBottom: 16 }}>
+        <div className="stripe-input-wrapper">
           <CardElement
             options={{
               style: {
                 base: {
                   color: "#ffffff",
-                  fontSize: "15px",
+                  fontSize: "14px",
+                  fontFamily: '"Inter", sans-serif',
+                  fontSmoothing: "antialiased",
                   "::placeholder": { color: "rgba(255,255,255,0.35)" },
                 },
                 invalid: { color: "#fca5a5" },
@@ -141,11 +143,15 @@ function WalletTopupForm({
         onClick={handleSubmit}
       >
         {isPaying ? (
-          <><div className="spinner" /> Processing…</>
+          <>
+            <div className="spinner" /> Processing…
+          </>
         ) : (
           <>
             <Plus size={16} strokeWidth={2} aria-hidden />
-            {finalAmount > 0 ? `Add $${finalAmount} to wallet` : "Select an amount"}
+            {finalAmount > 0
+              ? `Add $${finalAmount.toFixed(2)} to wallet`
+              : "Select an amount"}
           </>
         )}
       </button>
@@ -160,11 +166,10 @@ function timeAgo(iso: string) {
   if (h < 1) return "Just now";
   if (h < 24) return `${h}h ago`;
   if (d < 7) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function RefTypeIcon({ referenceType }: { referenceType: string }) {
@@ -191,16 +196,18 @@ function RefTypeIcon({ referenceType }: { referenceType: string }) {
 }
 
 function refLabel(type: string) {
-  return {
-    lead_purchase: "Lead purchase",
-    stripe_topup: "Wallet top-up",
-    dev_topup: "Wallet top-up",
-    onboarding_initial: "Onboarding credit",
-    subscription: "Subscription",
-    auto_buy: "Auto-buy",
-    admin_credit: "Credit",
-    refund: "Refund",
-  }[type] || type.replace(/_/g, " ");
+  return (
+    {
+      lead_purchase: "Lead purchase",
+      stripe_topup: "Wallet top-up",
+      dev_topup: "Wallet top-up",
+      onboarding_initial: "Onboarding credit",
+      subscription: "Subscription",
+      auto_buy: "Auto-buy",
+      admin_credit: "Credit",
+      refund: "Refund",
+    }[type] || type.replace(/_/g, " ")
+  );
 }
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
@@ -209,17 +216,27 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   const min = Math.min(...vals);
   const max = Math.max(...vals);
   const range = max - min || 1;
-  const w = 120; const h = 40;
-  const points = vals.map((v, i) => {
-    const x = (i / (vals.length - 1)) * w;
-    const y = h - ((v - min) / range) * (h - 6) - 3;
-    return `${x},${y}`;
-  }).join(" ");
+  const w = 120;
+  const h = 40;
+  const points = vals
+    .map((v, i) => {
+      const x = (i / (vals.length - 1)) * w;
+      const y = h - ((v - min) / range) * (h - 6) - 3;
+      return `${x},${y}`;
+    })
+    .join(" ");
   const lastPt = points.split(" ").pop()!;
   const [lcx, lcy] = lastPt.split(",");
   return (
     <svg width={w} height={h} style={{ overflow: "visible" }}>
-      <polyline points={points} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <circle cx={lcx} cy={lcy} r={3} fill={color} />
     </svg>
   );
@@ -234,7 +251,8 @@ function sparklineFromTransactions(
     return [bal, bal, bal, bal, bal, bal, bal];
   }
   const chronological = [...txs].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    (a, b) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   );
   const points = chronological.map((t) => centsToNumber(t.balance_after_cents));
   if (points.length < 7) {
@@ -265,7 +283,6 @@ export default function WalletPage() {
   } = useQuery({
     queryKey: queryKeys.wallet.me,
     queryFn: getWalletMe,
-    // Auto-reload runs server-side; poll so balance/txs update without a full navigation.
     refetchInterval: (q) =>
       (q.state.data as WalletAccountDto | undefined)?.auto_reload_enabled
         ? 30_000
@@ -310,7 +327,9 @@ export default function WalletPage() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const isPro = subscription != null && ["active", "past_due"].includes(subscription.status ?? "");
+  const isPro =
+    subscription != null &&
+    ["active", "past_due"].includes(subscription.status ?? "");
 
   const loading = walletLoading || txsLoading;
   const loadError =
@@ -329,25 +348,32 @@ export default function WalletPage() {
   const [reloadThreshold, setReloadThreshold] = useState(100);
   const [reloadAmount, setReloadAmount] = useState(500);
   const [saveCardForAutoReload, setSaveCardForAutoReload] = useState(false);
-  const [autoReloadSaveError, setAutoReloadSaveError] = useState<string | null>(null);
+  const [autoReloadSaveError, setAutoReloadSaveError] = useState<string | null>(
+    null,
+  );
 
   const balanceCents = wallet?.balance_cents ?? "0";
   const balanceNum = centsToNumber(balanceCents);
 
-  // Dynamic pricing from config — fall back to defaults if not yet loaded
   const inboundConfig = pricingConfigs?.find((c) => c.lead_type === "inbound");
-  const sharedPriceCents = inboundConfig?.shared_price_cents != null
-    ? Number(inboundConfig.shared_price_cents) : 2500;
-  const exclusivePriceCents = inboundConfig?.new_lead_price_cents != null
-    ? Number(inboundConfig.new_lead_price_cents) : 15000;
+  const sharedPriceCents =
+    inboundConfig?.shared_price_cents != null
+      ? Number(inboundConfig.shared_price_cents)
+      : 2500;
+  const exclusivePriceCents =
+    inboundConfig?.new_lead_price_cents != null
+      ? Number(inboundConfig.new_lead_price_cents)
+      : 15000;
 
-  // Non-subscribers can only buy exclusive leads — use exclusive price for capacity
-  const effectiveLeadPriceCents = isPro ? sharedPriceCents : exclusivePriceCents;
+  const effectiveLeadPriceCents = isPro
+    ? sharedPriceCents
+    : exclusivePriceCents;
   const leadsCanAfford = Math.floor(balanceNum / effectiveLeadPriceCents);
-  const isWalletLow = balanceNum <= effectiveLeadPriceCents * 2 && balanceNum >= effectiveLeadPriceCents;
+  const isWalletLow =
+    balanceNum <= effectiveLeadPriceCents * 2 &&
+    balanceNum >= effectiveLeadPriceCents;
   const isDeliveryPaused = balanceNum < effectiveLeadPriceCents;
 
-  /** Server sets this only after "Save this card for auto-reload" on a completed top-up */
   const autoReloadOptIn = Boolean(wallet?.auto_reload_opt_in);
   const hasSavedCard = Boolean(wallet?.stripe_payment_method_id);
 
@@ -359,7 +385,6 @@ export default function WalletPage() {
 
   const totalIn = txTotals ? centsToNumber(txTotals.total_credits_cents) : 0;
   const totalOut = txTotals ? centsToNumber(txTotals.total_debits_cents) : 0;
-  const lifetimeTxCount = txTotals?.transaction_count ?? 0;
 
   const sparkValues = useMemo(
     () => sparklineFromTransactions(txs, balanceCents),
@@ -382,12 +407,18 @@ export default function WalletPage() {
     }
     if (wallet.auto_reload_threshold_cents != null) {
       setReloadThreshold(
-        Math.max(50, Math.round(centsToNumber(wallet.auto_reload_threshold_cents) / 100)),
+        Math.max(
+          50,
+          Math.round(centsToNumber(wallet.auto_reload_threshold_cents) / 100),
+        ),
       );
     }
     if (wallet.auto_reload_amount_cents != null) {
       setReloadAmount(
-        Math.max(100, Math.round(centsToNumber(wallet.auto_reload_amount_cents) / 100)),
+        Math.max(
+          100,
+          Math.round(centsToNumber(wallet.auto_reload_amount_cents) / 100),
+        ),
       );
     }
   }, [wallet]);
@@ -407,9 +438,15 @@ export default function WalletPage() {
     onSuccess: async () => {
       setAutoReloadSaveError(null);
       await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
-      await queryClient.invalidateQueries({ queryKey: ["wallet", "transactions"] });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.transactionTotals });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.dashboard.summary,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["wallet", "transactions"],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.wallet.transactionTotals,
+      });
     },
     onError: (e: unknown) => {
       setAutoReloadSaveError(
@@ -442,10 +479,18 @@ export default function WalletPage() {
     });
 
     await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.me });
-    await queryClient.invalidateQueries({ queryKey: ["wallet", "transactions"] });
-    await queryClient.invalidateQueries({ queryKey: queryKeys.wallet.transactionTotals });
-    await queryClient.invalidateQueries({ queryKey: queryKeys.stripe.paymentMethodPreview });
-    await queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
+    await queryClient.invalidateQueries({
+      queryKey: ["wallet", "transactions"],
+    });
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.wallet.transactionTotals,
+    });
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.stripe.paymentMethodPreview,
+    });
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.dashboard.summary,
+    });
 
     setSuccess(true);
     setSelectedAmount(null);
@@ -455,75 +500,44 @@ export default function WalletPage() {
 
   return (
     <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;700;800&family=DM+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+        
         .wl-root {
           min-height: 100vh;
           background: #080a0f;
           color: #fff;
-          font-family: 'DM Sans', sans-serif;
+          font-family: 'Inter', sans-serif;
           display: flex;
           flex-direction: column;
         }
 
-        /* ── NAV ── */
-        .topnav {
-          height: 64px;
-          border-bottom: 1px solid rgba(255,255,255,0.055);
+        /* ── PAGE HEADER ── */
+        .page-header {
+          max-width: 1280px;
+          width: 100%;
+          margin: 0 auto;
+          padding: 40px 24px 0;
           display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 28px;
-          position: sticky; top: 0; z-index: 50;
-          background: rgba(8,10,15,0.96);
-          backdrop-filter: blur(16px);
+          flex-direction: column;
+          gap: 6px;
         }
-
-        .nav-left { display: flex; align-items: center; gap: 28px; }
-
-        .brand {
-          display: flex; align-items: center; gap: 10px; text-decoration: none;
+        .page-header h1 {
+          font-family: 'Manrope', sans-serif;
+          font-size: 32px;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+          margin: 0;
+          background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
-
-        .brand-icon {
-          width: 30px; height: 30px;
-          background: linear-gradient(135deg, #6366f1, #10b981);
-          border-radius: 7px;
-          display: flex; align-items: center; justify-content: center;
-        }
-
-        .brand-name { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: #fff; }
-
-        .nav-links { display: flex; gap: 2px; }
-
-        .nav-link {
-          padding: 7px 13px; border-radius: 8px;
-          font-size: 13px; color: rgba(255,255,255,0.42);
-          cursor: pointer; transition: all 0.15s; text-decoration: none;
-        }
-
-        .nav-link:hover { color: rgba(255,255,255,0.8); background: rgba(255,255,255,0.05); }
-        .nav-link.active { color: #fff; background: rgba(255,255,255,0.08); }
-
-        .nav-right { display: flex; align-items: center; gap: 14px; }
-
-        .wallet-pill {
-          display: flex; align-items: center; gap: 7px;
-          background: rgba(16,185,129,0.09);
-          border: 1px solid rgba(16,185,129,0.2);
-          border-radius: 100px;
-          padding: 6px 14px;
-          font-size: 13px; color: #6ee7b7; font-weight: 500; text-decoration: none;
-        }
-
-        .avatar {
-          width: 34px; height: 34px;
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
-          border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 12px; font-weight: 700; cursor: pointer;
+        .page-header p {
+          color: rgba(255, 255, 255, 0.5);
+          font-size: 14px;
+          font-weight: 500;
         }
 
         /* ── LAYOUT ── */
@@ -534,612 +548,345 @@ export default function WalletPage() {
           max-width: 1280px;
           width: 100%;
           margin: 0 auto;
-          padding: 32px 24px 48px;
-          gap: 24px;
+          padding: 32px 24px 64px;
+          gap: 28px;
           align-items: start;
         }
 
-        .wl-left {
-          grid-area: main;
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-        }
-        .wl-right {
-          grid-area: side;
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-          position: sticky;
-          top: 88px;
-          align-self: start;
-        }
-
-        .save-card-row {
-          position: relative;
-          display: flex;
-          align-items: flex-start;
-          gap: 14px;
-          padding: 14px 16px;
-          border-radius: 14px;
-          border: 1px solid rgba(255,255,255,0.1);
-          background: linear-gradient(145deg, rgba(99,102,241,0.06), rgba(255,255,255,0.02));
-          cursor: pointer;
-          transition: border-color 0.2s, background 0.2s;
-          margin-bottom: 14px;
-        }
-        .save-card-row:hover {
-          border-color: rgba(99,102,241,0.35);
-          background: rgba(99,102,241,0.08);
-        }
-        .save-card-row input {
-          position: absolute;
-          opacity: 0;
-          width: 0;
-          height: 0;
-        }
-        .save-card-check {
-          flex-shrink: 0;
-          width: 24px;
-          height: 24px;
-          border-radius: 7px;
-          border: 2px solid rgba(255,255,255,0.28);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-top: 1px;
-          transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
-        }
-        .save-card-row:has(:checked) .save-card-check {
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
-          border-color: rgba(255,255,255,0.15);
-          box-shadow: 0 4px 14px rgba(99,102,241,0.35);
-        }
-        .save-card-copy {
-          flex: 1;
-          min-width: 0;
-        }
-        .save-card-title {
-          font-size: 14px;
-          font-weight: 600;
-          color: rgba(255,255,255,0.92);
-          letter-spacing: -0.2px;
-        }
-        .save-card-desc {
-          font-size: 12px;
-          color: rgba(255,255,255,0.38);
-          margin-top: 4px;
-          line-height: 1.45;
-        }
-
-        .pm-card {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          padding: 18px 18px;
-          border-radius: 16px;
-          border: 1px solid rgba(255,255,255,0.1);
-          background: linear-gradient(135deg, rgba(15,23,42,0.9), rgba(30,27,75,0.35));
-          box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-        }
-        .pm-card-icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 12px;
-          background: rgba(99,102,241,0.15);
-          border: 1px solid rgba(99,102,241,0.25);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #a5b4fc;
-        }
-        .pm-card-lines {
-          flex: 1;
-          min-width: 0;
-        }
-        .pm-card-brand {
-          font-family: 'Syne', sans-serif;
-          font-size: 15px;
-          font-weight: 700;
-          color: #fff;
-          letter-spacing: -0.3px;
-        }
-        .pm-card-number {
-          font-family: 'DM Mono', monospace;
-          font-size: 14px;
-          color: rgba(255,255,255,0.75);
-          margin-top: 6px;
-          letter-spacing: 0.08em;
-        }
-        .pm-card-exp {
-          font-size: 11px;
-          color: rgba(255,255,255,0.35);
-          margin-top: 6px;
-          text-transform: uppercase;
-          letter-spacing: 0.8px;
-        }
-
-        .tx-pager {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          margin-top: 16px;
-          padding-top: 16px;
-          border-top: 1px solid rgba(255,255,255,0.06);
-        }
-        .tx-pager-info {
-          font-size: 12px;
-          color: rgba(255,255,255,0.38);
-        }
-        .tx-pager-btns {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .tx-pager-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 8px 14px;
-          border-radius: 10px;
-          font-size: 12px;
-          font-weight: 600;
-          font-family: 'DM Sans', sans-serif;
-          border: 1px solid rgba(255,255,255,0.1);
-          background: rgba(255,255,255,0.04);
-          color: rgba(255,255,255,0.85);
-          cursor: pointer;
-          transition: all 0.15s;
-        }
-        .tx-pager-btn:hover:not(:disabled) {
-          background: rgba(99,102,241,0.15);
-          border-color: rgba(99,102,241,0.35);
-          color: #fff;
-        }
-        .tx-pager-btn:disabled {
-          opacity: 0.35;
-          cursor: not-allowed;
-        }
+        .wl-left { grid-area: main; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+        .wl-right { grid-area: side; display: flex; flex-direction: column; gap: 24px; position: sticky; top: 32px; min-width: 0; }
 
         /* ── BALANCE HERO ── */
         .balance-hero {
-          background: linear-gradient(135deg, rgba(99,102,241,0.15) 0%, rgba(16,185,129,0.08) 100%);
-          border: 1px solid rgba(99,102,241,0.2);
-          border-radius: 22px;
-          padding: 32px;
+          background: linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(16,185,129,0.05) 100%), rgba(255,255,255,0.02);
+          border: 1px solid rgba(99,102,241,0.25);
+          border-radius: 24px;
+          padding: 36px;
           position: relative;
           overflow: hidden;
-          animation: fadeUp 0.4s ease both;
+          box-shadow: 0 16px 40px -10px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
 
         @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(14px); }
+          from { opacity: 0; transform: translateY(16px); }
           to   { opacity: 1; transform: translateY(0); }
         }
 
         .balance-hero::before {
-          content: '';
-          position: absolute;
-          top: -60px; right: -60px;
-          width: 200px; height: 200px;
-          background: radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%);
-          border-radius: 50%;
+          content: ''; position: absolute; top: -80px; right: -80px;
+          width: 250px; height: 250px;
+          background: radial-gradient(circle, rgba(99,102,241,0.25) 0%, transparent 70%);
+          border-radius: 50%; filter: blur(20px);
         }
 
         .balance-hero::after {
-          content: '';
-          position: absolute;
-          bottom: -40px; left: -40px;
-          width: 160px; height: 160px;
+          content: ''; position: absolute; bottom: -60px; left: -60px;
+          width: 200px; height: 200px;
           background: radial-gradient(circle, rgba(16,185,129,0.15) 0%, transparent 70%);
-          border-radius: 50%;
+          border-radius: 50%; filter: blur(20px);
         }
 
         .hero-inner { position: relative; z-index: 1; }
 
-        .hero-top {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: 24px;
-        }
+        .hero-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; }
 
         .balance-label {
-          font-size: 12px;
-          color: rgba(255,255,255,0.45);
-          text-transform: uppercase;
-          letter-spacing: 0.8px;
-          margin-bottom: 10px;
+          font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.5);
+          text-transform: ; letter-spacing: 0.08em; margin-bottom: 8px;
         }
 
         .balance-amount {
-          font-family: 'Syne', sans-serif;
-          font-size: 56px;
-          font-weight: 800;
-          letter-spacing: -3px;
-          color: #fff;
-          line-height: 1;
+          font-family: 'Syne', sans-serif; font-size: 64px; font-weight: 800;
+          letter-spacing: -0.04em; color: #fff; line-height: 1;
         }
 
-        .balance-currency { font-size: 28px; color: rgba(255,255,255,0.5); letter-spacing: -1px; margin-right: 4px; }
+        .balance-currency { font-size: 32px; color: rgba(255,255,255,0.4); margin-right: 4px; vertical-align: text-top; }
+        .balance-cents { font-size: 32px; color: rgba(255,255,255,0.4); }
 
-        .balance-cents { font-size: 28px; color: rgba(255,255,255,0.4); }
-
-        .sparkline-wrap { margin-top: 8px; }
+        .sparkline-wrap { margin-top: 12px; opacity: 0.8; }
 
         .hero-stats {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 20px 32px;
-          margin-top: 24px;
-          padding-top: 24px;
+          display: flex; flex-wrap: wrap; gap: 24px 40px;
+          margin-top: 28px; padding-top: 28px;
           border-top: 1px solid rgba(255,255,255,0.08);
         }
 
-        .hero-stat {
-          min-width: 120px;
-        }
-        .hero-stat-val { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 700; color: #fff; }
-        .hero-stat-label { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .hero-stat { min-width: 120px; }
+        .hero-stat-val { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 700; color: #fff; letter-spacing: -0.02em; }
+        .hero-stat-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4); margin-top: 4px; text-transform: ; letter-spacing: 0.04em; }
 
         .hero-badge {
           display: flex; align-items: center; gap: 6px;
-          background: rgba(16,185,129,0.1);
-          border: 1px solid rgba(16,185,129,0.2);
-          border-radius: 100px;
-          padding: 6px 14px;
-          font-size: 12px; font-weight: 500; color: #6ee7b7;
-          white-space: nowrap;
+          background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25);
+          border-radius: 100px; padding: 6px 14px;
+          font-size: 12px; font-weight: 600; color: #6ee7b7; white-space: nowrap;
+          box-shadow: 0 0 12px rgba(16,185,129,0.15);
         }
 
         /* ── CARD ── */
         .card {
-          background: rgba(255,255,255,0.028);
-          border: 1px solid rgba(255,255,255,0.065);
-          border-radius: 18px;
-          padding: 24px;
-          animation: fadeUp 0.4s ease both;
+          background: rgba(255,255,255,0.02);
+          border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 20px; padding: 24px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.02);
+          animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
 
-        .card-header {
-          display: flex; justify-content: space-between; align-items: center;
-          gap: 12px;
-          flex-wrap: wrap;
-          margin-bottom: 20px;
+        .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+        .card-title { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.02em; }
+        .card-sub { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.4); margin-top: 4px; }
+
+        /* ── WARNING BANNERS ── */
+        .warning-banner {
+          padding: 16px 20px;
+          border-radius: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          border: 1px solid;
         }
-
-        .card-title {
-          font-family: 'Syne', sans-serif;
-          font-size: 15px; font-weight: 700;
-          color: #fff; letter-spacing: -0.3px;
+        .warning-banner-content {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          flex: 1;
+          min-width: 0;
         }
-
-        .card-sub { font-size: 12px; color: rgba(255,255,255,0.3); margin-top: 3px; }
-
-        /* ── FILTERS ── */
-        .filter-tabs {
-          display: flex; gap: 6px;
-          flex-wrap: wrap;
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.07);
+        .warning-banner-text {
+          flex: 1;
+          min-width: 0;
+        }
+        .warning-btn {
+          padding: 10px 18px;
           border-radius: 10px;
-          padding: 4px;
-        }
-
-        .filter-tab {
-          padding: 6px 14px;
-          border-radius: 7px;
-          font-size: 12px;
-          color: rgba(255,255,255,0.4);
+          border: none;
+          font-size: 13px;
+          font-weight: 700;
           cursor: pointer;
-          transition: all 0.15s;
-          border: none; background: none;
-          font-family: 'DM Sans', sans-serif;
-        }
-
-        .filter-tab.active {
-          background: rgba(255,255,255,0.08);
-          color: #fff;
-          font-weight: 500;
-        }
-
-        /* ── TX LIST ── */
-        .tx-list { display: flex; flex-direction: column; }
-
-        .tx-date-group { margin-bottom: 4px; }
-
-        .tx-date-label {
-          font-size: 11px;
-          color: rgba(255,255,255,0.25);
-          text-transform: uppercase;
-          letter-spacing: 0.6px;
-          padding: 12px 0 6px;
-          font-weight: 500;
-        }
-
-        .tx-item {
-          display: flex; align-items: center; gap: 14px;
-          padding: 13px 0;
-          border-bottom: 1px solid rgba(255,255,255,0.04);
-          transition: background 0.15s;
-          border-radius: 8px;
-          cursor: pointer;
-        }
-
-        .tx-item:hover { background: rgba(255,255,255,0.025); padding-left: 8px; padding-right: 8px; }
-        .tx-item:last-child { border-bottom: none; }
-
-        .tx-icon {
-          width: 38px; height: 38px;
-          border-radius: 10px;
-          display: flex; align-items: center; justify-content: center;
+          white-space: nowrap;
           flex-shrink: 0;
-          color: rgba(255,255,255,0.75);
-        }
-        .tx-icon svg { flex-shrink: 0; }
-
-        .tx-icon.credit { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.15); }
-        .tx-icon.debit  { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); }
-
-        .tx-info { flex: 1; min-width: 0; }
-
-        .tx-desc {
-          font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.85);
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
 
-        .tx-meta {
-          display: flex; gap: 10px; margin-top: 3px;
-        }
-
-        .tx-type-badge {
-          font-size: 10px;
-          padding: 2px 7px; border-radius: 4px;
-          font-weight: 500;
-        }
-
-        .tx-time { font-size: 11px; color: rgba(255,255,255,0.25); }
-
-        .tx-amount {
-          font-family: 'DM Mono', monospace;
-          font-size: 14px; font-weight: 500;
-          text-align: right; flex-shrink: 0;
-        }
-
-        .tx-amount.credit { color: #6ee7b7; }
-        .tx-amount.debit  { color: rgba(255,255,255,0.65); }
-
-        .tx-balance-after {
-          font-size: 11px; color: rgba(255,255,255,0.25);
-          font-family: 'DM Mono', monospace;
-          margin-top: 2px; text-align: right;
-        }
-
-        /* ── TOP-UP PANEL ── */
-        .topup-amounts {
-          display: grid; grid-template-columns: repeat(3, 1fr);
-          gap: 8px; margin-bottom: 16px;
-        }
-
-        .amount-btn {
-          padding: 12px 8px;
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius: 11px;
-          font-size: 15px; font-weight: 600;
-          color: rgba(255,255,255,0.65);
-          cursor: pointer; transition: all 0.15s;
-          font-family: 'Syne', sans-serif;
-          text-align: center;
-        }
-
-        .amount-btn:hover { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.3); color: #a5b4fc; }
-        .amount-btn.selected { background: rgba(99,102,241,0.15); border-color: #6366f1; color: #a5b4fc; }
-
+        /* ── STRIPE & INPUTS ── */
+        .stripe-input-wrapper,
         .custom-input-wrap {
           position: relative;
-          margin-bottom: 14px;
-          border-radius: 11px;
-          background: rgba(255,255,255,0.04);
+          background: rgba(255,255,255,0.03);
           border: 1px solid rgba(255,255,255,0.08);
-          overflow: hidden;
+          border-radius: 12px;
+          padding: 14px 16px;
+          transition: all 0.2s ease;
+        }
+        
+        .custom-input-wrap { padding: 0; display: flex; align-items: center; margin-bottom: 16px; overflow: hidden; }
+        
+        .stripe-input-wrapper:focus-within,
+        .custom-input-wrap:focus-within {
+          border-color: rgba(99,102,241,0.45);
+          box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+          background: rgba(99,102,241,0.04);
         }
 
         .custom-input-prefix {
-          position: absolute; left: 14px; top: 50%;
-          transform: translateY(-50%);
-          font-size: 16px; color: rgba(255,255,255,0.4);
-          font-family: 'Syne', sans-serif; font-weight: 700;
+          padding-left: 16px; font-size: 15px; color: rgba(255,255,255,0.4); font-weight: 600; font-family: 'DM Mono', monospace;
         }
 
         .custom-input {
-          width: 100%;
-          box-sizing: border-box;
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 11px;
-          padding: 13px 16px 13px 32px;
-          font-size: 16px; font-weight: 600;
-          color: #fff; outline: none;
-          font-family: 'DM Mono', monospace;
-          transition: border-color 0.2s;
-          overflow: hidden;
-          -moz-appearance: textfield;
-          appearance: textfield;
+          flex: 1; background: transparent; border: none; padding: 14px 16px 14px 8px; min-width: 0;
+          font-size: 15px; font-weight: 500; color: #fff; outline: none; font-family: 'DM Mono', monospace;
+          -moz-appearance: textfield; appearance: textfield;
         }
+        .custom-input::-webkit-outer-spin-button, .custom-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .custom-input::placeholder { color: rgba(255,255,255,0.3); font-family: 'Inter', sans-serif; font-weight: 400; }
 
-        .custom-input::-webkit-outer-spin-button,
-        .custom-input::-webkit-inner-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
+        .topup-amounts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+
+        .amount-btn {
+          padding: 12px 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+          border-radius: 10px; font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.6);
+          cursor: pointer; transition: all 0.15s ease; font-family: 'DM Mono', monospace; text-align: center;
         }
-
-        .custom-input:focus { border-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.04); }
-        .custom-input::placeholder { color: rgba(255,255,255,0.15); font-weight: 400; }
-
-        .topup-summary {
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 11px;
-          padding: 14px 16px;
-          margin-bottom: 14px;
-          display: flex; flex-direction: column; gap: 8px;
-        }
-
-        .summary-row {
-          display: flex; justify-content: space-between; align-items: center;
-          font-size: 13px;
-        }
-
-        .summary-label { color: rgba(255,255,255,0.4); }
-        .summary-val { color: #fff; font-weight: 500; }
-        .summary-val.highlight { color: #6ee7b7; font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; }
+        .amount-btn:hover { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.3); color: #a5b4fc; }
+        .amount-btn.selected { background: rgba(99,102,241,0.15); border-color: #6366f1; color: #c4b5fd; box-shadow: 0 0 12px rgba(99,102,241,0.25); }
 
         .topup-btn {
-          width: 100%;
-          padding: 14px;
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
-          border: none; border-radius: 12px;
-          font-size: 15px; font-weight: 700;
-          color: #fff; cursor: pointer;
-          font-family: 'Syne', sans-serif;
-          transition: opacity 0.15s, transform 0.15s;
-          display: flex; align-items: center; justify-content: center; gap: 8px;
+          width: 100%; padding: 14px; background: linear-gradient(135deg, #6366f1, #8b5cf6);
+          border: none; border-radius: 12px; font-size: 14px; font-weight: 700; color: #fff;
+          cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 8px;
+          box-shadow: 0 4px 16px rgba(99,102,241,0.25);
         }
+        .topup-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.35); }
+        .topup-btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; filter: grayscale(50%); }
 
-        .topup-btn:hover { opacity: 0.9; transform: translateY(-1px); }
-        .topup-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
-
-        .success-banner {
-          background: rgba(16,185,129,0.1);
-          border: 1px solid rgba(16,185,129,0.25);
-          border-radius: 10px;
-          padding: 12px 16px;
-          font-size: 13px; font-weight: 500; color: #6ee7b7;
-          display: flex; align-items: center; gap: 8px;
-          animation: fadeUp 0.3s ease;
-          margin-bottom: 14px;
+        .save-card-row {
+          display: flex; align-items: flex-start; gap: 14px; padding: 14px 16px;
+          border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);
+          background: rgba(255,255,255,0.02); cursor: pointer; transition: all 0.2s; margin-bottom: 16px;
         }
-
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .spinner {
-          width: 16px; height: 16px;
-          border: 2px solid rgba(255,255,255,0.3);
-          border-top-color: white;
-          border-radius: 50%;
-          animation: spin 0.7s linear infinite;
+        .save-card-row:hover { border-color: rgba(99,102,241,0.3); background: rgba(99,102,241,0.05); }
+        .save-card-row input { position: absolute; opacity: 0; width: 0; height: 0; }
+        
+        .save-card-check {
+          flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px;
+          border: 2px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center;
+          margin-top: 2px; transition: all 0.2s;
         }
+        .save-card-row:has(:checked) .save-card-check { background: #6366f1; border-color: #6366f1; box-shadow: 0 0 12px rgba(99,102,241,0.4); }
+        .save-card-copy { flex: 1; min-width: 0; }
+        .save-card-title { font-size: 13px; font-weight: 600; color: #fff; }
+        .save-card-desc { font-size: 12px; color: rgba(255,255,255,0.4); margin-top: 4px; line-height: 1.4; }
 
-        /* ── AUTO-RELOAD ── */
-        .autoreload-card {
-          background: rgba(255,255,255,0.028);
-          border: 1px solid rgba(255,255,255,0.065);
-          border-radius: 18px;
-          padding: 22px;
-          animation: fadeUp 0.4s ease both;
-          animation-delay: 0.08s;
-        }
+        /* ── RANGE SLIDERS ── */
+        .range-field { margin-bottom: 16px; }
+        .range-label-row { display: flex; justify-content: space-between; font-size: 12px; font-weight: 500; margin-bottom: 10px; }
+        .range-label-row span:first-child { color: rgba(255,255,255,0.5); }
+        .range-label-row span:last-child { color: #fff; font-weight: 700; font-family: 'DM Mono', monospace; font-size: 13px; }
 
-        .reload-toggle-row {
-          display: flex; align-items: center; justify-content: space-between;
-          margin-bottom: 16px;
-        }
+        input[type=range] { width: 100%; -webkit-appearance: none; background: transparent; margin: 8px 0; outline: none; }
+        input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #818cf8; cursor: pointer; margin-top: -7px; box-shadow: 0 0 10px rgba(129,140,248,0.4); border: 2px solid #fff; transition: transform 0.1s; }
+        input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.1); }
+        input[type=range]::-moz-range-track { width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 3px; }
+        input[type=range]::-moz-range-thumb { height: 20px; width: 20px; border-radius: 50%; background: #818cf8; cursor: pointer; border: 2px solid #fff; box-shadow: 0 0 10px rgba(129,140,248,0.4); }
 
-        .reload-title-group {}
-        .reload-title { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: #fff; }
-        .reload-sub { font-size: 12px; color: rgba(255,255,255,0.35); margin-top: 3px; }
-
-        .toggle {
-          width: 44px; height: 24px;
-          background: rgba(255,255,255,0.1);
-          border-radius: 12px;
-          position: relative; cursor: pointer;
-          transition: background 0.2s;
-          border: none; outline: none; flex-shrink: 0;
-        }
+        /* ── TOGGLE ── */
+        .toggle { width: 44px; height: 24px; background: rgba(255,255,255,0.1); border-radius: 12px; position: relative; cursor: pointer; transition: background 0.25s ease; border: none; outline: none; flex-shrink: 0; box-shadow: inset 0 1px 3px rgba(0,0,0,0.2); }
         .toggle.on { background: #6366f1; }
-        .toggle-thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+        .toggle-thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: #fff; border-radius: 50%; transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
         .toggle.on .toggle-thumb { transform: translateX(20px); }
 
-        .reload-settings {
-          display: flex; flex-direction: column; gap: 14px;
-          border-top: 1px solid rgba(255,255,255,0.06);
-          padding-top: 16px;
-        }
+        /* ── TX LIST ── */
+        .filter-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 4px; }
+        .filter-tab { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.4); cursor: pointer; transition: all 0.2s; border: none; background: transparent; font-family: 'Inter', sans-serif; }
+        .filter-tab:hover { color: rgba(255,255,255,0.8); }
+        .filter-tab.active { background: rgba(255,255,255,0.1); color: #fff; font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 
-        .range-field {}
-        .range-label-row {
-          display: flex; justify-content: space-between;
-          font-size: 13px; margin-bottom: 8px;
-        }
-        .range-label-row span:first-child { color: rgba(255,255,255,0.5); }
-        .range-label-row span:last-child { color: #fff; font-weight: 600; font-family: 'Syne', sans-serif; }
+        .tx-list { display: flex; flex-direction: column; margin-top: 8px; }
+        .tx-item { display: flex; align-items: center; gap: 16px; padding: 16px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); transition: all 0.2s ease; border-radius: 12px; }
+        .tx-item:hover { background: rgba(255,255,255,0.02); padding-left: 16px; padding-right: 8px; border-bottom-color: transparent; }
+        .tx-item:last-child { border-bottom: none; }
 
-        input[type=range] {
-          width: 100%; -webkit-appearance: none;
-          height: 4px; background: rgba(255,255,255,0.1);
-          border-radius: 2px; outline: none;
-        }
-        input[type=range]::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          width: 16px; height: 16px; border-radius: 50%;
-          background: #6366f1; cursor: pointer;
-        }
+        .tx-icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .tx-icon.credit { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.15); color: #34d399; }
+        .tx-icon.debit  { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: rgba(255,255,255,0.6); }
 
-        .reload-summary {
-          background: rgba(99,102,241,0.06);
-          border: 1px solid rgba(99,102,241,0.15);
-          border-radius: 10px;
-          padding: 12px 14px;
-          font-size: 12px; color: rgba(255,255,255,0.5); line-height: 1.6;
-        }
+        .tx-info { flex: 1; min-width: 0; }
+        .tx-desc { font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
+        .tx-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+        .tx-type-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.02em; text-transform: ; white-space: nowrap; }
+        .tx-time { font-size: 12px; color: rgba(255,255,255,0.35); white-space: nowrap; }
 
-        .reload-summary strong { color: #a5b4fc; font-weight: 500; }
+        .tx-amount-group { text-align: right; flex-shrink: 0; }
+        .tx-amount { font-family: 'DM Mono', monospace; font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+        .tx-amount.credit { color: #34d399; }
+        .tx-amount.debit  { color: rgba(255,255,255,0.7); }
+        .tx-balance-after { font-size: 11px; color: rgba(255,255,255,0.35); font-family: 'DM Mono', monospace; }
 
-        .save-reload-btn {
-          width: 100%; padding: 11px;
-          background: rgba(99,102,241,0.15);
-          border: 1px solid rgba(99,102,241,0.25);
-          border-radius: 10px;
-          color: #a5b4fc; font-size: 13px; font-weight: 600;
-          cursor: pointer; font-family: 'Syne', sans-serif;
-          transition: all 0.15s;
-        }
-        .save-reload-btn:hover { background: rgba(99,102,241,0.25); color: #fff; }
-        /* ── EMPTY STATE ── */
-        .empty-tx {
-          text-align: center; padding: 40px 20px;
-          color: rgba(255,255,255,0.25);
-        }
+        /* ── PM CARD ── */
+        .pm-card { display: flex; align-items: center; gap: 16px; padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.02); }
+        .pm-card-icon { width: 48px; height: 48px; border-radius: 12px; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.2); display: flex; align-items: center; justify-content: center; color: #a5b4fc; flex-shrink: 0; }
+        .pm-card-brand { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; color: #fff; letter-spacing: -0.02em; }
+        .pm-card-number { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 500; color: rgba(255,255,255,0.6); margin-top: 4px; letter-spacing: 0.05em; }
+        .pm-card-exp { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.35); margin-top: 6px; text-transform: ; letter-spacing: 0.05em; }
 
+        /* ── UTILS ── */
+        .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.25); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .empty-tx { text-align: center; padding: 48px 20px; color: rgba(255,255,255,0.4); font-size: 14px; font-weight: 500; }
+        
+        .tx-pager { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 24px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.06); }
+        .tx-pager-info { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.4); }
+        .tx-pager-btns { display: flex; gap: 8px; }
+        .tx-pager-btn { display: inline-flex; align-items: center; gap: 4px; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.8); cursor: pointer; transition: all 0.2s ease; }
+        .tx-pager-btn:hover:not(:disabled) { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
+        .tx-pager-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        .topup-summary { background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); border-radius: 12px; padding: 16px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
+        .summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+        .summary-label { color: rgba(255,255,255,0.5); font-weight: 500; }
+        .summary-val { color: #fff; font-family: 'DM Mono', monospace; font-weight: 500; }
+        .summary-val.highlight { color: #a5b4fc; font-size: 15px; font-weight: 600; }
+        
+        .success-banner { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25); border-radius: 12px; padding: 14px 16px; font-size: 13px; font-weight: 500; color: #34d399; display: flex; align-items: center; gap: 10px; margin-bottom: 16px; animation: fadeUp 0.3s ease; }
+
+        /* ── RESPONSIVE ── */
         @media (max-width: 900px) {
-          .wl-body {
-            grid-template-columns: 1fr;
-            grid-template-areas: "side" "main";
-            padding: 20px 16px;
-          }
-          .wl-right {
-            position: static;
-            top: auto;
-          }
-          .hero-stats {
-            gap: 16px;
-          }
-          .topup-amounts { grid-template-columns: repeat(3, 1fr); }
+          .wl-body { grid-template-columns: 1fr; grid-template-areas: "side" "main"; padding: 24px 16px 48px; gap: 24px; }
+          .wl-right { position: static; top: auto; }
         }
-      `}</style>
+
+        @media (max-width: 550px) {
+          .page-header { padding: 24px 16px 0; }
+          .wl-body { padding: 16px 16px 48px; gap: 16px; }
+
+          .balance-hero { padding: 20px; border-radius: 20px; }
+          .hero-top { flex-direction: column; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+          .balance-amount { font-size: 38px; }
+          .balance-currency, .balance-cents { font-size: 20px; }
+          .hero-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 20px; margin-top: 20px; }
+          .hero-stat { min-width: 0; }
+
+          .card { padding: 16px; border-radius: 16px; }
+          .card-header { flex-direction: column; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+          
+          .filter-tabs { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+          .filter-tab { width: 100%; text-align: center; padding: 8px 4px; font-size: 11px; display: flex; justify-content: center; }
+
+          .tx-item { padding: 12px 0; gap: 12px; }
+          .tx-icon { width: 36px; height: 36px; border-radius: 10px; }
+          .tx-desc { font-size: 13px; }
+          .tx-amount { font-size: 14px; }
+
+          .topup-amounts { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+          .amount-btn { padding: 10px 4px; font-size: 13px; }
+
+          .pm-card { flex-direction: column; align-items: flex-start; padding: 16px; gap: 12px; }
+
+          .save-card-row { flex-direction: column; align-items: flex-start; gap: 12px; padding: 14px; }
+          .save-card-copy { width: 100%; }
+
+          .warning-banner { flex-direction: column; align-items: flex-start; padding: 16px; gap: 16px; }
+          .warning-btn { width: 100%; }
+        }
+      `,
+        }}
+      />
 
       <div className="wl-root">
-        {/* ── NAV ── */}
-        {/* <Navbar /> */}
-
         {loading ? (
-          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: "50vh", color: "rgba(255,255,255,0.45)" }}>
-            Loading wallet…
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "50vh",
+              color: "rgba(255,255,255,0.45)",
+            }}
+          >
+            <div className="spinner" style={{ marginRight: 12 }} /> Loading
+            wallet…
           </div>
         ) : loadError ? (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, minHeight: "50vh", padding: 24, color: "#fca5a5", fontSize: 14 }}>
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 16,
+              minHeight: "50vh",
+              padding: 24,
+              color: "#fca5a5",
+              fontSize: 14,
+            }}
+          >
             <span>{loadError}</span>
             <button
               type="button"
@@ -1154,484 +901,741 @@ export default function WalletPage() {
                 borderRadius: 10,
                 color: "#a5b4fc",
                 cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
+                fontWeight: 600,
               }}
             >
               Retry
             </button>
           </div>
         ) : (
-        <div className="wl-body">
-          {/* ── LEFT ── */}
-          <div className="wl-left">
-            {/* Balance hero */}
-            <div className="balance-hero">
-              <div className="hero-inner">
-                <div className="hero-top">
-                  <div>
-                    <div className="balance-label">Available balance</div>
-                    <div className="balance-amount">
-                      <span className="balance-currency">$</span>
-                      {Math.floor(balanceNum / 100).toLocaleString()}
-                      <span className="balance-cents">.{String(balanceNum % 100).padStart(2, "0")}</span>
-                    </div>
-                    <div className="sparkline-wrap">
-                      <Sparkline values={sparkValues} color="rgba(99,102,241,0.6)" />
-                    </div>
-                  </div>
-                  <div className="hero-badge">
-                    <CheckCircle2 size={12} strokeWidth={2} aria-hidden />
-                    {wallet?.auto_reload_enabled ? "Auto-reload on" : "Auto-reload off"}
-                  </div>
-                </div>
-                <div className="hero-stats">
-                  <div className="hero-stat">
-                    <div className="hero-stat-val" style={{ color: "#6ee7b7" }}>+${(totalIn / 100).toLocaleString()}</div>
-                    <div className="hero-stat-label">Total funded</div>
-                  </div>
-                  <div className="hero-stat">
-                    <div className="hero-stat-val" style={{ color: "rgba(255,255,255,0.7)" }}>${(totalOut / 100).toLocaleString()}</div>
-                    <div className="hero-stat-label">Total spent</div>
-                  </div>
-                  <div className="hero-stat">
-                    <div className="hero-stat-val" style={{ color: isDeliveryPaused ? "#ef4444" : isWalletLow ? "#f59e0b" : undefined }}>
-                      {leadsCanAfford}
-                    </div>
-                    <div className="hero-stat-label">Leads you can afford</div>
-                  </div>
-                  <div className="hero-stat">
-                    <div className="hero-stat-val">${(effectiveLeadPriceCents / 100).toFixed(0)}</div>
-                    <div className="hero-stat-label">{isPro ? "Shared lead price" : "Exclusive lead price"}</div>
-                  </div>
-                  <div className="hero-stat">
-                    <div className="hero-stat-val">
-                      {wallet?.auto_reload_threshold_cents != null
-                        ? `$${(centsToNumber(wallet.auto_reload_threshold_cents) / 100).toFixed(0)}`
-                        : "—"}
-                    </div>
-                    <div className="hero-stat-label">Reload threshold</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Low wallet warning banner */}
-            {isDeliveryPaused && (
-              <div style={{
-                padding: "14px 18px", borderRadius: 12,
-                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
-                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>🚫</span>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5" }}>Lead delivery paused</div>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>
-                      Your balance is below the ${(effectiveLeadPriceCents / 100).toFixed(0)} {isPro ? "shared" : "exclusive"} lead price. Add funds to restart delivery.
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="btn-add-funds"
-                  onClick={() => setSelectedAmount(100)}
-                  style={{ padding: "8px 16px", borderRadius: 8, background: "#ef4444", color: "#fff", border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  Add Funds
-                </button>
-              </div>
-            )}
-            {isWalletLow && !isDeliveryPaused && (
-              <div style={{
-                padding: "14px 18px", borderRadius: 12,
-                background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)",
-                display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>⚠️</span>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#fde68a" }}>Wallet running low</div>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>
-                      You can afford about {leadsCanAfford} more {leadsCanAfford === 1 ? "lead" : "leads"}. Add funds to avoid delivery pausing.
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedAmount(100)}
-                  style={{ padding: "8px 16px", borderRadius: 8, background: "#f59e0b", color: "#000", border: "none", fontSize: 13, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  Add Funds
-                </button>
-              </div>
-            )}
-
-            {/* Cancelled subscription — exclusive-only notice */}
-            {subscription?.status === "cancelled" && balanceNum > 0 && (
-              <div style={{
-                padding: "14px 18px", borderRadius: 12,
-                background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.28)",
-                display: "flex", alignItems: "flex-start", gap: 12,
-              }}>
-                <span style={{ fontSize: 20, flexShrink: 0 }}>💡</span>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#a5b4fc", marginBottom: 4 }}>
-                    Your wallet balance is still usable
-                  </div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.55 }}>
-                    Your Pro subscription has expired, but your remaining ${(balanceNum / 100).toFixed(2)} can still be used
-                    to purchase <strong style={{ color: "#fff" }}>exclusive leads</strong> from the marketplace.
-                    Shared (non-exclusive) lead purchases require an active subscription.
-                    <a href="/subscriptions" style={{ color: "#a5b4fc", marginLeft: 6, textDecoration: "underline" }}>
-                      Reactivate to unlock shared leads →
-                    </a>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Transaction history */}
-            <div className="card">
-              <div className="card-header">
-                <div>
-                  <div className="card-title">Transaction history</div>
-                  <div className="card-sub">
-                    {txTotalCount} total
-                    {txTotalCount > 0
-                      ? ` · rows ${txRangeLabel}`
-                      : ""}
-                  </div>
-                </div>
-                <div className="filter-tabs">
-                  {(["all", "credit", "debit"] as const).map((f) => (
-                    <button
-                      key={f}
-                      type="button"
-                      className={`filter-tab ${filter === f ? "active" : ""}`}
-                      onClick={() => setFilter(f)}
-                    >
-                      {f === "all" ? "All" : f === "credit" ? "Credits" : "Debits"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="tx-list">
-                {txs.length === 0 ? (
-                  <div className="empty-tx">No transactions found.</div>
-                ) : (
-                  txs.map((tx) => (
-                    <div key={tx.id} className="tx-item">
-                      <div className={`tx-icon ${tx.type}`}>
-                        <RefTypeIcon referenceType={tx.reference_type} />
-                      </div>
-                      <div className="tx-info">
-                        <div className="tx-desc">{tx.description}</div>
-                        <div className="tx-meta">
-                          <span
-                            className="tx-type-badge"
-                            style={{
-                              background: tx.type === "credit" ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.05)",
-                              color: tx.type === "credit" ? "#6ee7b7" : "rgba(255,255,255,0.4)",
-                            }}
-                          >
-                            {refLabel(tx.reference_type)}
-                          </span>
-                          <span className="tx-time">{timeAgo(tx.created_at)}</span>
-                        </div>
-                      </div>
-                      <div>
-                        <div className={`tx-amount ${tx.type}`}>
-                          {tx.type === "credit" ? "+" : "−"}${(centsToNumber(tx.amount_cents) / 100).toFixed(2)}
-                        </div>
-                        <div className="tx-balance-after">
-                          bal. ${(centsToNumber(tx.balance_after_cents) / 100).toFixed(0)}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-              {txTotalCount > 0 ? (
-                <div className="tx-pager">
-                  <span className="tx-pager-info">
-                    Page {txPage} of {txTotalPages}
-                  </span>
-                  <div className="tx-pager-btns">
-                    <button
-                      type="button"
-                      className="tx-pager-btn"
-                      disabled={txPage <= 1}
-                      onClick={() => setTxPage((p) => Math.max(1, p - 1))}
-                    >
-                      <ChevronLeft size={16} strokeWidth={2} aria-hidden />
-                      Prev
-                    </button>
-                    <button
-                      type="button"
-                      className="tx-pager-btn"
-                      disabled={txPage >= txTotalPages}
-                      onClick={() => setTxPage((p) => Math.min(txTotalPages, p + 1))}
-                    >
-                      Next
-                      <ChevronRight size={16} strokeWidth={2} aria-hidden />
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {/* ── RIGHT ── */}
-          <div className="wl-right">
-            {/* Add funds */}
-            <div className="card">
-              <div className="card-header">
-                <div>
-                  <div className="card-title">Add funds</div>
-                  <div className="card-sub">Stripe card payment</div>
-                </div>
-                <Landmark size={20} strokeWidth={1.5} style={{ color: "rgba(255,255,255,0.22)" }} aria-hidden />
-              </div>
-
-              {topupError && (
-                <div className="success-banner" style={{ background: "rgba(239,68,68,0.12)", borderColor: "rgba(239,68,68,0.35)", color: "#fca5a5" }}>
-                  {topupError}
-                </div>
-              )}
-              {success && (
-                <div className="success-banner">
-                  <Check size={16} strokeWidth={2.5} aria-hidden />
-                  Wallet funded successfully!
-                </div>
-              )}
-
-              <div className="topup-amounts">
-                {TOP_UP_AMOUNTS.map((a) => (
-                  <button
-                    key={a}
-                    className={`amount-btn ${selectedAmount === a ? "selected" : ""}`}
-                    onClick={() => { setSelectedAmount(a); setCustomAmount(""); }}
-                  >
-                    ${a}
-                  </button>
-                ))}
-              </div>
-
-              <div className="custom-input-wrap">
-                <span className="custom-input-prefix">$</span>
-                <input
-                  className="custom-input"
-                  type="number"
-                  placeholder="Custom amount"
-                  value={customAmount}
-                  min={10}
-                  onChange={(e) => { setCustomAmount(e.target.value); setSelectedAmount(null); }}
-                />
-              </div>
-
-              <label className="save-card-row">
-                <input
-                  type="checkbox"
-                  checked={saveCardForAutoReload}
-                  onChange={(e) => setSaveCardForAutoReload(e.target.checked)}
-                  aria-label="Save this card for auto-reload"
-                />
-                <span className="save-card-check" aria-hidden>
-                  {saveCardForAutoReload ? (
-                    <Check size={14} strokeWidth={3} color="#ffffff" />
-                  ) : null}
-                </span>
-                <div className="save-card-copy">
-                  <div className="save-card-title">Save card for auto-reload</div>
-                  <div className="save-card-desc">
-                    Securely stores this card with Stripe for instant refills and automatic wallet top-ups.
-                  </div>
-                </div>
-              </label>
-
-              <Elements stripe={stripePromise}>
-                <WalletTopupForm
-                  finalAmount={finalAmount}
-                  saveCardForAutoReload={saveCardForAutoReload}
-                  onSuccess={handleTopupSuccess}
-                  onError={setTopupError}
-                />
-              </Elements>
-
-              {finalAmount > 0 && (
-                <div className="topup-summary">
-                  <div className="summary-row">
-                    <span className="summary-label">Amount to add</span>
-                    <span className="summary-val">${finalAmount.toFixed(2)}</span>
-                  </div>
-                  <div className="summary-row">
-                    <span className="summary-label">Current balance</span>
-                    <span className="summary-val">${(balanceNum / 100).toFixed(2)}</span>
-                  </div>
-                  <div className="summary-row" style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8, marginTop: 4 }}>
-                    <span className="summary-label">New balance</span>
-                    <span className="summary-val highlight">${((balanceNum / 100) + finalAmount).toFixed(2)}</span>
-                  </div>
-                </div>
-              )}
-
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.2)", textAlign: "center", marginTop: 12, lineHeight: 1.5 }}>
-                Your card is charged with Stripe; your wallet updates as soon as payment succeeds (webhooks stay in sync).
+          <>
+            <header className="page-header">
+              <h1>Wallet & Billing</h1>
+              <p>
+                Manage your funds, view transactions, and configure auto-reload.
               </p>
-            </div>
+            </header>
 
-            {/* Auto-reload — unlocks only after saving a card via the top-up checkbox */}
-            <div className="autoreload-card">
-              <div className="reload-toggle-row">
-                <div className="reload-title-group">
-                  <div className="reload-title">Auto-reload</div>
-                  <div className="reload-sub">Automatically refill your wallet</div>
+            <div className="wl-body">
+              {/* ── LEFT ── */}
+              <div className="wl-left">
+                {/* Balance hero */}
+                <div className="balance-hero">
+                  <div className="hero-inner">
+                    <div className="hero-top">
+                      <div>
+                        <div className="balance-label">Available balance</div>
+                        <div className="balance-amount">
+                          <span className="balance-currency">$</span>
+                          {Math.floor(balanceNum / 100).toLocaleString()}
+                          <span className="balance-cents">
+                            .{String(balanceNum % 100).padStart(2, "0")}
+                          </span>
+                        </div>
+                        <div className="sparkline-wrap">
+                          <Sparkline
+                            values={sparkValues}
+                            color="rgba(99,102,241,0.6)"
+                          />
+                        </div>
+                      </div>
+                      <div className="hero-badge">
+                        <CheckCircle2 size={14} strokeWidth={2.5} aria-hidden />
+                        {wallet?.auto_reload_enabled
+                          ? "Auto-reload on"
+                          : "Auto-reload off"}
+                      </div>
+                    </div>
+                    <div className="hero-stats">
+                      <div className="hero-stat">
+                        <div
+                          className="hero-stat-val"
+                          style={{ color: "#34d399" }}
+                        >
+                          +${(totalIn / 100).toLocaleString()}
+                        </div>
+                        <div className="hero-stat-label">Total funded</div>
+                      </div>
+                      <div className="hero-stat">
+                        <div
+                          className="hero-stat-val"
+                          style={{ color: "rgba(255,255,255,0.7)" }}
+                        >
+                          ${(totalOut / 100).toLocaleString()}
+                        </div>
+                        <div className="hero-stat-label">Total spent</div>
+                      </div>
+                      <div className="hero-stat">
+                        <div
+                          className="hero-stat-val"
+                          style={{
+                            color: isDeliveryPaused
+                              ? "#ef4444"
+                              : isWalletLow
+                                ? "#f59e0b"
+                                : undefined,
+                          }}
+                        >
+                          {leadsCanAfford}
+                        </div>
+                        <div className="hero-stat-label">
+                          Leads you can afford
+                        </div>
+                      </div>
+                      <div className="hero-stat">
+                        <div className="hero-stat-val">
+                          ${(effectiveLeadPriceCents / 100).toFixed(0)}
+                        </div>
+                        <div className="hero-stat-label">
+                          {isPro ? "Shared lead price" : "Exclusive lead price"}
+                        </div>
+                      </div>
+                      <div className="hero-stat">
+                        <div className="hero-stat-val">
+                          {wallet?.auto_reload_threshold_cents != null
+                            ? `$${(centsToNumber(wallet.auto_reload_threshold_cents) / 100).toFixed(0)}`
+                            : "—"}
+                        </div>
+                        <div className="hero-stat-label">Reload threshold</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                {autoReloadOptIn ? (
-                  <button
-                    type="button"
-                    className={`toggle ${autoReload ? "on" : ""}`}
-                    onClick={() => setAutoReload(!autoReload)}
-                    aria-label={autoReload ? "Turn off auto-reload" : "Turn on auto-reload"}
-                  >
-                    <div className="toggle-thumb" />
-                  </button>
-                ) : (
-                  <span
+
+                {/* Low wallet warning banner */}
+                {isDeliveryPaused && (
+                  <div
+                    className="warning-banner"
                     style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      letterSpacing: "0.04em",
-                      textTransform: "uppercase",
-                      color: "rgba(255,255,255,0.28)",
+                      background: "rgba(239,68,68,0.1)",
+                      borderColor: "rgba(239,68,68,0.25)",
                     }}
                   >
-                    {hasSavedCard
-                      ? "Card saved (unlock with checkbox)"
-                      : "Save card first"}
-                  </span>
+                    <div className="warning-banner-content">
+                      <span style={{ fontSize: 22 }}>🚫</span>
+                      <div className="warning-banner-text">
+                        <div
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 700,
+                            color: "#fca5a5",
+                          }}
+                        >
+                          Lead delivery paused
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "rgba(255,255,255,0.6)",
+                            marginTop: 2,
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          Your balance is below the $
+                          {(effectiveLeadPriceCents / 100).toFixed(0)}{" "}
+                          {isPro ? "shared" : "exclusive"} lead price. Add funds
+                          to restart delivery.
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAmount(100)}
+                      className="warning-btn"
+                      style={{ background: "#ef4444", color: "#fff" }}
+                    >
+                      Add Funds
+                    </button>
+                  </div>
                 )}
+                {isWalletLow && !isDeliveryPaused && (
+                  <div
+                    className="warning-banner"
+                    style={{
+                      background: "rgba(245,158,11,0.1)",
+                      borderColor: "rgba(245,158,11,0.25)",
+                    }}
+                  >
+                    <div className="warning-banner-content">
+                      <span style={{ fontSize: 22 }}>⚠️</span>
+                      <div className="warning-banner-text">
+                        <div
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 700,
+                            color: "#fcd34d",
+                          }}
+                        >
+                          Wallet running low
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "rgba(255,255,255,0.6)",
+                            marginTop: 2,
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          You can afford about {leadsCanAfford} more{" "}
+                          {leadsCanAfford === 1 ? "lead" : "leads"}. Add funds
+                          to avoid delivery pausing.
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAmount(100)}
+                      className="warning-btn"
+                      style={{ background: "#f59e0b", color: "#000" }}
+                    >
+                      Add Funds
+                    </button>
+                  </div>
+                )}
+
+                {/* Cancelled subscription — exclusive-only notice */}
+                {subscription?.status === "cancelled" && balanceNum > 0 && (
+                  <div
+                    className="warning-banner"
+                    style={{
+                      background: "rgba(99,102,241,0.08)",
+                      borderColor: "rgba(99,102,241,0.25)",
+                    }}
+                  >
+                    <div className="warning-banner-content">
+                      <span style={{ fontSize: 22 }}>💡</span>
+                      <div className="warning-banner-text">
+                        <div
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 700,
+                            color: "#a5b4fc",
+                            marginBottom: 4,
+                          }}
+                        >
+                          Your wallet balance is still usable
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "rgba(255,255,255,0.6)",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          Your Pro subscription has expired, but your remaining
+                          ${(balanceNum / 100).toFixed(2)} can still be used to
+                          purchase{" "}
+                          <strong style={{ color: "#fff" }}>
+                            exclusive leads
+                          </strong>{" "}
+                          from the marketplace. Shared (non-exclusive) lead
+                          purchases require an active subscription.
+                          <a
+                            href="/subscriptions"
+                            style={{
+                              color: "#a5b4fc",
+                              marginLeft: 6,
+                              textDecoration: "underline",
+                            }}
+                          >
+                            Reactivate to unlock shared leads →
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Transaction history */}
+                <div className="card">
+                  <div className="card-header">
+                    <div>
+                      <div className="card-title">Transaction history</div>
+                      <div className="card-sub">
+                        {txTotalCount} total{" "}
+                        {txTotalCount > 0 ? ` · rows ${txRangeLabel}` : ""}
+                      </div>
+                    </div>
+                    <div className="filter-tabs">
+                      {(["all", "credit", "debit"] as const).map((f) => (
+                        <button
+                          key={f}
+                          type="button"
+                          className={`filter-tab ${filter === f ? "active" : ""}`}
+                          onClick={() => setFilter(f)}
+                        >
+                          {f === "all"
+                            ? "All"
+                            : f === "credit"
+                              ? "Credits"
+                              : "Debits"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="tx-list">
+                    {txs.length === 0 ? (
+                      <div className="empty-tx">
+                        No transactions found matching this filter.
+                      </div>
+                    ) : (
+                      txs.map((tx) => (
+                        <div key={tx.id} className="tx-item">
+                          <div className={`tx-icon ${tx.type}`}>
+                            <RefTypeIcon referenceType={tx.reference_type} />
+                          </div>
+                          <div className="tx-info">
+                            <div className="tx-desc">{tx.description}</div>
+                            <div className="tx-meta">
+                              <span
+                                className="tx-type-badge"
+                                style={{
+                                  background:
+                                    tx.type === "credit"
+                                      ? "rgba(16,185,129,0.1)"
+                                      : "rgba(255,255,255,0.06)",
+                                  color:
+                                    tx.type === "credit"
+                                      ? "#34d399"
+                                      : "rgba(255,255,255,0.5)",
+                                }}
+                              >
+                                {refLabel(tx.reference_type)}
+                              </span>
+                              <span className="tx-time">
+                                {timeAgo(tx.created_at)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="tx-amount-group">
+                            <div className={`tx-amount ${tx.type}`}>
+                              {tx.type === "credit" ? "+" : "−"}$
+                              {(centsToNumber(tx.amount_cents) / 100).toFixed(
+                                2,
+                              )}
+                            </div>
+                            <div className="tx-balance-after">
+                              bal. $
+                              {(
+                                centsToNumber(tx.balance_after_cents) / 100
+                              ).toFixed(0)}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {txTotalCount > 0 ? (
+                    <div className="tx-pager">
+                      <span className="tx-pager-info">
+                        Page {txPage} of {txTotalPages}
+                      </span>
+                      <div className="tx-pager-btns">
+                        <button
+                          type="button"
+                          className="tx-pager-btn"
+                          disabled={txPage <= 1}
+                          onClick={() => setTxPage((p) => Math.max(1, p - 1))}
+                        >
+                          <ChevronLeft size={16} strokeWidth={2} aria-hidden />
+                          Prev
+                        </button>
+                        <button
+                          type="button"
+                          className="tx-pager-btn"
+                          disabled={txPage >= txTotalPages}
+                          onClick={() =>
+                            setTxPage((p) => Math.min(txTotalPages, p + 1))
+                          }
+                        >
+                          Next
+                          <ChevronRight size={16} strokeWidth={2} aria-hidden />
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
-              {!autoReloadOptIn ? (
-                <p
-                  style={{
-                    fontSize: 12,
-                    color: "rgba(255,255,255,0.48)",
-                    lineHeight: 1.6,
-                    marginTop: 4,
-                  }}
-                >
-                  {hasSavedCard ? (
-                    <>
-                      Your card is saved, but auto-reload unlocks only after you
-                      complete a wallet top-up and check{" "}
-                      <strong style={{ color: "rgba(255,255,255,0.78)" }}>
-                        Save this card for auto-reload
-                      </strong>
-                      .
-                    </>
-                  ) : (
-                    <>
-                      To use auto-reload, add funds above and check{" "}
-                      <strong style={{ color: "rgba(255,255,255,0.78)" }}>
-                        Save this card for auto-reload
-                      </strong>{" "}
-                      before completing payment. That stores your card for automatic refills and unlocks these settings.
-                    </>
-                  )}
-                </p>
-              ) : null}
+              {/* ── RIGHT ── */}
+              <div className="wl-right">
+                {/* Add funds */}
+                <div className="card">
+                  <div className="card-header">
+                    <div>
+                      <div className="card-title">Add funds</div>
+                      <div className="card-sub">Stripe card payment</div>
+                    </div>
+                    <Landmark
+                      size={22}
+                      strokeWidth={1.5}
+                      style={{ color: "rgba(255,255,255,0.2)" }}
+                      aria-hidden
+                    />
+                  </div>
 
-              {autoReloadOptIn && autoReload && (
-                <div className="reload-settings">
-                  <div className="range-field">
-                    <div className="range-label-row">
-                      <span>Reload when balance drops below</span>
-                      <span>${reloadThreshold}</span>
+                  {topupError && (
+                    <div
+                      className="success-banner"
+                      style={{
+                        background: "rgba(239,68,68,0.1)",
+                        borderColor: "rgba(239,68,68,0.3)",
+                        color: "#fca5a5",
+                      }}
+                    >
+                      {topupError}
                     </div>
+                  )}
+                  {success && (
+                    <div className="success-banner">
+                      <Check size={18} strokeWidth={2.5} aria-hidden />
+                      Wallet funded successfully!
+                    </div>
+                  )}
+
+                  <div className="topup-amounts">
+                    {TOP_UP_AMOUNTS.map((a) => (
+                      <button
+                        key={a}
+                        className={`amount-btn ${selectedAmount === a ? "selected" : ""}`}
+                        onClick={() => {
+                          setSelectedAmount(a);
+                          setCustomAmount("");
+                        }}
+                      >
+                        ${a}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="custom-input-wrap">
+                    <span className="custom-input-prefix">$</span>
                     <input
-                      type="range" min={50} max={500} step={50}
-                      value={reloadThreshold}
-                      onChange={(e) => setReloadThreshold(+e.target.value)}
+                      className="custom-input"
+                      type="number"
+                      placeholder="Custom amount"
+                      value={customAmount}
+                      min={10}
+                      onChange={(e) => {
+                        setCustomAmount(e.target.value);
+                        setSelectedAmount(null);
+                      }}
                     />
                   </div>
-                  <div className="range-field">
-                    <div className="range-label-row">
-                      <span>Auto-reload amount</span>
-                      <span>${reloadAmount}</span>
-                    </div>
+
+                  <label className="save-card-row">
                     <input
-                      type="range" min={100} max={2000} step={100}
-                      value={reloadAmount}
-                      onChange={(e) => setReloadAmount(+e.target.value)}
+                      type="checkbox"
+                      checked={saveCardForAutoReload}
+                      onChange={(e) =>
+                        setSaveCardForAutoReload(e.target.checked)
+                      }
+                      aria-label="Save this card for auto-reload"
                     />
-                  </div>
-                  <div className="reload-summary">
-                    When your balance falls below <strong>${reloadThreshold}</strong>, we'll automatically charge your saved card and add <strong>${reloadAmount}</strong> to your wallet.
-                  </div>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
-                    The server checks every few minutes when your balance is low.
+                    <span className="save-card-check" aria-hidden>
+                      {saveCardForAutoReload ? (
+                        <Check size={14} strokeWidth={3} color="#ffffff" />
+                      ) : null}
+                    </span>
+                    <div className="save-card-copy">
+                      <div className="save-card-title">
+                        Save card for auto-reload
+                      </div>
+                      <div className="save-card-desc">
+                        Securely stores this card with Stripe for instant
+                        refills and automatic wallet top-ups.
+                      </div>
+                    </div>
+                  </label>
+
+                  <Elements stripe={stripePromise}>
+                    <WalletTopupForm
+                      finalAmount={finalAmount}
+                      saveCardForAutoReload={saveCardForAutoReload}
+                      onSuccess={handleTopupSuccess}
+                      onError={setTopupError}
+                    />
+                  </Elements>
+
+                  {finalAmount > 0 && (
+                    <div className="topup-summary">
+                      <div className="summary-row">
+                        <span className="summary-label">Amount to add</span>
+                        <span className="summary-val">
+                          ${finalAmount.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="summary-label">Current balance</span>
+                        <span className="summary-val">
+                          ${(balanceNum / 100).toFixed(2)}
+                        </span>
+                      </div>
+                      <div
+                        className="summary-row"
+                        style={{
+                          borderTop: "1px solid rgba(255,255,255,0.06)",
+                          paddingTop: 10,
+                          marginTop: 4,
+                        }}
+                      >
+                        <span className="summary-label">New balance</span>
+                        <span className="summary-val highlight">
+                          ${(balanceNum / 100 + finalAmount).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "rgba(255,255,255,0.3)",
+                      textAlign: "center",
+                      marginTop: 16,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Your card is charged securely with Stripe.
                   </p>
-                  {autoReloadSaveError ? (
-                    <p style={{ fontSize: 12, color: "#fca5a5", marginBottom: 8, lineHeight: 1.45 }}>
-                      {autoReloadSaveError}
+                </div>
+
+                {/* Auto-reload */}
+                <div className="card" style={{ animationDelay: "0.1s" }}>
+                  <div className="card-header" style={{ marginBottom: 16 }}>
+                    <div>
+                      <div className="card-title">Auto-reload</div>
+                      <div className="card-sub">
+                        Automatically refill your wallet
+                      </div>
+                    </div>
+                    {autoReloadOptIn ? (
+                      <button
+                        type="button"
+                        className={`toggle ${autoReload ? "on" : ""}`}
+                        onClick={() => setAutoReload(!autoReload)}
+                        aria-label={
+                          autoReload
+                            ? "Turn off auto-reload"
+                            : "Turn on auto-reload"
+                        }
+                      >
+                        <div className="toggle-thumb" />
+                      </button>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          letterSpacing: "0.04em",
+                          textTransform: "",
+                          color: "rgba(255,255,255,0.3)",
+                        }}
+                      >
+                        {hasSavedCard ? "Locked" : "Save card first"}
+                      </span>
+                    )}
+                  </div>
+
+                  {!autoReloadOptIn ? (
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "rgba(255,255,255,0.5)",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {hasSavedCard ? (
+                        <>
+                          Your card is saved, but auto-reload unlocks only after
+                          you complete a wallet top-up and check{" "}
+                          <strong style={{ color: "#fff" }}>
+                            Save this card for auto-reload
+                          </strong>
+                          .
+                        </>
+                      ) : (
+                        <>
+                          To use auto-reload, add funds above and check{" "}
+                          <strong style={{ color: "#fff" }}>
+                            Save this card for auto-reload
+                          </strong>{" "}
+                          before completing payment.
+                        </>
+                      )}
                     </p>
                   ) : null}
-                  <button
-                    type="button"
-                    className="save-reload-btn"
-                    disabled={autoReloadMutation.isPending}
-                    onClick={() => void handleSaveAutoReload()}
-                  >
-                    {autoReloadMutation.isPending ? "Saving…" : "Save auto-reload settings"}
-                  </button>
-                </div>
-              )}
-            </div>
 
-            <div className="card" style={{ animationDelay: "0.12s" }}>
-              <div className="card-header">
-                <div className="card-title">Payment method</div>
-              </div>
-              {wallet?.stripe_payment_method_id ? (
-                pmPreviewLoading ? (
-                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", padding: "10px 0" }}>
-                    Loading card…
-                  </div>
-                ) : pmPreview?.paymentMethod ? (
-                  <div className="pm-card">
-                    <div className="pm-card-icon">
-                      <CreditCard size={22} strokeWidth={1.75} aria-hidden />
+                  {autoReloadOptIn && autoReload && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 16,
+                        borderTop: "1px solid rgba(255,255,255,0.08)",
+                        paddingTop: 20,
+                      }}
+                    >
+                      <div className="range-field">
+                        <div className="range-label-row">
+                          <span>Reload when balance drops below</span>
+                          <span>${reloadThreshold}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={50}
+                          max={500}
+                          step={50}
+                          value={reloadThreshold}
+                          onChange={(e) => setReloadThreshold(+e.target.value)}
+                        />
+                      </div>
+                      <div className="range-field">
+                        <div className="range-label-row">
+                          <span>Auto-reload amount</span>
+                          <span>${reloadAmount}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={100}
+                          max={2000}
+                          step={100}
+                          value={reloadAmount}
+                          onChange={(e) => setReloadAmount(+e.target.value)}
+                        />
+                      </div>
+
+                      <div
+                        style={{
+                          background: "rgba(99,102,241,0.08)",
+                          border: "1px solid rgba(99,102,241,0.2)",
+                          borderRadius: 12,
+                          padding: "14px 16px",
+                          fontSize: 13,
+                          color: "rgba(255,255,255,0.6)",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        When your balance falls below{" "}
+                        <strong style={{ color: "#a5b4fc" }}>
+                          ${reloadThreshold}
+                        </strong>
+                        , we'll automatically charge your saved card and add{" "}
+                        <strong style={{ color: "#a5b4fc" }}>
+                          ${reloadAmount}
+                        </strong>{" "}
+                        to your wallet.
+                      </div>
+
+                      {autoReloadSaveError && (
+                        <p style={{ fontSize: 13, color: "#fca5a5" }}>
+                          {autoReloadSaveError}
+                        </p>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={autoReloadMutation.isPending}
+                        onClick={() => void handleSaveAutoReload()}
+                        style={{
+                          width: "100%",
+                          padding: "12px",
+                          background: "rgba(99,102,241,0.15)",
+                          border: "1px solid rgba(99,102,241,0.3)",
+                          borderRadius: 10,
+                          color: "#a5b4fc",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          transition: "all 0.2s",
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.background =
+                            "rgba(99,102,241,0.25)";
+                          e.currentTarget.style.color = "#fff";
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.background =
+                            "rgba(99,102,241,0.15)";
+                          e.currentTarget.style.color = "#a5b4fc";
+                        }}
+                      >
+                        {autoReloadMutation.isPending
+                          ? "Saving…"
+                          : "Save auto-reload settings"}
+                      </button>
                     </div>
-                    <div className="pm-card-lines">
-                      <div className="pm-card-brand">
-                        {formatCardBrand(pmPreview.paymentMethod.brand)}
-                      </div>
-                      <div className="pm-card-number">
-                        •••• •••• •••• {pmPreview.paymentMethod.last4}
-                      </div>
-                      <div className="pm-card-exp">
-                        Expires{" "}
-                        {String(pmPreview.paymentMethod.exp_month).padStart(2, "0")}/
-                        {String(pmPreview.paymentMethod.exp_year).slice(-2)}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.42)", padding: "8px 0", lineHeight: 1.5 }}>
-                    Card on file — masked details unavailable right now. Saved payments still work.
-                  </div>
-                )
-              ) : (
-                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", padding: "8px 0", lineHeight: 1.5 }}>
-                  No card on file. Add funds and enable “Save card for auto-reload” to store a card.
+                  )}
                 </div>
-              )}
+
+                {/* Payment method */}
+                <div className="card" style={{ animationDelay: "0.2s" }}>
+                  <div className="card-header">
+                    <div className="card-title">Payment method</div>
+                  </div>
+                  {wallet?.stripe_payment_method_id ? (
+                    pmPreviewLoading ? (
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: "rgba(255,255,255,0.4)",
+                          padding: "10px 0",
+                        }}
+                      >
+                        Loading card…
+                      </div>
+                    ) : pmPreview?.paymentMethod ? (
+                      <div className="pm-card">
+                        <div className="pm-card-icon">
+                          <CreditCard size={24} strokeWidth={1.5} aria-hidden />
+                        </div>
+                        <div>
+                          <div className="pm-card-brand">
+                            {formatCardBrand(pmPreview.paymentMethod.brand)}
+                          </div>
+                          <div className="pm-card-number">
+                            •••• •••• •••• {pmPreview.paymentMethod.last4}
+                          </div>
+                          <div className="pm-card-exp">
+                            Expires{" "}
+                            {String(pmPreview.paymentMethod.exp_month).padStart(
+                              2,
+                              "0",
+                            )}
+                            /
+                            {String(pmPreview.paymentMethod.exp_year).slice(-2)}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: "rgba(255,255,255,0.5)",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        Card on file — masked details unavailable right now.
+                        Saved payments still work.
+                      </div>
+                    )
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "rgba(255,255,255,0.5)",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      No card on file. Add funds and enable “Save card for
+                      auto-reload” to store a card.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
         )}
       </div>
     </>

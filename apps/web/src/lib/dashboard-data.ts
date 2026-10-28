@@ -1,5 +1,8 @@
 import { getAuthMe } from "@/lib/auth-api";
-import { getOnboardingMe, type OnboardingProgressDto } from "@/lib/onboarding-api";
+import {
+  getOnboardingMe,
+  type OnboardingProgressDto,
+} from "@/lib/onboarding-api";
 import {
   centsToNumber,
   getWalletMe,
@@ -8,7 +11,10 @@ import {
   type WalletTransactionDto,
 } from "@/lib/wallet-api";
 import { getMyLeads, type MyLeadsResponse } from "@/lib/leads-api";
-import { getMySubscription, type SubscriptionDto } from "@/lib/subscriptions-api";
+import {
+  getMySubscription,
+  type SubscriptionDto,
+} from "@/lib/subscriptions-api";
 
 export type DashboardSummary = {
   me: Awaited<ReturnType<typeof getAuthMe>>;
@@ -20,17 +26,18 @@ export type DashboardSummary = {
 };
 
 export async function fetchDashboardSummary(): Promise<DashboardSummary> {
-  const [me, wallet, onboarding, txs, subscription, recentLeads] = await Promise.all([
-    getAuthMe(),
-    getWalletMe(),
-    getOnboardingMe().catch(() => null),
-    getWalletTransactions({ limit: 100, offset: 0 }).then((r) => r.items),
-    getMySubscription().catch(() => null),
-    getMyLeads({ page: 1, limit: 8 }).catch(() => ({
-      items: [],
-      pagination: { page: 1, limit: 8, total: 0 },
-    })),
-  ]);
+  const [me, wallet, onboarding, txs, subscription, recentLeads] =
+    await Promise.all([
+      getAuthMe(),
+      getWalletMe(),
+      getOnboardingMe().catch(() => null),
+      getWalletTransactions({ limit: 100, offset: 0 }).then((r) => r.items),
+      getMySubscription().catch(() => null),
+      getMyLeads({ page: 1, limit: 8 }).catch(() => ({
+        items: [],
+        pagination: { page: 1, limit: 8, total: 0 },
+      })),
+    ]);
   return { me, wallet, onboarding, txs, subscription, recentLeads };
 }
 
@@ -39,15 +46,21 @@ function startOfMonth(d: Date): Date {
 }
 
 /** Sum debit amounts in current calendar month (dollars as number, from cents). */
-export function debitSpendThisMonthDollars(txs: WalletTransactionDto[]): number {
+export function debitSpendThisMonthDollars(
+  txs: WalletTransactionDto[],
+): number {
   const start = startOfMonth(new Date()).getTime();
   return txs
-    .filter((t) => t.type === "debit" && new Date(t.created_at).getTime() >= start)
+    .filter(
+      (t) => t.type === "debit" && new Date(t.created_at).getTime() >= start,
+    )
     .reduce((s, t) => s + Math.abs(centsToNumber(t.amount_cents)) / 100, 0);
 }
 
 /** Count lead_purchase debits in current calendar month. */
-export function leadPurchaseCountThisMonth(txs: WalletTransactionDto[]): number {
+export function leadPurchaseCountThisMonth(
+  txs: WalletTransactionDto[],
+): number {
   const start = startOfMonth(new Date()).getTime();
   return txs.filter(
     (t) =>
@@ -62,7 +75,11 @@ export function weeklyTxCounts(txs: WalletTransactionDto[]): number[] {
   const counts = Array.from({ length: 7 }, () => 0);
   const now = new Date();
   for (let i = 0; i < 7; i++) {
-    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (6 - i));
+    const day = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - (6 - i),
+    );
     const ds = new Date(day);
     ds.setHours(0, 0, 0, 0);
     const de = new Date(day);
@@ -94,7 +111,11 @@ export function last7DayLabels(): string[] {
   const labels: string[] = [];
   const now = new Date();
   for (let i = 0; i < 7; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (6 - i));
+    const d = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - (6 - i),
+    );
     labels.push(d.toLocaleDateString("en-US", { weekday: "short" }));
   }
   return labels;
@@ -115,7 +136,8 @@ export function activityFromTransactions(txs: WalletTransactionDto[]): Array<{
   time: string;
 }> {
   const sorted = [...txs].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    (a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
   const iconFor = (t: WalletTransactionDto): ActivityFeedIconKind => {
     if (t.type === "credit") {

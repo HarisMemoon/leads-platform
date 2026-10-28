@@ -1,7 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
-import { createQueryBuilderMock, createRepositoryMock } from '../../test/helpers/testing';
+import {
+  createQueryBuilderMock,
+  createRepositoryMock,
+} from '../../test/helpers/testing';
 import { PurchaseType } from '../../common/enums/purchase-type.enum';
 import { PingService } from './ping.service';
+import { LeadDedupService } from '../leads/lead-dedup.service';
 
 describe('PingService', () => {
   function makeService() {
@@ -14,12 +18,21 @@ describe('PingService', () => {
     const hitRepo = createRepositoryMock<any>();
     const matcher = { match: jest.fn() };
     const leadsService = { buyLead: jest.fn() };
-    const leadPricingService = { applyTierToLead: jest.fn(async (lead) => lead) };
-    const outboundPingService = { pingAll: jest.fn().mockResolvedValue({ sold: false, attempts: 0 }) };
-    const leadPricingConfigService = {
-      getPricesForLead: jest.fn().mockResolvedValue({ exclusive: '15000', shared: '2500' }),
+    const leadPricingService = {
+      applyTierToLead: jest.fn(async (lead) => lead),
     };
-    const distributionService = { enqueueLeadDistribution: jest.fn().mockResolvedValue(undefined) };
+    const outboundPingService = {
+      pingAll: jest.fn().mockResolvedValue({ sold: false, attempts: 0 }),
+    };
+    const leadPricingConfigService = {
+      getPricesForLead: jest
+        .fn()
+        .mockResolvedValue({ exclusive: '15000', shared: '2500' }),
+    };
+    const distributionService = {
+      enqueueLeadDistribution: jest.fn().mockResolvedValue(undefined),
+    };
+    const leadDedupService = new LeadDedupService(leadRepo as any);
     const service = new PingService(
       vendorRepo as any,
       pricingRuleRepo as any,
@@ -35,6 +48,7 @@ describe('PingService', () => {
       outboundPingService as any,
       leadPricingConfigService as any,
       distributionService as any,
+      leadDedupService,
     );
 
     vendorRepo.findOne.mockResolvedValue({
@@ -46,16 +60,28 @@ describe('PingService', () => {
       ping_ttl_seconds: 900,
     });
     pingRepo.create.mockImplementation((value) => value);
-    pingRepo.save.mockImplementation(async (value) => ({ ...value, id: value.id ?? 'ping-1' }));
+    pingRepo.save.mockImplementation(async (value) => ({
+      ...value,
+      id: value.id ?? 'ping-1',
+    }));
     postRepo.create.mockImplementation((value) => value);
-    postRepo.save.mockImplementation(async (value) => ({ ...value, id: value.id ?? 'post-1' }));
+    postRepo.save.mockImplementation(async (value) => ({
+      ...value,
+      id: value.id ?? 'post-1',
+    }));
     leadRepo.create.mockImplementation((value) => value);
-    leadRepo.save.mockImplementation(async (value) => ({ ...value, id: value.id ?? 'lead-1' }));
+    leadRepo.save.mockImplementation(async (value) => ({
+      ...value,
+      id: value.id ?? 'lead-1',
+    }));
     leadRepo.createQueryBuilder.mockReturnValue(
       createQueryBuilderMock({ getOne: jest.fn().mockResolvedValue(null) }),
     );
     hitRepo.create.mockImplementation((value) => value);
-    hitRepo.save.mockImplementation(async (value) => ({ ...value, id: value.id ?? 'hit-1' }));
+    hitRepo.save.mockImplementation(async (value) => ({
+      ...value,
+      id: value.id ?? 'hit-1',
+    }));
 
     return {
       service,
@@ -73,7 +99,9 @@ describe('PingService', () => {
   it('rejects pings that match an existing duplicate lead', async () => {
     const { service, leadRepo } = makeService();
     leadRepo.createQueryBuilder.mockReturnValue(
-      createQueryBuilderMock({ getOne: jest.fn().mockResolvedValue({ id: 'existing-lead' }) }),
+      createQueryBuilderMock({
+        getOne: jest.fn().mockResolvedValue({ id: 'existing-lead' }),
+      }),
     );
 
     await expect(

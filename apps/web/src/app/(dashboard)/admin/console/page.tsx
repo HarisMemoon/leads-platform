@@ -243,7 +243,7 @@ export default function AdminConsolePage() {
                 marginBottom: 6,
                 fontWeight: 700,
                 letterSpacing: "0.1em",
-                textTransform: "uppercase",
+                textTransform: "",
               }}
             >
               Admin Console
@@ -328,7 +328,7 @@ export default function AdminConsolePage() {
                         fontWeight: 700,
                         letterSpacing: "0.08em",
                         color: "rgba(255,255,255,0.3)",
-                        textTransform: "uppercase",
+                        textTransform: "",
                         whiteSpace: "nowrap",
                       }}
                     >

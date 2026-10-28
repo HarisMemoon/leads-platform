@@ -27,6 +27,10 @@ export default function MarketingNavbar() {
   return (
     <>
       <style>{`
+      .gpu-layer {
+  transform: translateZ(0);
+  will-change: transform;
+}
         .nav-float-wrap {
           position: sticky;
           top: 0;
@@ -44,11 +48,11 @@ export default function MarketingNavbar() {
           border-radius: 18px;
           border: 1px solid rgba(255, 255, 255, 0.09);
           background: linear-gradient(165deg, rgba(22, 24, 35, 0.88) 0%, rgba(10, 12, 18, 0.92) 100%);
-          backdrop-filter: blur(20px) saturate(1.35);
-          -webkit-backdrop-filter: blur(20px) saturate(1.35);
+          
           box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 1px 0 rgba(255, 255, 255, 0.06) inset;
           display: flex;
           flex-direction: column;
+           
           
         }
         .nav-float-shell::before {
@@ -64,6 +68,8 @@ export default function MarketingNavbar() {
           mask-composite: exclude;
           pointer-events: none;
           opacity: 0.65;
+           transform: translateZ(0);
+  will-change: transform;
         }
         .nav-top-bar {
           position: relative;
@@ -146,7 +152,7 @@ export default function MarketingNavbar() {
       `}</style>
 
       <div className="nav-float-wrap" aria-label="Primary navigation">
-        <nav className="nav-float-shell">
+        <nav className="nav-float-shell gpu-layer">
           <div className="nav-top-bar">
             {/* LEFT: Logo & desktop links */}
             <div

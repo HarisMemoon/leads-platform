@@ -28,31 +28,56 @@ const LEAD_TYPES = [
 ];
 
 const US_STATES: { abbr: string; name: string }[] = [
-  { abbr: "AL", name: "Alabama" }, { abbr: "AK", name: "Alaska" },
-  { abbr: "AZ", name: "Arizona" }, { abbr: "AR", name: "Arkansas" },
-  { abbr: "CA", name: "California" }, { abbr: "CO", name: "Colorado" },
-  { abbr: "CT", name: "Connecticut" }, { abbr: "DE", name: "Delaware" },
-  { abbr: "FL", name: "Florida" }, { abbr: "GA", name: "Georgia" },
-  { abbr: "HI", name: "Hawaii" }, { abbr: "ID", name: "Idaho" },
-  { abbr: "IL", name: "Illinois" }, { abbr: "IN", name: "Indiana" },
-  { abbr: "IA", name: "Iowa" }, { abbr: "KS", name: "Kansas" },
-  { abbr: "KY", name: "Kentucky" }, { abbr: "LA", name: "Louisiana" },
-  { abbr: "ME", name: "Maine" }, { abbr: "MD", name: "Maryland" },
-  { abbr: "MA", name: "Massachusetts" }, { abbr: "MI", name: "Michigan" },
-  { abbr: "MN", name: "Minnesota" }, { abbr: "MS", name: "Mississippi" },
-  { abbr: "MO", name: "Missouri" }, { abbr: "MT", name: "Montana" },
-  { abbr: "NE", name: "Nebraska" }, { abbr: "NV", name: "Nevada" },
-  { abbr: "NH", name: "New Hampshire" }, { abbr: "NJ", name: "New Jersey" },
-  { abbr: "NM", name: "New Mexico" }, { abbr: "NY", name: "New York" },
-  { abbr: "NC", name: "North Carolina" }, { abbr: "ND", name: "North Dakota" },
-  { abbr: "OH", name: "Ohio" }, { abbr: "OK", name: "Oklahoma" },
-  { abbr: "OR", name: "Oregon" }, { abbr: "PA", name: "Pennsylvania" },
-  { abbr: "RI", name: "Rhode Island" }, { abbr: "SC", name: "South Carolina" },
-  { abbr: "SD", name: "South Dakota" }, { abbr: "TN", name: "Tennessee" },
-  { abbr: "TX", name: "Texas" }, { abbr: "UT", name: "Utah" },
-  { abbr: "VT", name: "Vermont" }, { abbr: "VA", name: "Virginia" },
-  { abbr: "WA", name: "Washington" }, { abbr: "WV", name: "West Virginia" },
-  { abbr: "WI", name: "Wisconsin" }, { abbr: "WY", name: "Wyoming" },
+  { abbr: "AL", name: "Alabama" },
+  { abbr: "AK", name: "Alaska" },
+  { abbr: "AZ", name: "Arizona" },
+  { abbr: "AR", name: "Arkansas" },
+  { abbr: "CA", name: "California" },
+  { abbr: "CO", name: "Colorado" },
+  { abbr: "CT", name: "Connecticut" },
+  { abbr: "DE", name: "Delaware" },
+  { abbr: "FL", name: "Florida" },
+  { abbr: "GA", name: "Georgia" },
+  { abbr: "HI", name: "Hawaii" },
+  { abbr: "ID", name: "Idaho" },
+  { abbr: "IL", name: "Illinois" },
+  { abbr: "IN", name: "Indiana" },
+  { abbr: "IA", name: "Iowa" },
+  { abbr: "KS", name: "Kansas" },
+  { abbr: "KY", name: "Kentucky" },
+  { abbr: "LA", name: "Louisiana" },
+  { abbr: "ME", name: "Maine" },
+  { abbr: "MD", name: "Maryland" },
+  { abbr: "MA", name: "Massachusetts" },
+  { abbr: "MI", name: "Michigan" },
+  { abbr: "MN", name: "Minnesota" },
+  { abbr: "MS", name: "Mississippi" },
+  { abbr: "MO", name: "Missouri" },
+  { abbr: "MT", name: "Montana" },
+  { abbr: "NE", name: "Nebraska" },
+  { abbr: "NV", name: "Nevada" },
+  { abbr: "NH", name: "New Hampshire" },
+  { abbr: "NJ", name: "New Jersey" },
+  { abbr: "NM", name: "New Mexico" },
+  { abbr: "NY", name: "New York" },
+  { abbr: "NC", name: "North Carolina" },
+  { abbr: "ND", name: "North Dakota" },
+  { abbr: "OH", name: "Ohio" },
+  { abbr: "OK", name: "Oklahoma" },
+  { abbr: "OR", name: "Oregon" },
+  { abbr: "PA", name: "Pennsylvania" },
+  { abbr: "RI", name: "Rhode Island" },
+  { abbr: "SC", name: "South Carolina" },
+  { abbr: "SD", name: "South Dakota" },
+  { abbr: "TN", name: "Tennessee" },
+  { abbr: "TX", name: "Texas" },
+  { abbr: "UT", name: "Utah" },
+  { abbr: "VT", name: "Vermont" },
+  { abbr: "VA", name: "Virginia" },
+  { abbr: "WA", name: "Washington" },
+  { abbr: "WV", name: "West Virginia" },
+  { abbr: "WI", name: "Wisconsin" },
+  { abbr: "WY", name: "Wyoming" },
 ];
 
 const FREQUENCIES: { value: AlertFrequency; label: string; hint: string }[] = [
@@ -74,12 +99,16 @@ function fmtFreq(f: string) {
 
 function fmtLeadTypes(types?: string[]) {
   if (!types?.length) return "Any lead type";
-  return types.map((t) => LEAD_TYPES.find((x) => x.value === t)?.label ?? t).join(", ");
+  return types
+    .map((t) => LEAD_TYPES.find((x) => x.value === t)?.label ?? t)
+    .join(", ");
 }
 
 function fmtStates(states?: string[]) {
   if (!states?.length) return "All states";
-  const names = states.map((a) => US_STATES.find((s) => s.abbr === a)?.name ?? a);
+  const names = states.map(
+    (a) => US_STATES.find((s) => s.abbr === a)?.name ?? a,
+  );
   if (names.length <= 4) return names.join(", ");
   return `${names.slice(0, 3).join(", ")} +${names.length - 3} more`;
 }
@@ -105,7 +134,9 @@ function Chip({
         border: selected
           ? "1px solid rgba(99,102,241,0.6)"
           : "1px solid rgba(255,255,255,0.1)",
-        background: selected ? "rgba(99,102,241,0.18)" : "rgba(255,255,255,0.04)",
+        background: selected
+          ? "rgba(99,102,241,0.18)"
+          : "rgba(255,255,255,0.04)",
         color: selected ? "#a5b4fc" : "rgba(255,255,255,0.55)",
         fontSize: 12,
         fontWeight: selected ? 600 : 400,
@@ -151,7 +182,8 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
   return (
     <div
       style={{
-        background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
+        background:
+          "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 16,
         padding: 24,
@@ -171,7 +203,13 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
       {/* Lead types */}
       <div style={{ marginBottom: 20 }}>
         <div style={labelStyle}>Lead types</div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 10 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: "rgba(255,255,255,0.35)",
+            marginBottom: 10,
+          }}
+        >
           Leave blank to match any type
         </div>
         <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 8 }}>
@@ -189,7 +227,13 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
       {/* States */}
       <div style={{ marginBottom: 20 }}>
         <div style={labelStyle}>States</div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 10 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: "rgba(255,255,255,0.35)",
+            marginBottom: 10,
+          }}
+        >
           Leave blank to match all states
         </div>
         <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 6 }}>
@@ -207,7 +251,14 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
       {/* Frequency */}
       <div style={{ marginBottom: 20 }}>
         <div style={labelStyle}>Frequency</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const, marginTop: 10 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap" as const,
+            marginTop: 10,
+          }}
+        >
           {FREQUENCIES.map((f) => (
             <button
               key={f.value}
@@ -216,12 +267,14 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
               style={{
                 padding: "9px 18px",
                 borderRadius: 10,
-                border: freq === f.value
-                  ? "1px solid rgba(99,102,241,0.6)"
-                  : "1px solid rgba(255,255,255,0.1)",
-                background: freq === f.value
-                  ? "rgba(99,102,241,0.18)"
-                  : "rgba(255,255,255,0.04)",
+                border:
+                  freq === f.value
+                    ? "1px solid rgba(99,102,241,0.6)"
+                    : "1px solid rgba(255,255,255,0.1)",
+                background:
+                  freq === f.value
+                    ? "rgba(99,102,241,0.18)"
+                    : "rgba(255,255,255,0.04)",
                 color: freq === f.value ? "#a5b4fc" : "rgba(255,255,255,0.5)",
                 fontSize: 13,
                 fontWeight: freq === f.value ? 600 : 400,
@@ -230,7 +283,9 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
               }}
             >
               <div>{f.label}</div>
-              <div style={{ fontSize: 10, marginTop: 2, opacity: 0.7 }}>{f.hint}</div>
+              <div style={{ fontSize: 10, marginTop: 2, opacity: 0.7 }}>
+                {f.hint}
+              </div>
             </button>
           ))}
         </div>
@@ -239,7 +294,14 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
       {/* Channels */}
       <div style={{ marginBottom: 24 }}>
         <div style={labelStyle}>Channels</div>
-        <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" as const }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 10,
+            flexWrap: "wrap" as const,
+          }}
+        >
           {[
             { value: "email", label: "Email" },
             { value: "sms", label: "SMS" },
@@ -264,7 +326,9 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
                   border: on
                     ? "1px solid rgba(16,185,129,0.4)"
                     : "1px solid rgba(255,255,255,0.1)",
-                  background: on ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.04)",
+                  background: on
+                    ? "rgba(16,185,129,0.1)"
+                    : "rgba(255,255,255,0.04)",
                   color: on ? "#6ee7b7" : "rgba(255,255,255,0.45)",
                   fontSize: 13,
                   fontWeight: on ? 600 : 400,
@@ -274,7 +338,9 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
               >
                 <span
                   style={{
-                    width: 8, height: 8, borderRadius: "50%",
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
                     background: on ? "#10b981" : "rgba(255,255,255,0.2)",
                     flexShrink: 0,
                   }}
@@ -318,10 +384,20 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
 
 // ── Alert card ────────────────────────────────────────────────────────────────
 
-function AlertCard({ alert, onChange }: { alert: MarketAlertDto; onChange: () => void }) {
-  const del = useMutation({ mutationFn: () => deleteMarketAlert(alert.id), onSuccess: onChange });
+function AlertCard({
+  alert,
+  onChange,
+}: {
+  alert: MarketAlertDto;
+  onChange: () => void;
+}) {
+  const del = useMutation({
+    mutationFn: () => deleteMarketAlert(alert.id),
+    onSuccess: onChange,
+  });
   const toggle = useMutation({
-    mutationFn: () => patchMarketAlert(alert.id, { is_active: !alert.is_active }),
+    mutationFn: () =>
+      patchMarketAlert(alert.id, { is_active: !alert.is_active }),
     onSuccess: onChange,
   });
 
@@ -332,22 +408,43 @@ function AlertCard({ alert, onChange }: { alert: MarketAlertDto; onChange: () =>
   return (
     <div
       style={{
-        background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
+        background:
+          "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
         border: `1px solid ${alert.is_active ? "rgba(99,102,241,0.2)" : "rgba(255,255,255,0.06)"}`,
         borderRadius: 14,
         padding: "18px 20px",
         opacity: alert.is_active ? 1 : 0.6,
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+        }}
+      >
         <div style={{ flex: 1, minWidth: 0 }}>
           {/* Lead types */}
-          <div style={{ fontSize: 14, fontWeight: 600, color: "rgba(255,255,255,0.9)", marginBottom: 6 }}>
+          <div
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.9)",
+              marginBottom: 6,
+            }}
+          >
             {fmtLeadTypes(leadTypes)}
           </div>
 
           {/* States */}
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.45)",
+              marginBottom: 10,
+            }}
+          >
             {fmtStates(states)}
           </div>
 
@@ -355,7 +452,9 @@ function AlertCard({ alert, onChange }: { alert: MarketAlertDto; onChange: () =>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
             <span style={badge("#6366f1")}>{fmtFreq(alert.frequency)}</span>
             {channels.map((ch) => (
-              <span key={ch} style={badge("#10b981")}>{ch}</span>
+              <span key={ch} style={badge("#10b981")}>
+                {ch}
+              </span>
             ))}
             {!alert.is_active && <span style={badge("#64748b")}>paused</span>}
           </div>
@@ -455,7 +554,7 @@ export default function MarketAlertsPage() {
             fontSize: 11,
             fontWeight: 700,
             letterSpacing: "0.14em",
-            textTransform: "uppercase" as const,
+            textTransform: "" as const,
             color: "#a5b4fc",
             marginBottom: 8,
           }}
@@ -473,8 +572,16 @@ export default function MarketAlertsPage() {
         >
           Lead alerts
         </h1>
-        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 14, margin: 0, maxWidth: 520 }}>
-          Get notified when new leads match your criteria. Configure lead types, states, delivery channel, and how often you want updates.
+        <p
+          style={{
+            color: "rgba(255,255,255,0.45)",
+            fontSize: 14,
+            margin: 0,
+            maxWidth: 520,
+          }}
+        >
+          Get notified when new leads match your criteria. Configure lead types,
+          states, delivery channel, and how often you want updates.
         </p>
       </div>
 
@@ -482,7 +589,11 @@ export default function MarketAlertsPage() {
       {alerts.length > 0 && (
         <div style={{ display: "flex", gap: 12, marginBottom: 28 }}>
           {[
-            { label: "Active alerts", value: String(active.length), color: "#6366f1" },
+            {
+              label: "Active alerts",
+              value: String(active.length),
+              color: "#6366f1",
+            },
             { label: "Paused", value: String(paused.length), color: "#64748b" },
           ].map(({ label, value, color }) => (
             <div
@@ -495,8 +606,28 @@ export default function MarketAlertsPage() {
                 minWidth: 100,
               }}
             >
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 4, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase" as const }}>{label}</div>
-              <div style={{ fontFamily: "Manrope, sans-serif", fontSize: 22, fontWeight: 800, color }}>{value}</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "rgba(255,255,255,0.4)",
+                  marginBottom: 4,
+                  fontWeight: 600,
+                  letterSpacing: "0.04em",
+                  textTransform: "" as const,
+                }}
+              >
+                {label}
+              </div>
+              <div
+                style={{
+                  fontFamily: "Manrope, sans-serif",
+                  fontSize: 22,
+                  fontWeight: 800,
+                  color,
+                }}
+              >
+                {value}
+              </div>
             </div>
           ))}
         </div>
@@ -508,7 +639,13 @@ export default function MarketAlertsPage() {
       {/* Alert list */}
       <div style={{ marginTop: 32 }}>
         {isLoading && (
-          <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 14, padding: "24px 0" }}>
+          <div
+            style={{
+              color: "rgba(255,255,255,0.4)",
+              fontSize: 14,
+              padding: "24px 0",
+            }}
+          >
             Loading…
           </div>
         )}
@@ -533,7 +670,13 @@ export default function MarketAlertsPage() {
             {active.length > 0 && (
               <div style={{ marginBottom: 24 }}>
                 <div style={{ ...labelStyle, marginBottom: 12 }}>Active</div>
-                <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column" as const,
+                    gap: 10,
+                  }}
+                >
                   {active.map((a) => (
                     <AlertCard key={a.id} alert={a} onChange={refresh} />
                   ))}
@@ -544,7 +687,13 @@ export default function MarketAlertsPage() {
             {paused.length > 0 && (
               <div>
                 <div style={{ ...labelStyle, marginBottom: 12 }}>Paused</div>
-                <div style={{ display: "flex", flexDirection: "column" as const, gap: 10 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column" as const,
+                    gap: 10,
+                  }}
+                >
                   {paused.map((a) => (
                     <AlertCard key={a.id} alert={a} onChange={refresh} />
                   ))}

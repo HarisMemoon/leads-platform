@@ -42,7 +42,7 @@ export function Stat({ label, value, accent, hint }: StatProps) {
           fontSize: 12,
           color: "rgba(255,255,255,0.45)",
           fontWeight: 600,
-          textTransform: "uppercase",
+          textTransform: "",
           letterSpacing: "0.05em",
           marginBottom: 10,
         }}

@@ -420,7 +420,7 @@ export default function IntegrationsTab() {
                       fontSize: 11,
                       color: "rgba(255,255,255,0.3)",
                       fontWeight: 500,
-                      textTransform: "uppercase",
+                      textTransform: "",
                       letterSpacing: "0.05em",
                     }}
                   >

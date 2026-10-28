@@ -134,7 +134,7 @@ export default function ResourcesTab() {
                 fontSize: 12,
                 fontWeight: 600,
                 color: "rgba(255,255,255,0.6)",
-                textTransform: "uppercase",
+                textTransform: "",
               }}
             >
               Type
@@ -164,7 +164,7 @@ export default function ResourcesTab() {
                 fontSize: 12,
                 fontWeight: 600,
                 color: "rgba(255,255,255,0.6)",
-                textTransform: "uppercase",
+                textTransform: "",
               }}
             >
               Title
@@ -189,7 +189,7 @@ export default function ResourcesTab() {
                 fontSize: 12,
                 fontWeight: 600,
                 color: "rgba(255,255,255,0.6)",
-                textTransform: "uppercase",
+                textTransform: "",
               }}
             >
               URL
@@ -215,7 +215,7 @@ export default function ResourcesTab() {
                 fontSize: 12,
                 fontWeight: 600,
                 color: "rgba(255,255,255,0.6)",
-                textTransform: "uppercase",
+                textTransform: "",
               }}
             >
               Sort Weight
@@ -248,7 +248,7 @@ export default function ResourcesTab() {
                 fontSize: 12,
                 fontWeight: 600,
                 color: "rgba(255,255,255,0.6)",
-                textTransform: "uppercase",
+                textTransform: "",
               }}
             >
               Body text (Optional)
@@ -318,7 +318,7 @@ export default function ResourcesTab() {
               style={{
                 background: "rgba(0,0,0,0.2)",
                 fontSize: 11,
-                textTransform: "uppercase",
+                textTransform: "",
                 color: "rgba(255,255,255,0.4)",
               }}
             >

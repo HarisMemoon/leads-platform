@@ -68,7 +68,7 @@ function PlanEditorCard({ plan }: { plan: AdminSubscriptionPlan }) {
               fontSize: 12,
               fontWeight: 700,
               letterSpacing: "0.1em",
-              textTransform: "uppercase",
+              textTransform: "",
               color: "#c4b5fd",
               marginBottom: 8,
             }}
@@ -101,7 +101,7 @@ function PlanEditorCard({ plan }: { plan: AdminSubscriptionPlan }) {
             fontSize: 12,
             fontWeight: 600,
             color: "rgba(255,255,255,0.6)",
-            textTransform: "uppercase",
+            textTransform: "",
           }}
         >
           Monthly Subscription Price

@@ -1,11 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
 import MarketingNavbar from "@/components/MarketingNavbar";
+import { useQuery } from "@tanstack/react-query";
+import { getSubscriptionPricing } from "@/lib/subscriptions-api";
 
 type IconProps = { className?: string };
 const iconBase = "shrink-0";
+
+const headingStyle = {
+  fontFamily: "var(--font-heading)",
+  fontWeight: 600,
+} as const;
 
 function IconFilters({ className = "" }: IconProps) {
   return (
@@ -292,6 +298,178 @@ function IconShield({ className = "" }: IconProps) {
   );
 }
 
+function NetworkGraphic() {
+  return (
+    <div className="relative z-10 flex-1 w-full rounded-2xl border border-white/5 bg-[#0A0B10]/80 p-3 xs:p-1 flex items-center justify-center overflow-hidden">
+      {/* Grid Lines - Shared across both views */}
+      <div className="absolute inset-0 bg-[url('/textures/cubes.png')] opacity-5 mix-blend-overlay pointer-events-none" />
+
+      {/* =========================================
+          MOBILE & TABLET VIEW (Vertical Flow)
+          Displays on screens smaller than 768px
+      ========================================= */}
+      <div className="relative w-full h-[340px] max-w-[280px] mx-auto flex md:hidden items-center justify-center">
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          style={{ overflow: "visible" }}
+        >
+          {/* Top Left (FL) to Center */}
+          <path
+            d="M 60 40 C 60 90, 140 90, 140 140"
+            fill="none"
+            stroke="rgba(255,255,255,0.1)"
+            strokeWidth="2"
+          />
+          {/* Top Right (TX) to Center */}
+          <path
+            d="M 220 40 C 220 90, 140 90, 140 140"
+            fill="none"
+            stroke="rgba(255,255,255,0.1)"
+            strokeWidth="2"
+          />
+          {/* Center to Bottom (CRM) */}
+          <path
+            d="M 140 160 C 140 200, 140 220, 140 260"
+            fill="none"
+            stroke="#6C5CE7"
+            strokeWidth="2"
+            strokeDasharray="6 6"
+            className=""
+          />
+        </svg>
+
+        {/* Top Left Node */}
+        <div className="absolute left-[60px] top-[40px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-2">
+          <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+            <div className="h-1.5 w-1.5 rounded-full bg-white/60" />
+          </div>
+          <span className="text-[9px] text-white/40  tracking-widest font-mono whitespace-nowrap">
+            Ping: FL
+          </span>
+        </div>
+
+        {/* Top Right Node */}
+        <div className="absolute left-[220px] top-[40px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-2">
+          <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+            <div className="h-1.5 w-1.5 rounded-full bg-white/60" />
+          </div>
+          <span className="text-[9px] text-white/40  tracking-widest font-mono whitespace-nowrap">
+            Ping: TX
+          </span>
+        </div>
+
+        {/* Center Node (Engine) */}
+        <div className="absolute left-[140px] top-[140px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-2">
+          <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-[#6C5CE7] to-[#10b981] p-[1px] shadow-[0_0_30px_rgba(108,92,231,0.3)] shrink-0">
+            <div className="h-full w-full rounded-[11px] bg-[#12141C] flex items-center justify-center">
+              <IconGrid className="h-6 w-6 text-white" />
+            </div>
+          </div>
+          <span className="text-[10px] font-bold text-white tracking-widest  whitespace-nowrap">
+            Engine
+          </span>
+        </div>
+
+        {/* Bottom Node (CRM) */}
+        <div className="absolute left-[140px] top-[260px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-2">
+          <div className="h-8 w-8 rounded-full bg-[#2FD699]/20 border border-[#2FD699]/50 flex items-center justify-center shadow-[0_0_20px_rgba(47,214,153,0.2)] shrink-0">
+            <IconCheck className="h-4 w-4 text-[#2FD699]" />
+          </div>
+          <div className="flex flex-col items-center whitespace-nowrap text-center">
+            <span className="text-[10px] font-bold text-[#2FD699]  tracking-wider">
+              Post
+            </span>
+            <span className="text-[9px] text-white/50 font-mono">
+              CRM Delivery
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* =========================================
+          DESKTOP VIEW (Horizontal Flow)
+          Displays on screens 768px and wider
+      ========================================= */}
+      <div className="relative w-full h-64 max-w-[300px] mx-auto hidden md:flex items-center justify-center">
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          style={{ overflow: "visible" }}
+        >
+          {/* Top Left to Center */}
+          <path
+            d="M 8 40 C 50 40, 70 120, 120 120"
+            fill="none"
+            stroke="rgba(255,255,255,0.1)"
+            strokeWidth="2"
+          />
+          {/* Bottom Left to Center */}
+          <path
+            d="M 8 200 C 50 200, 70 120, 120 120"
+            fill="none"
+            stroke="rgba(255,255,255,0.1)"
+            strokeWidth="2"
+          />
+          {/* Center to Right */}
+          <path
+            d="M 120 120 C 145 120, 165 120, 196 120"
+            fill="none"
+            stroke="#6C5CE7"
+            strokeWidth="2"
+            strokeDasharray="6 6"
+            className=""
+          />
+        </svg>
+
+        {/* Left Nodes */}
+        <div className="absolute left-0 top-[40px] -translate-y-1/2 flex items-center gap-2">
+          <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+            <div className="h-1.5 w-1.5 rounded-full bg-white/60" />
+          </div>
+          <span className="text-[9px] text-white/40  tracking-widest font-mono whitespace-nowrap">
+            Ping: FL
+          </span>
+        </div>
+
+        <div className="absolute left-0 top-[200px] -translate-y-1/2 flex items-center gap-2">
+          <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+            <div className="h-1.5 w-1.5 rounded-full bg-white/60" />
+          </div>
+          <span className="text-[9px] text-white/40  tracking-widest font-mono whitespace-nowrap">
+            Ping: TX
+          </span>
+        </div>
+
+        {/* Center Node */}
+        <div className="absolute left-[120px] top-[130px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-2">
+          <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-[#6C5CE7] to-[#10b981] p-[1px] shadow-[0_0_30px_rgba(108,92,231,0.3)] shrink-0">
+            <div className="h-full w-full rounded-[11px] bg-[#12141C] flex items-center justify-center">
+              <IconGrid className="h-6 w-6 text-white" />
+            </div>
+          </div>
+          <span className="text-[10px] font-bold text-white tracking-widest  whitespace-nowrap">
+            Engine
+          </span>
+        </div>
+
+        {/* Right Node */}
+        <div className="absolute left-[180px] top-[120px] -translate-y-1/2 flex items-center gap-3">
+          <div className="h-8 w-8 rounded-full bg-[#2FD699]/20 border border-[#2FD699]/50 flex items-center justify-center shadow-[0_0_20px_rgba(47,214,153,0.2)] shrink-0">
+            <IconCheck className="h-4 w-4 text-[#2FD699]" />
+          </div>
+          <div className="flex flex-col whitespace-nowrap">
+            <span className="text-[10px] font-bold text-[#2FD699]  tracking-wider">
+              Post
+            </span>
+            <span className="text-[9px] text-white/50 font-mono">
+              CRM Delivery
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------------- */
 /* Data                                                                  */
 /* ---------------------------------------------------------------------- */
@@ -454,62 +632,19 @@ const PURCHASE_COMPARISON = [
 /* Hooks                                                                  */
 /* ---------------------------------------------------------------------- */
 
-function useElapsedSeconds(resetKey: number) {
-  const [seconds, setSeconds] = useState(0);
-  useEffect(() => {
-    setSeconds(0);
-    const reduceMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-    if (reduceMotion) return;
-    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
-    return () => clearInterval(id);
-  }, [resetKey]);
-  return seconds;
-}
-
 /* ---------------------------------------------------------------------- */
 /* Small building blocks                                                  */
 /* ---------------------------------------------------------------------- */
 
-const STAGGER = ["delay-0", "delay-100", "delay-200", "delay-300", "delay-500"];
-
 function Reveal({
   children,
   className = "",
-  index = 0,
 }: {
   children: React.ReactNode;
   className?: string;
   index?: number;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [shown, setShown] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShown(true);
-          io.disconnect();
-        }
-      },
-      { threshold: 0.2 },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      className={`transition-all duration-700 ease-out motion-reduce:transition-none ${STAGGER[index] ?? ""} ${shown ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"} ${className}`}
-    >
-      {children}
-    </div>
-  );
+  return <div className={className}>{children}</div>;
 }
 
 function SlotDots({ label }: { label: string }) {
@@ -581,61 +716,28 @@ function MarketingHeader() {
 /* ---------------------------------------------------------------------- */
 
 export default function Home() {
-  const [feedIndex, setFeedIndex] = useState(0);
-  const [matched, setMatched] = useState(false);
-  const elapsed = useElapsedSeconds(feedIndex);
+  const { data: pricing } = useQuery({
+    queryKey: ["subscriptions", "pricing"],
+    queryFn: getSubscriptionPricing,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (mq.matches) return;
-    const matchTimer = setTimeout(() => setMatched(true), 900);
-    const advanceTimer = setInterval(() => {
-      setMatched(false);
-      setFeedIndex((i) => (i + 1) % FEED.length);
-      setTimeout(() => setMatched(true), 900);
-    }, 3400);
-    return () => {
-      clearTimeout(matchTimer);
-      clearInterval(advanceTimer);
-    };
-  }, []);
-
-  const active = FEED[feedIndex];
-  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
-  const ss = String(elapsed % 60).padStart(2, "0");
-
+  const proPrice = pricing?.proDisplayPrice ?? "$49";
+  const sharedInbound = pricing
+    ? `$${Math.round(pricing.sharedInboundPriceCents / 100)}`
+    : "$30";
+  const sharedOutbound = pricing
+    ? `$${Math.round(pricing.sharedOutboundPriceCents / 100)}`
+    : "$20";
   return (
     <main
       className="min-h-screen bg-[#0A0B10] text-[#F3F4F8]"
       style={{ fontFamily: "var(--font-body)" }}
     >
-      <style>{`
-        @keyframes drift-a {
-          from { transform: translate(0, 0); }
-          to { transform: translate(40px, 30px); }
-        }
-        @keyframes drift-b {
-          from { transform: translate(0, 0); }
-          to { transform: translate(-30px, 20px); }
-        }
-        @keyframes scan {
-          from { transform: translateX(-120%); }
-          to { transform: translateX(320%); }
-        }
-      `}</style>
-
       <MarketingHeader />
 
       {/* Hero */}
-      <section className="relative overflow-hidden pt-28">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 overflow-hidden"
-        >
-          <div className="absolute -left-32 -top-40 h-[500px] w-[500px] rounded-full bg-[#6C5CE7]/25 blur-[120px] [animation:drift-a_22s_ease-in-out_infinite_alternate] motion-reduce:[animation:none]" />
-          <div className="absolute -right-24 top-20 h-[400px] w-[400px] rounded-full bg-[#2FD699]/15 blur-[120px] [animation:drift-b_26s_ease-in-out_infinite_alternate] motion-reduce:[animation:none]" />
-        </div>
-
+      <section className="relative overflow-hidden pt-16 md:pt-24">
         <div className="relative mx-auto grid max-w-6xl gap-12 px-6 pb-20 pt-16 md:grid-cols-[1.1fr_0.9fr] md:pt-24">
           <div className="flex flex-col justify-center">
             <h1
@@ -656,7 +758,7 @@ export default function Home() {
             <div className="mt-10 flex flex-wrap items-center gap-4">
               <Link
                 href="/register"
-                className="rounded-xl bg-[#6C5CE7] px-6 py-3.5 text-[15px] font-semibold text-white shadow-[0_0_40px_rgba(108,92,231,0.35)] transition hover:-translate-y-0.5 hover:bg-[#7A6BF0]"
+                className="rounded-xl bg-[#6C5CE7] px-6 py-3.5 text-[15px] font-semibold text-white hover:bg-[#7A6BF0]"
               >
                 Browse the marketplace
               </Link>
@@ -676,19 +778,13 @@ export default function Home() {
           {/* Intelligent Distribution & Wallet Preview */}
           <div className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#12141C] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
             {/* Background Animated Gradients & Scanners */}
-            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]">
-              <div className="absolute left-0 top-0 h-full w-[35%] bg-gradient-to-r from-transparent via-white/[0.04] to-transparent [animation:scan_3.4s_linear_infinite] motion-reduce:hidden" />
-              <div className="absolute right-0 top-0 h-48 w-48 bg-[#6C5CE7]/15 blur-[60px] rounded-full" />
-              <div className="absolute left-10 bottom-0 h-32 w-32 bg-[#2FD699]/10 blur-[50px] rounded-full" />
-            </div>
-
             {/* Top Header */}
             <div className="relative flex items-center justify-between mb-5 text-xs">
-              <span className="uppercase tracking-wider font-semibold text-transparent bg-clip-text bg-gradient-to-r from-white to-white/50">
+              <span className=" tracking-wider font-semibold text-transparent bg-clip-text bg-gradient-to-r from-white to-white/50">
                 Smart Distribution Engine
               </span>
               <span className="inline-flex items-center gap-2 rounded-full bg-[#2FD699]/10 px-2.5 py-1 border border-[#2FD699]/20 text-[#2FD699]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#2FD699] shadow-[0_0_8px_#2FD699] animate-pulse" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[#2FD699]" />
                 Ping / Post Active
               </span>
             </div>
@@ -700,7 +796,7 @@ export default function Home() {
               </div>
               <div className="relative flex justify-between items-start">
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-white/40 mb-1">
+                  <p className="text-[10px]  tracking-widest text-white/40 mb-1">
                     Available Balance
                   </p>
                   <p
@@ -711,7 +807,7 @@ export default function Home() {
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[9px] uppercase tracking-wide text-white/30 mb-1.5">
+                  <p className="text-[9px]  tracking-wide text-white/30 mb-1.5">
                     Auto-reload
                   </p>
                   <div className="inline-flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-full px-2.5 py-1">
@@ -739,7 +835,7 @@ export default function Home() {
                     key={idx}
                     className="rounded-lg border border-white/5 bg-[#12141C] p-2.5 text-center flex flex-col justify-center"
                   >
-                    <span className="text-[8px] uppercase tracking-widest text-white/35 mb-1 block whitespace-nowrap overflow-hidden text-ellipsis">
+                    <span className="text-[8px]  tracking-widest text-white/35 mb-1 block whitespace-nowrap overflow-hidden text-ellipsis">
                       {stat.label}
                     </span>
                     <span
@@ -757,11 +853,10 @@ export default function Home() {
             <div className="relative mb-4 rounded-xl border border-[#6C5CE7]/30 bg-gradient-to-r from-[#6C5CE7]/[0.05] to-transparent p-4 overflow-hidden">
               {/* Laser line animation */}
               <div className="absolute left-0 top-1/2 w-full h-px bg-gradient-to-r from-transparent via-[#6C5CE7]/40 to-transparent -translate-y-1/2" />
-              <div className="absolute left-0 top-1/2 w-20 h-px bg-[#A9A0FF] -translate-y-1/2 shadow-[0_0_12px_#A9A0FF] [animation:scan_2.5s_ease-in-out_infinite]" />
 
               <div className="relative z-10 flex justify-between items-center">
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[9px] uppercase tracking-wider text-[#A9A0FF] font-semibold bg-[#6C5CE7]/10 border border-[#6C5CE7]/20 px-2 py-0.5 rounded w-fit">
+                  <span className="text-[9px]  tracking-wider text-[#A9A0FF] font-semibold bg-[#6C5CE7]/10 border border-[#6C5CE7]/20 px-2 py-0.5 rounded w-fit">
                     Real-time Routing
                   </span>
                   <p className="text-[11px] text-white/60">
@@ -803,7 +898,7 @@ export default function Home() {
               {/* Stripe Add Funds UI */}
               <div className="rounded-xl border border-white/10 bg-gradient-to-br from-[#1A1C29] to-[#12141C] p-3 flex flex-col justify-between relative overflow-hidden group hover:border-white/20 transition-colors cursor-pointer">
                 <div className="flex justify-between items-center mb-3">
-                  <span className="text-[9px] text-white/40 uppercase tracking-widest">
+                  <span className="text-[9px] text-white/40  tracking-widest">
                     Top-up
                   </span>
                   <span className="text-[10px] font-bold italic text-white/70 tracking-tighter">
@@ -828,7 +923,7 @@ export default function Home() {
               {/* Transactions Mini-Ledger */}
               <div className="rounded-xl border border-white/10 bg-[#1A1C29] p-3 flex flex-col justify-between">
                 <div className="flex justify-between items-center mb-2.5">
-                  <span className="text-[9px] text-white/40 uppercase tracking-widest">
+                  <span className="text-[9px] text-white/40  tracking-widest">
                     History
                   </span>
                   <span className="text-[9px] text-[#6C5CE7] hover:text-[#A9A0FF] cursor-pointer transition-colors">
@@ -874,28 +969,13 @@ export default function Home() {
       {/* Platform Highlights / Core Capabilities (Place directly below Hero) */}
       <section className="relative overflow-hidden border-t border-white/[0.06] bg-[#0A0B10] py-24">
         {/* Section-specific animations */}
-        <style>{`
-          @keyframes node-pulse {
-            0%, 100% { transform: scale(1); opacity: 0.8; }
-            50% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 20px currentColor; }
-          }
-          @keyframes flow-line {
-            0% { stroke-dashoffset: 24; }
-            100% { stroke-dashoffset: 0; }
-          }
-          @keyframes float-chip {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-4px); }
-          }
-        `}</style>
 
         {/* Ambient Background Blur */}
-        <div className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 h-[400px] w-[800px] bg-gradient-to-b from-[#6C5CE7]/10 to-transparent blur-[100px] pointer-events-none" />
 
         <div className="relative mx-auto max-w-6xl px-6">
           <Reveal>
             <div className="max-w-3xl mx-auto text-center mb-16">
-              <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-[#6C5CE7] mb-4">
+              <h2 className="text-sm font-bold  tracking-[0.2em] text-[#6C5CE7] mb-4">
                 The Smart Automated Marketplace
               </h2>
               <h3
@@ -920,23 +1000,21 @@ export default function Home() {
             {/* Card 1: Absolute Control */}
             <Reveal index={1}>
               <div className="group relative flex h-full flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-[#12141C] p-8 transition-colors hover:bg-[#161823]">
-                <div className="absolute right-0 top-0 h-40 w-40 bg-gradient-to-bl from-[#2FD699]/10 to-transparent blur-2xl" />
-
                 {/* Visualizer */}
                 <div className="relative mb-8 h-32 w-full rounded-xl border border-white/5 bg-[#0A0B10]/50 p-4 flex flex-col justify-center gap-3 overflow-hidden">
                   <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center justify-center">
                     <IconTarget className="h-20 w-20 text-white/5" />
                   </div>
-                  <div className="flex gap-2 relative z-10 [animation:float-chip_4s_ease-in-out_infinite]">
-                    <span className="rounded-full border border-[#2FD699]/30 bg-[#2FD699]/10 px-3 py-1 text-[10px] font-medium tracking-wide text-[#2FD699] uppercase backdrop-blur-md">
+                  <div className="flex gap-2 relative z-10">
+                    <span className="rounded-full border border-[#2FD699]/30 bg-[#2FD699]/10 px-3 py-1 text-[10px] font-medium tracking-wide text-[#2FD699] ">
                       State: Texas
                     </span>
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-medium tracking-wide text-white/60 uppercase backdrop-blur-md">
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-medium tracking-wide text-white/60 ">
                       City: Austin
                     </span>
                   </div>
-                  <div className="flex gap-2 relative z-10 [animation:float-chip_4s_ease-in-out_infinite_0.5s]">
-                    <span className="rounded-full border border-[#E8A33D]/30 bg-[#E8A33D]/10 px-3 py-1 text-[10px] font-medium tracking-wide text-[#E8A33D] uppercase backdrop-blur-md">
+                  <div className="flex gap-2 relative z-10">
+                    <span className="rounded-full border border-[#E8A33D]/30 bg-[#E8A33D]/10 px-3 py-1 text-[10px] font-medium tracking-wide text-[#E8A33D] ">
                       Type: Pre-Foreclosure
                     </span>
                   </div>
@@ -956,16 +1034,14 @@ export default function Home() {
             {/* Card 2: Exclusive vs Non-Exclusive */}
             <Reveal index={2}>
               <div className="group relative flex h-full flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-[#12141C] p-8 transition-colors hover:bg-[#161823]">
-                <div className="absolute right-0 top-0 h-40 w-40 bg-gradient-to-bl from-[#6C5CE7]/10 to-transparent blur-2xl" />
-
                 {/* Visualizer */}
-                <div className="relative mb-8 h-32 w-full rounded-xl border border-white/5 bg-[#0A0B10]/50 p-4 flex items-center justify-center gap-6 overflow-hidden">
+                <div className=" relative mb-8 h-32 w-full rounded-xl border border-white/5 bg-[#0A0B10]/50 p-4 flex items-center justify-center gap-6 overflow-hidden">
                   {/* Exclusive Side */}
                   <div className="flex flex-col items-center gap-3">
                     <div className="h-10 w-10 rounded-full border border-[#A9A0FF]/30 bg-[#6C5CE7]/20 flex items-center justify-center relative">
                       <div className="h-4 w-4 rounded-full bg-[#A9A0FF] shadow-[0_0_15px_#6C5CE7]" />
                     </div>
-                    <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">
+                    <span className="text-[10px]  tracking-wider text-white/40 font-semibold">
                       Exclusive
                     </span>
                   </div>
@@ -981,7 +1057,7 @@ export default function Home() {
                         <div className="h-3 w-3 rounded-full bg-white/20" />
                       </div>
                     </div>
-                    <span className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">
+                    <span className="text-[10px]  tracking-wider text-white/40 font-semibold">
                       Shared (Slots)
                     </span>
                   </div>
@@ -1001,13 +1077,11 @@ export default function Home() {
             {/* Card 3: Intelligent Ping/Post Engine */}
             <Reveal index={3} className="md:col-span-2">
               <div className="group relative flex flex-col md:flex-row overflow-hidden rounded-[2rem] border border-[#6C5CE7]/30 bg-gradient-to-br from-[#12141C] to-[#161825] p-8 md:p-12 shadow-2xl">
-                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[300px] w-[600px] bg-[#6C5CE7]/5 blur-[80px] pointer-events-none" />
-
                 {/* Text Content */}
                 <div className="relative z-10 flex-1 flex flex-col justify-center md:pr-12 mb-10 md:mb-0">
                   <div className="inline-flex items-center gap-2 rounded-full border border-[#A9A0FF]/30 bg-[#6C5CE7]/10 px-3 py-1 mb-6 w-fit">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#A9A0FF] animate-pulse" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#A9A0FF]">
+                    <span className="h-1.5 w-1.5 rounded-full bg-[#A9A0FF]" />
+                    <span className="text-[10px] font-bold  tracking-wider text-[#A9A0FF]">
                       Enterprise Grade
                     </span>
                   </div>
@@ -1039,95 +1113,8 @@ export default function Home() {
                 </div>
 
                 {/* Ping/Post Animation Visualizer */}
-                <div className="relative z-10 flex-1 h-64 w-full rounded-2xl border border-white/5 bg-[#0A0B10]/80 p-6 flex items-center justify-center overflow-hidden">
-                  {/* Grid Lines */}
-                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5 mix-blend-overlay" />
 
-                  {/* Strict bounds (300px wide) perfectly centered to prevent side clipping */}
-                  <div className="relative w-full h-full max-w-[300px] mx-auto">
-                    {/* SVG Connecting Lines - Precisely mapped to the center of each icon */}
-                    <svg
-                      className="absolute inset-0 w-full h-full pointer-events-none"
-                      style={{ overflow: "visible" }}
-                    >
-                      {/* Top Left to Center */}
-                      <path
-                        d="M 8 40 C 50 40, 70 120, 120 120"
-                        fill="none"
-                        stroke="rgba(255,255,255,0.1)"
-                        strokeWidth="2"
-                      />
-                      {/* Bottom Left to Center */}
-                      <path
-                        d="M 8 200 C 50 200, 70 120, 120 120"
-                        fill="none"
-                        stroke="rgba(255,255,255,0.1)"
-                        strokeWidth="2"
-                      />
-                      {/* Center to Right */}
-                      <path
-                        d="M 120 120 C 145 120, 165 120, 196 120"
-                        fill="none"
-                        stroke="#6C5CE7"
-                        strokeWidth="2"
-                        strokeDasharray="6 6"
-                        className="[animation:flow-line_1s_linear_infinite]"
-                      />
-                    </svg>
-
-                    {/* Left Nodes (Vendors Pinging) */}
-                    {/* Removed -translate-x-1/2 so it starts exactly at 0px */}
-                    <div className="absolute left-0 top-[40px] -translate-y-1/2 flex items-center gap-2">
-                      <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                        <div className="h-1.5 w-1.5 rounded-full bg-white/60 animate-ping" />
-                      </div>
-                      <span className="text-[9px] text-white/40 uppercase tracking-widest font-mono whitespace-nowrap">
-                        Ping: FL
-                      </span>
-                    </div>
-
-                    <div className="absolute left-0 top-[200px] -translate-y-1/2 flex items-center gap-2">
-                      <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center shrink-0">
-                        <div
-                          className="h-1.5 w-1.5 rounded-full bg-white/60 animate-ping"
-                          style={{ animationDelay: "0.5s" }}
-                        />
-                      </div>
-                      <span className="text-[9px] text-white/40 uppercase tracking-widest font-mono whitespace-nowrap">
-                        Ping: TX
-                      </span>
-                    </div>
-
-                    {/* Center Node (Distribution Engine) */}
-                    {/* Remains centered at the 120px mark */}
-                    <div className="absolute left-[120px] top-[130px] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center gap-2">
-                      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-[#6C5CE7] to-[#10b981] p-[1px] shadow-[0_0_30px_rgba(108,92,231,0.3)] shrink-0">
-                        <div className="h-full w-full rounded-[11px] bg-[#12141C] flex items-center justify-center">
-                          <IconGrid className="h-6 w-6 text-white [animation:node-pulse_2s_ease-in-out_infinite]" />
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-bold text-white tracking-widest uppercase whitespace-nowrap">
-                        Engine
-                      </span>
-                    </div>
-
-                    {/* Right Node (Your CRM Post) */}
-                    {/* Positioned at 180px so the whole text group ends around ~290px, perfectly within bounds */}
-                    <div className="absolute left-[180px] top-[120px] -translate-y-1/2 flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full bg-[#2FD699]/20 border border-[#2FD699]/50 flex items-center justify-center shadow-[0_0_20px_rgba(47,214,153,0.2)] shrink-0">
-                        <IconCheck className="h-4 w-4 text-[#2FD699]" />
-                      </div>
-                      <div className="flex flex-col whitespace-nowrap">
-                        <span className="text-[10px] font-bold text-[#2FD699] uppercase tracking-wider">
-                          Post
-                        </span>
-                        <span className="text-[9px] text-white/50 font-mono">
-                          CRM Delivery
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <NetworkGraphic />
               </div>
             </Reveal>
           </div>
@@ -1140,12 +1127,11 @@ export default function Home() {
         className="relative py-24 bg-[#0A0B10] overflow-hidden"
       >
         {/* Ambient Background Glows */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 h-[400px] w-[800px] bg-gradient-to-r from-[#6C5CE7]/5 via-transparent to-[#2FD699]/5 blur-[100px] pointer-events-none" />
 
         <div className="relative mx-auto max-w-6xl px-6">
           <Reveal>
             <div className="text-center mb-20">
-              <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-[#2FD699] mb-4">
+              <h2 className="text-sm font-bold  tracking-[0.2em] text-[#2FD699] mb-4">
                 Simple Setup
               </h2>
               <h2
@@ -1162,9 +1148,7 @@ export default function Home() {
             <div
               aria-hidden
               className="absolute left-[12%] right-[12%] top-7 hidden h-[2px] bg-white/5 md:block overflow-hidden rounded-full"
-            >
-              <div className="absolute top-0 left-0 h-full w-1/3 bg-gradient-to-r from-transparent via-[#6C5CE7] to-transparent [animation:scan_3s_ease-in-out_infinite]" />
-            </div>
+            ></div>
 
             {STEPS.map((step, i) => {
               const StepIcon = step.icon;
@@ -1172,8 +1156,7 @@ export default function Home() {
                 <Reveal key={step.title} index={i}>
                   <div className="relative flex flex-col items-center text-center group">
                     {/* Icon Container with Glow & Hover Effects */}
-                    <div className="relative z-10 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#12141C] text-[#A9A0FF] shadow-lg transition-all duration-300 group-hover:-translate-y-2 group-hover:border-[#6C5CE7]/40 group-hover:shadow-[0_10px_30px_rgba(108,92,231,0.25)]">
-                      <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[#6C5CE7]/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                    <div className="relative z-10 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#12141C] text-[#A9A0FF]">
                       <StepIcon className="h-6 w-6 relative z-10" />
                     </div>
 
@@ -1181,7 +1164,7 @@ export default function Home() {
                     <div className="mt-8 flex items-center justify-center gap-3">
                       <span className="h-px w-6 bg-gradient-to-r from-transparent to-[#6C5CE7]/50" />
                       <span
-                        className="text-[11px] font-bold tracking-[0.2em] uppercase text-[#6C5CE7]"
+                        className="text-[11px] font-bold tracking-[0.2em]  text-[#6C5CE7]"
                         style={{ fontFamily: "var(--font-mono)" }}
                       >
                         Step {String(i + 1).padStart(2, "0")}
@@ -1204,13 +1187,12 @@ export default function Home() {
         </div>
       </section>
 
-      {/* NEW: Automation & Ping Post Section */}
+      {/* Automation & Ping Post Section */}
       <section
         id="automation"
         className="relative border-t border-white/[0.06] bg-[#0D0F16] py-24 overflow-hidden"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "1px 800px" }}
       >
-        <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-[#6C5CE7]/10 blur-[150px] rounded-full pointer-events-none" />
-
         <div className="relative mx-auto max-w-6xl px-6">
           <Reveal>
             <div className="mb-16 md:text-center max-w-3xl mx-auto">
@@ -1253,7 +1235,7 @@ export default function Home() {
                     {/* Mock Input Row 1 */}
                     <div className="grid grid-cols-2 gap-4">
                       <div className="bg-[#1A1C29] border border-white/5 rounded-xl p-4">
-                        <span className="block text-xs text-white/40 mb-2 uppercase tracking-wide">
+                        <span className="block text-xs text-white/40 mb-2  tracking-wide">
                           Max Leads / Day
                         </span>
                         <div className="flex items-center text-lg font-medium text-white">
@@ -1261,7 +1243,7 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="bg-[#1A1C29] border border-white/5 rounded-xl p-4">
-                        <span className="block text-xs text-white/40 mb-2 uppercase tracking-wide">
+                        <span className="block text-xs text-white/40 mb-2  tracking-wide">
                           Daily Spend Cap
                         </span>
                         <div className="flex items-center text-lg font-medium text-white">
@@ -1294,11 +1276,11 @@ export default function Home() {
                           Purchase Type
                         </span>
                         <div className="flex gap-2">
-                          <span className="text-xs bg-white/10 text-white/70 px-3 py-1 rounded-full">
+                          <span className="text-xs bg-white/10 text-white/70 px-3 py-1 rounded-full text-center align-middle">
                             Exclusive
                           </span>
-                          <span className="text-xs bg-[#6C5CE7]/20 text-[#A9A0FF] px-3 py-1 rounded-full border border-[#6C5CE7]/30">
-                            Both
+                          <span className="text-xs bg-white/10 text-white/70 px-3 py-1 rounded-full">
+                            Non-Exclusive
                           </span>
                         </div>
                       </div>
@@ -1333,13 +1315,13 @@ export default function Home() {
                         <span className="text-sm font-semibold text-white">
                           TX High-Intent Foreclosures
                         </span>
-                        <span className="text-[10px] uppercase tracking-wider bg-[#2FD699]/20 text-[#2FD699] px-2 py-1 rounded">
+                        <span className="text-[10px]  tracking-wider bg-[#2FD699]/20 text-[#2FD699] px-2 py-1 rounded">
                           Active
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-4 mt-4">
                         <div>
-                          <span className="block text-[11px] text-white/40 uppercase mb-1">
+                          <span className="block text-[11px] text-white/40  mb-1">
                             Max Bid
                           </span>
                           <span className="text-base text-white font-medium">
@@ -1347,7 +1329,7 @@ export default function Home() {
                           </span>
                         </div>
                         <div>
-                          <span className="block text-[11px] text-white/40 uppercase mb-1">
+                          <span className="block text-[11px] text-white/40  mb-1">
                             Type
                           </span>
                           <span className="text-sm text-white/70">
@@ -1364,13 +1346,13 @@ export default function Home() {
                         <span className="text-sm font-semibold text-white">
                           National Broad
                         </span>
-                        <span className="text-[10px] uppercase tracking-wider bg-white/10 text-white/50 px-2 py-1 rounded">
+                        <span className="text-[10px]  tracking-wider bg-white/10 text-white/50 px-2 py-1 rounded">
                           Paused
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-4 mt-4">
                         <div>
-                          <span className="block text-[11px] text-white/40 uppercase mb-1">
+                          <span className="block text-[11px] text-white/40  mb-1">
                             Max Bid
                           </span>
                           <span className="text-base text-white font-medium">
@@ -1378,7 +1360,7 @@ export default function Home() {
                           </span>
                         </div>
                         <div>
-                          <span className="block text-[11px] text-white/40 uppercase mb-1">
+                          <span className="block text-[11px] text-white/40  mb-1">
                             Type
                           </span>
                           <span className="text-sm text-white/70">Shared</span>
@@ -1397,6 +1379,7 @@ export default function Home() {
       <section
         id="marketplace"
         className="border-t border-white/[0.06] bg-[#0D0F16] py-24"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "1px 800px" }}
       >
         <div className="mx-auto max-w-6xl px-6">
           <Reveal>
@@ -1411,7 +1394,7 @@ export default function Home() {
             <div className="mt-12 grid overflow-hidden rounded-[2rem] border border-white/10 md:grid-cols-2 shadow-2xl">
               <div className="border-b border-white/10 bg-[#0D0F16] p-10 md:border-b-0 md:border-r relative">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-white/[0.02] to-transparent pointer-events-none" />
-                <p className="text-xs font-semibold uppercase tracking-wider text-white/40 mb-8">
+                <p className="text-xs font-semibold  tracking-wider text-white/40 mb-8">
                   Without Newleey
                 </p>
                 <ul className="space-y-6">
@@ -1428,7 +1411,7 @@ export default function Home() {
               </div>
               <div className="bg-[#12141C] p-10 relative">
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-[#6C5CE7]/[0.05] to-transparent pointer-events-none" />
-                <p className="text-xs font-semibold uppercase tracking-wider text-[#A9A0FF] mb-8">
+                <p className="text-xs font-semibold  tracking-wider text-[#A9A0FF] mb-8">
                   With Newleey
                 </p>
                 <ul className="space-y-6">
@@ -1449,7 +1432,10 @@ export default function Home() {
       </section>
 
       {/* Features */}
-      <section className="border-t border-white/[0.06] bg-[#0D0F16] py-24">
+      <section
+        className="border-t border-white/[0.06] bg-[#0D0F16] py-24"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "1px 800px" }}
+      >
         <div className="mx-auto max-w-6xl px-6">
           <div className="grid gap-6 md:grid-cols-3">
             {FEATURES.map((f, i) => {
@@ -1474,7 +1460,7 @@ export default function Home() {
                       {f.chips.map((chip) => (
                         <span
                           key={chip}
-                          className={`rounded-full px-3 py-1.5 text-[11px] font-medium tracking-wide uppercase ${chipTone(chip)}`}
+                          className={`rounded-full px-3 py-1.5 text-[11px] font-medium tracking-wide  ${chipTone(chip)}`}
                         >
                           {chip}
                         </span>
@@ -1489,7 +1475,10 @@ export default function Home() {
       </section>
 
       {/* Purchase options */}
-      <section className="py-24 bg-[#0A0B10]">
+      <section
+        className="py-24 bg-[#0A0B10]"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "1px 800px" }}
+      >
         <div className="mx-auto max-w-6xl px-6">
           <Reveal>
             <h2
@@ -1502,8 +1491,7 @@ export default function Home() {
           <div className="mt-12 grid gap-6 md:grid-cols-2">
             <Reveal>
               <div className="h-full rounded-[2rem] border border-white/10 bg-[#12141C] p-10 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-[#6C5CE7]/10 blur-[50px] rounded-full pointer-events-none" />
-                <span className="rounded-full bg-[#6C5CE7]/20 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[#A9A0FF]">
+                <span className="rounded-full bg-[#6C5CE7]/20 px-3 py-1.5 text-xs font-semibold  tracking-wider text-[#A9A0FF]">
                   Exclusive
                 </span>
                 <p className="mt-6 text-xl font-semibold text-white">
@@ -1517,8 +1505,7 @@ export default function Home() {
             </Reveal>
             <Reveal index={1}>
               <div className="h-full rounded-[2rem] border border-white/10 bg-[#12141C] p-10 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-[#E8A33D]/10 blur-[50px] rounded-full pointer-events-none" />
-                <span className="rounded-full bg-[#E8A33D]/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[#E8A33D]">
+                <span className="rounded-full bg-[#E8A33D]/15 px-3 py-1.5 text-xs font-semibold  tracking-wider text-[#E8A33D]">
                   Non Exclusive
                 </span>
                 <p className="mt-6 text-xl font-semibold text-white">
@@ -1537,20 +1524,98 @@ export default function Home() {
         </div>
       </section>
 
+      <section
+        id="pro-plan"
+        className="scroll-mt-20 border-t border-white/[0.06] bg-[#0D0F16] py-20 md:py-24"
+      >
+        <div className="mx-auto grid max-w-6xl gap-10 px-6 md:grid-cols-2 md:items-start">
+          <div>
+            <span className="inline-flex rounded-full border border-[#6C5CE7]/30 bg-[#6C5CE7]/10 px-3 py-1 text-xs font-semibold  tracking-wider text-[#B6AEFF]">
+              Simple membership
+            </span>
+            <h2
+              className="mt-5 text-3xl text-white md:text-4xl"
+              style={headingStyle}
+            >
+              One plan. More ways to grow.
+            </h2>
+            <p className="mt-4 max-w-[44ch] text-lg leading-relaxed text-white/50">
+              Free accounts can browse the marketplace and buy Exclusive leads.
+              Pro adds shared lead pricing, automatic delivery, and early access
+              to new leads.
+            </p>
+            <p className="mt-6 text-sm text-white/45">
+              No long-term commitment. Cancel anytime.
+            </p>
+          </div>
+
+          <div className="rounded-[2rem] border border-[#6C5CE7]/40 bg-[#12141C] p-7 md:p-8">
+            <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-6">
+              <div>
+                <p className="text-sm font-semibold  tracking-wider text-[#B6AEFF]">
+                  Pro
+                </p>
+                <p className="mt-1 text-sm text-white/45">Billed monthly</p>
+              </div>
+              <p className="flex items-baseline gap-2">
+                <span
+                  className="text-4xl font-semibold tracking-tight text-white"
+                  style={headingStyle}
+                >
+                  {proPrice}
+                </span>
+                <span className="text-sm text-white/50">/ month</span>
+              </p>
+            </div>
+
+            <ul className="mt-6 space-y-4 text-[15px] text-white/80">
+              {[
+                <>
+                  Non-exclusive inbound leads at {sharedInbound} each (up to 5
+                  buyers)
+                </>,
+                <>
+                  Non-exclusive outbound leads at {sharedOutbound} each (up to 3
+                  buyers)
+                </>,
+                <>Early marketplace access to new leads</>,
+                <>Auto-delivery of matching leads to your CRM</>,
+                <>Cancel anytime</>,
+              ].map((item, i) => (
+                <li key={i} className="flex items-start gap-3">
+                  <IconCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#2FD699]" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+
+            <Link
+              href="/register"
+              className="mt-8 block rounded-lg bg-[#6C5CE7] px-6 py-3 text-center text-[15px] font-semibold text-white transition-colors hover:bg-[#7A6BF0]"
+            >
+              Create an account to subscribe
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* CRM integration */}
-      <section className="py-24 border-t border-white/[0.06] bg-[#0D0F16]">
+      <section
+        className="py-24 border-t border-white/[0.06] bg-[#0D0F16]"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "1px 800px" }}
+      >
         <div className="mx-auto max-w-6xl px-6 grid md:grid-cols-2 gap-16 items-center">
           <Reveal>
             <h2
               className="text-3xl md:text-4xl text-white mb-6"
               style={{ fontFamily: "var(--font-heading)", fontWeight: 600 }}
             >
-              Your next lead should already be in your workflow.
+              Purchased lead delievered to your CRM.
             </h2>
             <p className="text-[15px] text-white/50 leading-relaxed mb-8">
-              Route purchased leads to the tools you already run pipeline out
-              of. Configure a webhook and send a test lead before anything goes
-              live. Speed to lead is everything.
+              Any lead purchased goes to the CRM your connect with the app,
+              including leads bought by the system's aotumation or the ping/post
+              feature.
             </p>
             <div className="flex flex-wrap gap-3">
               {["GoHighLevel", "LeadConnector", "Zapier", "HTTPS Webhook"].map(
@@ -1575,28 +1640,25 @@ export default function Home() {
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1A1C29] border border-white/10 shadow-lg">
                   <IconTarget className="h-6 w-6 text-[#A9A0FF]" />
                 </div>
-                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#2FD699]/50 to-transparent relative">
-                  <div className="absolute top-1/2 left-0 h-1.5 w-1.5 rounded-full bg-[#2FD699] -translate-y-1/2 shadow-[0_0_10px_#2FD699] [animation:scan_2s_linear_infinite]" />
-                </div>
+                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-[#2FD699]/50 to-transparent relative"></div>
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1A1C29] border border-white/10 shadow-lg">
                   <IconFlow className="h-6 w-6 text-[#2FD699]" />
                 </div>
               </div>
 
-              <p className="text-center text-sm font-medium text-white/40 uppercase tracking-wide mb-6">
+              <p className="text-center text-sm font-medium text-white/40  tracking-wide mb-6">
                 Instant CRM Delivery
               </p>
 
               {/* Simulated CRM Inbox UI (Non-Technical) */}
               <div className="bg-[#0A0B10] border border-white/5 p-4 rounded-2xl shadow-inner relative overflow-hidden">
                 {/* Subtle background glow */}
-                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-[#2FD699]/5 blur-[50px] rounded-full pointer-events-none" />
 
                 {/* Mock CRM Header */}
                 <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/5 relative z-10">
                   <div className="flex items-center gap-2">
-                    <div className="h-2 w-2 rounded-full bg-[#2FD699] animate-pulse" />
-                    <span className="text-[11px] text-white/60 font-medium uppercase tracking-wider">
+                    <div className="h-2 w-2 rounded-full bg-[#2FD699]" />
+                    <span className="text-[11px] text-white/60 font-medium  tracking-wider">
                       Lead Inbox
                     </span>
                   </div>
@@ -1606,7 +1668,7 @@ export default function Home() {
                 </div>
 
                 {/* Mock Lead Card */}
-                <div className="bg-[#12141C] border border-white/10 rounded-xl p-4 flex items-start gap-4 relative z-10 shadow-lg transform transition-transform hover:-translate-y-0.5 duration-300">
+                <div className="bg-[#12141C] border border-white/10 rounded-xl p-4 flex items-start gap-4 relative z-10 shadow-lg">
                   <div className="h-10 w-10 rounded-full bg-gradient-to-br from-[#2FD699] to-[#059669] flex items-center justify-center text-white text-sm font-bold shrink-0 shadow-[0_0_15px_rgba(47,214,153,0.2)]">
                     SJ
                   </div>
@@ -1616,18 +1678,18 @@ export default function Home() {
                       <h4 className="text-white text-sm font-semibold">
                         Sarah Jenkins
                       </h4>
-                      <span className="bg-[#2FD699]/10 text-[#2FD699] text-[9px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold border border-[#2FD699]/20">
+                      <span className="bg-[#2FD699]/10 text-[#2FD699] text-[9px] px-2 py-0.5 rounded-full  tracking-wider font-bold border border-[#2FD699]/20">
                         Exclusive
                       </span>
                     </div>
 
                     {/* Lead Attributes (Structured Data) */}
                     <div className="flex flex-wrap gap-2 mb-3">
-                      <span className="text-white/40 text-[9px] bg-white/5 border border-white/5 px-2 py-1 rounded-md uppercase tracking-wider">
+                      <span className="text-white/40 text-[9px] bg-white/5 border border-white/5 px-2 py-1 rounded-md  tracking-wider">
                         Source: Ping/Post
                       </span>
 
-                      <span className="text-white/40 text-[9px] bg-white/5 border border-white/5 px-2 py-1 rounded-md uppercase tracking-wider">
+                      <span className="text-white/40 text-[9px] bg-white/5 border border-white/5 px-2 py-1 rounded-md  tracking-wider">
                         State: TX
                       </span>
                     </div>
@@ -1656,16 +1718,14 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Massive CTA Section */}
+      {/* CTA Section */}
       <section className="py-24 px-6 md:px-10 max-w-7xl mx-auto">
         <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[#12141C] p-10 md:p-24 text-center shadow-[0_30px_80px_rgba(0,0,0,0.5)] group transition-all duration-500 hover:border-white/20">
           {/* Animated Background Layers */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-[2rem]">
             {/* Top scanning line */}
-            <div className="absolute left-0 top-0 h-full w-[40%] bg-gradient-to-r from-transparent via-[#6C5CE7]/10 to-transparent [animation:scan_4s_ease-in-out_infinite] motion-reduce:hidden" />
 
             {/* Glowing Orbs */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-to-br from-[#6C5CE7]/20 via-transparent to-[#2FD699]/15 blur-[120px] rounded-full transition-transform duration-1000 group-hover:scale-110" />
 
             {/* Subtle Grid Pattern Overlay */}
             <div
@@ -1680,9 +1740,9 @@ export default function Home() {
 
           <div className="relative z-10 max-w-3xl mx-auto flex flex-col items-center">
             {/* Status Badge */}
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 mb-8 backdrop-blur-sm">
-              <span className="h-2 w-2 rounded-full bg-[#2FD699] animate-pulse" />
-              <span className="text-xs font-semibold uppercase tracking-widest text-white/70">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 mb-8">
+              <span className="h-2 w-2 rounded-full bg-[#2FD699]" />
+              <span className="text-xs font-semibold  tracking-widest text-white/70">
                 Start Closing Today
               </span>
             </div>
@@ -1707,7 +1767,7 @@ export default function Home() {
             <div className="flex flex-col sm:flex-row justify-center items-center gap-4 w-full sm:w-auto">
               <Link
                 href="/register"
-                className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-[#6C5CE7] px-8 py-4 text-[15px] font-semibold text-white shadow-[0_0_40px_rgba(108,92,231,0.3)] transition-all duration-300 hover:-translate-y-1 hover:bg-[#7A6BF0]"
+                className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-[#6C5CE7] px-8 py-4 text-[15px] font-semibold text-white hover:bg-[#7A6BF0]"
               >
                 Create Free Account
                 <svg
@@ -1726,7 +1786,7 @@ export default function Home() {
               </Link>
               <Link
                 href="/pro"
-                className="w-full sm:w-auto rounded-xl border border-white/15 bg-white/5 backdrop-blur-md px-8 py-4 text-[15px] font-semibold text-white transition-all duration-300 hover:bg-white/10 hover:text-white"
+                className="w-full sm:w-auto rounded-xl border border-white/15 bg-white/5 px-8 py-4 text-[15px] font-semibold text-white transition-all duration-300 hover:bg-white/10 hover:text-white"
               >
                 Explore Pro Features
               </Link>

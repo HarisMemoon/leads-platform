@@ -10,6 +10,7 @@ import {
 import { queryKeys } from "@/lib/query-keys";
 import { Empty } from "../../components/Empty";
 import { Pill } from "../../components/Pill";
+import Link from "next/dist/client/link";
 
 // Removed definitions of SCRIPT_TABS and LEAD_FIELDS for brevity;
 // assume they are imported from a constants file or declared here just like in the original.
@@ -84,7 +85,9 @@ export function VendorWebhookPanel() {
               Review.
             </p>
           </div>
-          <button className="btn-modern btn-ghost">API Docs ↗</button>
+          <Link href="/api-docs">
+            <button className="btn-modern btn-ghost">API Docs ↗</button>
+          </Link>
         </div>
 
         {/* Simplistic mock of code block for brevity */}
@@ -146,7 +149,7 @@ export function VendorWebhookPanel() {
                 style={{
                   fontSize: 12,
                   color: "rgba(255,255,255,0.5)",
-                  textTransform: "uppercase",
+                  textTransform: "",
                   marginBottom: 8,
                 }}
               >
@@ -168,7 +171,7 @@ export function VendorWebhookPanel() {
                 style={{
                   fontSize: 12,
                   color: "rgba(255,255,255,0.5)",
-                  textTransform: "uppercase",
+                  textTransform: "",
                   marginBottom: 8,
                 }}
               >
@@ -190,7 +193,7 @@ export function VendorWebhookPanel() {
                 style={{
                   fontSize: 12,
                   color: "rgba(255,255,255,0.5)",
-                  textTransform: "uppercase",
+                  textTransform: "",
                   marginBottom: 8,
                 }}
               >
