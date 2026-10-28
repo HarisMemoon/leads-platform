@@ -118,7 +118,7 @@ function UserDetailModal({
                 fontSize: 11,
                 fontWeight: 700,
                 letterSpacing: "0.1em",
-                textTransform: "",
+                textTransform: "uppercase",
                 color: "#818cf8",
                 marginBottom: 8,
               }}
@@ -188,7 +188,7 @@ function UserDetailModal({
                   fontSize: 13,
                   fontWeight: 700,
                   color: "rgba(255,255,255,0.5)",
-                  textTransform: "",
+                  textTransform: "uppercase",
                   marginBottom: 16,
                 }}
               >
@@ -273,7 +273,7 @@ function UserDetailModal({
                   fontSize: 13,
                   fontWeight: 700,
                   color: "rgba(255,255,255,0.5)",
-                  textTransform: "",
+                  textTransform: "uppercase",
                   marginBottom: 16,
                 }}
               >
@@ -356,7 +356,7 @@ function UserDetailModal({
                   fontSize: 13,
                   fontWeight: 700,
                   color: "rgba(255,255,255,0.5)",
-                  textTransform: "",
+                  textTransform: "uppercase",
                   marginBottom: 16,
                 }}
               >
@@ -424,7 +424,7 @@ function UserDetailModal({
                   fontSize: 13,
                   fontWeight: 700,
                   color: "rgba(255,255,255,0.5)",
-                  textTransform: "",
+                  textTransform: "uppercase",
                   marginBottom: 16,
                 }}
               >
@@ -885,7 +885,7 @@ export default function CustomersTab() {
               style={{
                 background: "rgba(0,0,0,0.2)",
                 fontSize: 11,
-                textTransform: "",
+                textTransform: "uppercase",
                 color: "rgba(255,255,255,0.4)",
               }}
             >

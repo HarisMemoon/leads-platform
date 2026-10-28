@@ -62,34 +62,16 @@ function ActivityFeedIcon({ kind }: { kind: ActivityFeedIconKind }) {
 function MiniBarChart({ data, days }: { data: number[]; days: string[] }) {
   const max = Math.max(...data, 1);
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "flex-end",
-        gap: 6,
-        height: 80,
-        padding: "0 4px",
-      }}
-    >
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 80, padding: "0 4px" }}>
       {data.map((v, i) => (
-        <div
-          key={i}
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 5,
-          }}
-        >
+        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
           <div
             style={{
               width: "100%",
               height: `${(v / max) * 64}px`,
-              background:
-                i === 6
-                  ? "linear-gradient(to top, #6366f1, #8b5cf6)"
-                  : "rgba(255,255,255,0.08)",
+              background: i === 6
+                ? "linear-gradient(to top, #6366f1, #8b5cf6)"
+                : "rgba(255,255,255,0.08)",
               borderRadius: 4,
               transition: "height 0.6s ease",
               position: "relative",
@@ -97,24 +79,14 @@ function MiniBarChart({ data, days }: { data: number[]; days: string[] }) {
             }}
           >
             {i === 6 && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  background:
-                    "linear-gradient(to top, rgba(99,102,241,0.8), rgba(139,92,246,0.4))",
-                  animation: "shimmer 2s ease-in-out infinite",
-                }}
-              />
+              <div style={{
+                position: "absolute", inset: 0,
+                background: "linear-gradient(to top, rgba(99,102,241,0.8), rgba(139,92,246,0.4))",
+                animation: "shimmer 2s ease-in-out infinite",
+              }} />
             )}
           </div>
-          <span
-            style={{
-              fontSize: 10,
-              color: i === 6 ? "#a5b4fc" : "rgba(255,255,255,0.25)",
-              fontFamily: "'DM Sans', sans-serif",
-            }}
-          >
+          <span style={{ fontSize: 10, color: i === 6 ? "#a5b4fc" : "rgba(255,255,255,0.25)", fontFamily: "'DM Sans', sans-serif" }}>
             {days[i]}
           </span>
         </div>
@@ -124,38 +96,17 @@ function MiniBarChart({ data, days }: { data: number[]; days: string[] }) {
 }
 
 // ─── Radial Progress ─────────────────────────────────────────────────────────
-function RadialProgress({
-  value,
-  max,
-  color,
-  size = 80,
-}: {
-  value: number;
-  max: number;
-  color: string;
-  size?: number;
-}) {
+function RadialProgress({ value, max, color, size = 80 }: { value: number; max: number; color: string; size?: number }) {
   const pct = Math.min(value / max, 1);
   const r = (size - 10) / 2;
   const circ = 2 * Math.PI * r;
   const dash = pct * circ;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={6} />
       <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        fill="none"
-        stroke="rgba(255,255,255,0.06)"
-        strokeWidth={6}
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth={6}
+        cx={size / 2} cy={size / 2} r={r} fill="none"
+        stroke={color} strokeWidth={6}
         strokeDasharray={`${dash} ${circ}`}
         strokeLinecap="round"
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
@@ -189,8 +140,7 @@ export default function DashboardPage() {
 
   const obData = (onboarding?.data ?? {}) as Record<string, unknown>;
   const autoBuy = Boolean(obData.auto_buy);
-  const maxPerDay =
-    typeof obData.max_per_day === "number" ? obData.max_per_day : 3;
+  const maxPerDay = typeof obData.max_per_day === "number" ? obData.max_per_day : 3;
   const minBalanceDollars =
     typeof obData.min_balance === "number" ? obData.min_balance : 200;
 
@@ -205,9 +155,7 @@ export default function DashboardPage() {
         data: { ...obData, auto_buy: next },
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.dashboard.summary,
-      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary });
       void queryClient.invalidateQueries({ queryKey: queryKeys.onboarding.me });
     },
   });
@@ -344,7 +292,7 @@ export default function DashboardPage() {
           font-weight: 500;
           color: rgba(255,255,255,0.22);
           letter-spacing: 0.9px;
-          text-transform: ;
+          text-transform: uppercase;
           padding: 14px 12px 6px;
         }
 
@@ -568,7 +516,7 @@ export default function DashboardPage() {
         }
 
         .autobuy-stat-val { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: #fff; }
-        .autobuy-stat-label { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 3px; text-transform: ; letter-spacing: 0.4px; }
+        .autobuy-stat-label { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.4px; }
 
         /* ── PROGRESS CARD ── */
         .progress-items { display: flex; flex-direction: column; gap: 14px; }
@@ -647,7 +595,7 @@ export default function DashboardPage() {
           font-size: 11px;
           font-weight: 500;
           color: rgba(255,255,255,0.3);
-          text-transform: ;
+          text-transform: uppercase;
           letter-spacing: 0.5px;
           padding: 0 10px 12px;
           text-align: left;
@@ -710,7 +658,7 @@ export default function DashboardPage() {
           padding: 18px;
         }
 
-        .wallet-balance-label { font-size: 11px; color: rgba(255,255,255,0.4); text-transform: ; letter-spacing: 0.6px; margin-bottom: 6px; }
+        .wallet-balance-label { font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 6px; }
         .wallet-balance-val { font-family: 'Syne', sans-serif; font-size: 30px; font-weight: 800; color: #fff; letter-spacing: -1px; }
         .wallet-currency { font-size: 16px; color: rgba(255,255,255,0.55); margin-right: 3px; }
 
@@ -859,7 +807,7 @@ export default function DashboardPage() {
           {/* ── SIDEBAR ── */}
           <aside className="sidebar">
             <div className="sidebar-section-label">Overview</div>
-            <Link href="/dashboard" className="sidebar-item active">
+            <Link href="/dashboard"   className="sidebar-item active">
               <LayoutDashboard size={15} strokeWidth={2} aria-hidden />
               Dashboard
             </Link>
@@ -868,13 +816,13 @@ export default function DashboardPage() {
               Marketplace
               <span className="sidebar-badge">9</span>
             </Link>
-            <Link href="/leads" className="sidebar-item">
+            <Link href="/leads"       className="sidebar-item">
               <ClipboardList size={15} strokeWidth={2} aria-hidden />
               My Leads
             </Link>
 
             <div className="sidebar-section-label">Billing</div>
-            <Link href="/wallet" className="sidebar-item">
+            <Link href="/wallet"       className="sidebar-item">
               <Wallet size={15} strokeWidth={2} aria-hidden />
               Wallet
             </Link>
@@ -888,7 +836,7 @@ export default function DashboardPage() {
               <Plug size={15} strokeWidth={2} aria-hidden />
               Integrations
             </Link>
-            <Link href="/settings" className="sidebar-item">
+            <Link href="/settings"    className="sidebar-item">
               <Settings size={15} strokeWidth={2} aria-hidden />
               Settings
             </Link>
@@ -929,9 +877,7 @@ export default function DashboardPage() {
                   {
                     Icon: Wallet,
                     iconBg: "rgba(16,185,129,0.12)",
-                    val: isLoading
-                      ? "—"
-                      : `$${(walletBalance / 100).toFixed(0)}`,
+                    val: isLoading ? "—" : `$${(walletBalance / 100).toFixed(0)}`,
                     label: "Wallet balance",
                     delta: "Live from wallet API",
                     type: "neu",
@@ -947,9 +893,7 @@ export default function DashboardPage() {
                   {
                     Icon: Receipt,
                     iconBg: "rgba(245,158,11,0.12)",
-                    val: isLoading
-                      ? "—"
-                      : `$${spendThisMonthDollars.toFixed(0)}`,
+                    val: isLoading ? "—" : `$${spendThisMonthDollars.toFixed(0)}`,
                     label: "Spent this month",
                     delta:
                       spendLimit > 0
@@ -976,19 +920,13 @@ export default function DashboardPage() {
               ).map((s, i) => {
                 const StatIcon = s.Icon;
                 return (
-                  <div
-                    className="stat-card"
-                    key={i}
-                    style={{ animationDelay: `${i * 0.06}s` }}
-                  >
+                  <div className="stat-card" key={i} style={{ animationDelay: `${i * 0.06}s` }}>
                     <div className="stat-icon" style={{ background: s.iconBg }}>
                       <StatIcon size={18} strokeWidth={2} aria-hidden />
                     </div>
                     <div className="stat-value">{s.val}</div>
                     <div className="stat-label">{s.label}</div>
-                    <div
-                      className={`stat-delta ${s.type === "up" ? "delta-up" : s.type === "down" ? "delta-down" : "delta-neu"}`}
-                    >
+                    <div className={`stat-delta ${s.type === "up" ? "delta-up" : s.type === "down" ? "delta-down" : "delta-neu"}`}>
                       {s.delta}
                     </div>
                   </div>
@@ -999,14 +937,9 @@ export default function DashboardPage() {
             {/* Mid grid */}
             <div className="mid-grid">
               {/* Weekly chart */}
-              <div
-                className="card chart-card"
-                style={{ animationDelay: "0.1s" }}
-              >
+              <div className="card chart-card" style={{ animationDelay: "0.1s" }}>
                 <div className="card-header">
-                  <div className="card-title">
-                    Wallet activity — last 7 days
-                  </div>
+                  <div className="card-title">Wallet activity — last 7 days</div>
                   <button
                     type="button"
                     className="card-action"
@@ -1026,22 +959,15 @@ export default function DashboardPage() {
                 </div>
                 <div className="chart-meta">
                   <div className="chart-meta-item">
-                    <div className="chart-meta-val">
-                      {isLoading ? "—" : weeklyTxSum}
-                    </div>
+                    <div className="chart-meta-val">{isLoading ? "—" : weeklyTxSum}</div>
                     <div className="chart-meta-label">Wallet txs (7d)</div>
                   </div>
                   <div className="chart-meta-item">
-                    <div className="chart-meta-val">
-                      {isLoading ? "—" : leadsThisMonth}
-                    </div>
+                    <div className="chart-meta-val">{isLoading ? "—" : leadsThisMonth}</div>
                     <div className="chart-meta-label">Lead purchases (mo)</div>
                   </div>
                   <div className="chart-meta-item">
-                    <div
-                      className="chart-meta-val"
-                      style={{ color: "#10b981" }}
-                    >
+                    <div className="chart-meta-val" style={{ color: "#10b981" }}>
                       {isLoading ? "—" : `$${spendThisMonthDollars.toFixed(0)}`}
                     </div>
                     <div className="chart-meta-label">Spent (month)</div>
@@ -1054,29 +980,19 @@ export default function DashboardPage() {
               <div className="card" style={{ animationDelay: "0.15s" }}>
                 <div className="card-header">
                   <div className="card-title">Auto-Buy</div>
-                  <Link href="/settings" className="card-action">
-                    Configure →
-                  </Link>
+                  <Link href="/settings" className="card-action">Configure →</Link>
                 </div>
                 <div className="autobuy-status">
                   <div className="autobuy-info">
                     <div className="autobuy-label">Distribution engine</div>
-                    <div className="autobuy-sub">
-                      {autoBuy
-                        ? "Actively buying matching leads"
-                        : "Paused — no leads will be auto-purchased"}
-                    </div>
+                    <div className="autobuy-sub">{autoBuy ? "Actively buying matching leads" : "Paused — no leads will be auto-purchased"}</div>
                   </div>
                   <button
                     type="button"
                     className={`toggle ${autoBuy ? "on" : ""}`}
-                    disabled={
-                      toggleAutoBuy.isPending || isLoading || !onboarding
-                    }
+                    disabled={toggleAutoBuy.isPending || isLoading || !onboarding}
                     onClick={() => toggleAutoBuy.mutate(!autoBuy)}
-                    title={
-                      !onboarding ? "Complete onboarding first" : undefined
-                    }
+                    title={!onboarding ? "Complete onboarding first" : undefined}
                   >
                     <div className="toggle-thumb" />
                   </button>
@@ -1099,24 +1015,12 @@ export default function DashboardPage() {
               <div className="card" style={{ animationDelay: "0.18s" }}>
                 <div className="card-header">
                   <div className="card-title">Monthly usage</div>
-                  <Link href="/subscriptions" className="card-action">
-                    Upgrade →
-                  </Link>
+                  <Link href="/subscriptions" className="card-action">Upgrade →</Link>
                 </div>
                 <div className="progress-items">
                   {[
-                    {
-                      name: "Leads purchased",
-                      used: leadsThisMonth,
-                      max: leadsLimit,
-                      color: "#6366f1",
-                    },
-                    {
-                      name: "Wallet spend",
-                      used: spendThisMonthDollars,
-                      max: spendLimit,
-                      color: "#10b981",
-                    },
+                    { name: "Leads purchased", used: leadsThisMonth, max: leadsLimit, color: "#6366f1" },
+                    { name: "Wallet spend", used: spendThisMonthDollars, max: spendLimit, color: "#10b981" },
                     {
                       name: "Auto-buy (demo cap)",
                       used: Math.min(spendThisMonthDollars, 1000),
@@ -1127,18 +1031,10 @@ export default function DashboardPage() {
                     <div key={p.name} className="progress-item">
                       <div className="progress-row">
                         <span className="progress-name">{p.name}</span>
-                        <span className="progress-vals">
-                          <span>{p.used}</span> / {p.max}
-                        </span>
+                        <span className="progress-vals"><span>{p.used}</span> / {p.max}</span>
                       </div>
                       <div className="progress-track">
-                        <div
-                          className="progress-fill"
-                          style={{
-                            width: `${Math.min((p.used / p.max) * 100, 100)}%`,
-                            background: p.color,
-                          }}
-                        />
+                        <div className="progress-fill" style={{ width: `${Math.min((p.used / p.max) * 100, 100)}%`, background: p.color }} />
                       </div>
                     </div>
                   ))}
@@ -1149,9 +1045,7 @@ export default function DashboardPage() {
               <div className="card" style={{ animationDelay: "0.22s" }}>
                 <div className="card-header">
                   <div className="card-title">Integrations</div>
-                  <Link href="/integrations" className="card-action">
-                    Manage →
-                  </Link>
+                  <Link href="/integrations" className="card-action">Manage →</Link>
                 </div>
                 <div className="integ-list">
                   {(() => {
@@ -1181,28 +1075,19 @@ export default function DashboardPage() {
                     return items.map((itg) => {
                       const IntegIcon = itg.Icon;
                       return (
-                        <div key={itg.name} className="integ-item">
-                          <div
-                            className="integ-icon"
-                            style={{ background: itg.bg }}
-                          >
-                            <IntegIcon size={16} strokeWidth={2} aria-hidden />
-                          </div>
-                          <div className="integ-info">
-                            <div className="integ-name">{itg.name}</div>
-                            <div
-                              className="integ-status"
-                              style={{ color: itg.color }}
-                            >
-                              <span
-                                className="integ-dot"
-                                style={{ background: itg.color }}
-                              />
-                              {itg.status}
-                            </div>
+                      <div key={itg.name} className="integ-item">
+                        <div className="integ-icon" style={{ background: itg.bg }}>
+                          <IntegIcon size={16} strokeWidth={2} aria-hidden />
+                        </div>
+                        <div className="integ-info">
+                          <div className="integ-name">{itg.name}</div>
+                          <div className="integ-status" style={{ color: itg.color }}>
+                            <span className="integ-dot" style={{ background: itg.color }} />
+                            {itg.status}
                           </div>
                         </div>
-                      );
+                      </div>
+                    );
                     });
                   })()}
                 </div>
@@ -1213,9 +1098,7 @@ export default function DashboardPage() {
             <div className="card" style={{ animationDelay: "0.25s" }}>
               <div className="card-header">
                 <div className="card-title">Recent leads</div>
-                <Link href="/leads" className="card-action">
-                  View all →
-                </Link>
+                <Link href="/leads" className="card-action">View all →</Link>
               </div>
               <div className="leads-table-wrap">
                 <table>
@@ -1233,20 +1116,9 @@ export default function DashboardPage() {
                   <tbody>
                     {recentLeads.length === 0 ? (
                       <tr>
-                        <td
-                          colSpan={7}
-                          style={{
-                            padding: "28px 10px",
-                            textAlign: "center",
-                            color: "rgba(255,255,255,0.4)",
-                            fontSize: 13,
-                          }}
-                        >
+                        <td colSpan={7} style={{ padding: "28px 10px", textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
                           No purchased leads yet. Browse the{" "}
-                          <Link
-                            href="/marketplace"
-                            style={{ color: "#a5b4fc" }}
-                          >
+                          <Link href="/marketplace" style={{ color: "#a5b4fc" }}>
                             marketplace
                           </Link>{" "}
                           or top up your{" "}
@@ -1258,57 +1130,18 @@ export default function DashboardPage() {
                       </tr>
                     ) : (
                       recentLeads.map((row) => (
-                        <tr
-                          key={row.assignment_id}
-                          style={{
-                            borderBottom: "1px solid rgba(255,255,255,0.06)",
-                          }}
-                        >
+                        <tr key={row.assignment_id} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                           <td style={{ padding: "12px 10px", fontSize: 13 }}>
-                            <Link
-                              href={`/leads?focus=${row.lead_id}`}
-                              style={{
-                                color: "#e0e7ff",
-                                textDecoration: "none",
-                              }}
-                            >
+                            <Link href={`/leads?focus=${row.lead_id}`} style={{ color: "#e0e7ff", textDecoration: "none" }}>
                               {row.market}
                             </Link>
                           </td>
-                          <td
-                            style={{
-                              padding: "12px 10px",
-                              fontSize: 13,
-                              color: "rgba(255,255,255,0.65)",
-                            }}
-                          >
-                            {row.type}
-                          </td>
-                          <td
-                            style={{
-                              padding: "12px 10px",
-                              fontSize: 12,
-                              color: "rgba(255,255,255,0.5)",
-                            }}
-                          >
-                            {row.exclusivity}
-                          </td>
-                          <td style={{ padding: "12px 10px", fontSize: 12 }}>
-                            {row.status}
-                          </td>
-                          <td style={{ padding: "12px 10px", fontSize: 12 }}>
-                            {row.ghl_sync_status}
-                          </td>
-                          <td style={{ padding: "12px 10px", fontSize: 13 }}>
-                            ${(Number(row.charged_amount) / 100).toFixed(0)}
-                          </td>
-                          <td
-                            style={{
-                              padding: "12px 10px",
-                              fontSize: 12,
-                              color: "rgba(255,255,255,0.45)",
-                            }}
-                          >
+                          <td style={{ padding: "12px 10px", fontSize: 13, color: "rgba(255,255,255,0.65)" }}>{row.type}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{row.exclusivity}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 12 }}>{row.status}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 12 }}>{row.ghl_sync_status}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 13 }}>${(Number(row.charged_amount) / 100).toFixed(0)}</td>
+                          <td style={{ padding: "12px 10px", fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
                             {new Date(row.assigned_at).toLocaleDateString()}
                           </td>
                         </tr>
@@ -1333,25 +1166,17 @@ export default function DashboardPage() {
                 </div>
                 <div className="wallet-meta">
                   <div className="wallet-meta-item">
-                    <div className="wallet-meta-val">
-                      ${isLoading ? "—" : spendThisMonthDollars.toFixed(0)}
+                    <div className="wallet-meta-val">$
+                      {isLoading ? "—" : spendThisMonthDollars.toFixed(0)}
                     </div>
                     <div className="wallet-meta-label">Spent this month</div>
                   </div>
                   <div className="wallet-meta-item">
-                    <div
-                      className="wallet-meta-val"
-                      style={{ display: "flex", alignItems: "center", gap: 6 }}
-                    >
+                    <div className="wallet-meta-val" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {wallet?.auto_reload_enabled ? (
                         <>
                           Auto
-                          <Check
-                            size={15}
-                            strokeWidth={2.5}
-                            style={{ color: "#10b981" }}
-                            aria-label="On"
-                          />
+                          <Check size={15} strokeWidth={2.5} style={{ color: "#10b981" }} aria-label="On" />
                         </>
                       ) : (
                         "Auto off"
@@ -1364,9 +1189,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
-                <Link href="/wallet" className="add-funds-btn">
-                  + Add funds
-                </Link>
+                <Link href="/wallet" className="add-funds-btn">+ Add funds</Link>
               </div>
             </div>
 
@@ -1381,9 +1204,7 @@ export default function DashboardPage() {
                       : "No active plan"}
                   </div>
                   <div className="sub-plan-badge">
-                    {subscription?.status
-                      ? subscription.status.toUpperCase()
-                      : "—"}
+                    {subscription?.status ? subscription.status.toUpperCase() : "—"}
                   </div>
                 </div>
                 <div className="sub-renews">
@@ -1398,9 +1219,7 @@ export default function DashboardPage() {
                       {leadsThisMonth}
                       {subscription?.monthly_lead_limit != null
                         ? ` / ${subscription.monthly_lead_limit}`
-                        : leadsLimit
-                          ? ` / ${leadsLimit}`
-                          : ""}
+                        : leadsLimit ? ` / ${leadsLimit}` : ""}
                     </span>
                   </div>
                   <div className="progress-track">
@@ -1408,12 +1227,7 @@ export default function DashboardPage() {
                       className="progress-fill"
                       style={{
                         width: `${Math.min(
-                          (leadsThisMonth /
-                            Math.max(
-                              subscription?.monthly_lead_limit ?? leadsLimit,
-                              1,
-                            )) *
-                            100,
+                          (leadsThisMonth / Math.max(subscription?.monthly_lead_limit ?? leadsLimit, 1)) * 100,
                           100,
                         )}%`,
                         background: "#6366f1",
@@ -1421,24 +1235,16 @@ export default function DashboardPage() {
                     />
                   </div>
                 </div>
-                <Link href="/subscriptions" className="upgrade-btn">
-                  Manage subscription →
-                </Link>
+                <Link href="/subscriptions" className="upgrade-btn">Manage subscription →</Link>
               </div>
             </div>
 
             {/* Activity */}
             <div className="panel-section">
               <div className="panel-title">Recent activity</div>
-              <div className="activity-feed">
+                <div className="activity-feed">
                 {activityItems.length === 0 && !isLoading ? (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      color: "rgba(255,255,255,0.35)",
-                      padding: "8px 0",
-                    }}
-                  >
+                  <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", padding: "8px 0" }}>
                     No wallet activity yet.
                   </div>
                 ) : (

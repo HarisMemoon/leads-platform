@@ -54,7 +54,7 @@ const styles = {
   th: {
     padding: "10px 12px",
     fontSize: 11,
-    textTransform: "" as const,
+    textTransform: "uppercase" as const,
     letterSpacing: "0.04em",
     color: "rgba(255,255,255,0.45)",
     fontWeight: 500,
@@ -204,7 +204,7 @@ function CodeBlock({ title, code }: { title?: string; code: string }) {
         <span
           style={{
             fontSize: 11,
-            textTransform: "",
+            textTransform: "uppercase",
             letterSpacing: "0.06em",
             color: "rgba(255,255,255,0.35)",
             fontWeight: 600,
@@ -270,9 +270,7 @@ function Endpoint({
       }}
     >
       <span style={styles.methodBadge}>{method}</span>
-      <code style={{ ...styles.code, fontSize: 13.5, color: "#fff" }}>
-        {path}
-      </code>
+      <code style={{ ...styles.code, fontSize: 13.5, color: "#fff" }}>{path}</code>
       <span
         style={{
           marginLeft: "auto",
@@ -473,7 +471,7 @@ const SINGLE_LEAD_FIELDS: FieldRow[] = [
   {
     field: "quality_score",
     type: "integer (0–100)",
-    desc: "Lead quality score. Defaults to 70.",
+    desc: 'Lead quality score. Defaults to 70.',
     example: "82",
   },
   {
@@ -813,7 +811,7 @@ const POST_RESPONSE = `{
 
 const INBOUND_CURL = `curl -X POST ${API_BASE}/inbound/lead \\
   -H "Content-Type: application/json" \\
-  -H "X-Vendor-API-Key: YOUR_API_KEY" \\
+  -H "X-Vendor-Key: YOUR_API_KEY" \\
   -d '{
     "market": "Phoenix, AZ",
     "lead_type": "inherited",
@@ -847,7 +845,7 @@ export default function ApiDocsPage() {
               margin: 0,
               fontSize: 12,
               letterSpacing: "0.08em",
-              textTransform: "",
+              textTransform: "uppercase",
               color: "rgba(165,180,252,0.9)",
               fontWeight: 700,
             }}
@@ -932,9 +930,7 @@ export default function ApiDocsPage() {
               Admin Console → Lead Vendors
             </strong>
             . The same key works for every endpoint below — only the{" "}
-            <strong style={{ color: "rgba(255,255,255,0.8)" }}>
-              header name
-            </strong>{" "}
+            <strong style={{ color: "rgba(255,255,255,0.8)" }}>header name</strong>{" "}
             changes depending on which family of endpoints you're calling.
           </p>
           <FieldTable
@@ -942,15 +938,21 @@ export default function ApiDocsPage() {
               {
                 field: "X-Vendor-API-Key",
                 type: "header",
-                desc: "Used for ALL vendor endpoints: /vendor/ping, /vendor/post, /vendor/lead, /inbound/lead, and /inbound/leads. (Legacy X-Vendor-Key is still accepted on the /inbound endpoints only.)",
+                desc: "Used for /vendor/ping, /vendor/post, and /vendor/lead.",
+                example: "YOUR_API_KEY",
+              },
+              {
+                field: "X-Vendor-Key",
+                type: "header",
+                desc: "Used for /inbound/lead and /inbound/leads.",
                 example: "YOUR_API_KEY",
               },
             ]}
           />
           <p style={{ ...styles.p, marginBottom: 0 }}>
             If a request is missing its API key header or the key is invalid /
-            disabled, the endpoint returns{" "}
-            <code style={styles.code}>401 Unauthorized</code>.
+            disabled, the endpoint returns <code style={styles.code}>401
+            Unauthorized</code>.
           </p>
         </div>
 
@@ -958,9 +960,9 @@ export default function ApiDocsPage() {
         <div id="single-lead" style={styles.card}>
           <h2 style={styles.h2}>1. Single Lead — Recommended</h2>
           <p style={styles.p}>
-            Send everything in one call. Internally this validates the lead like
-            a ping (duplicate check, market matching), then creates the lead
-            directly in the marketplace with status{" "}
+            Send everything in one call. Internally this validates the lead
+            like a ping (duplicate check, market matching), then creates the
+            lead directly in the marketplace with status{" "}
             <code style={styles.code}>available</code>, runs auto-distribution
             to matching buyers, and fires outbound pings to other platforms
             (e.g. Juiced). No wallet charge happens at this step — buyers
@@ -987,10 +989,9 @@ export default function ApiDocsPage() {
           <p style={styles.p}>
             Ping first with the lead's location, type, and seller-matching
             fields. The platform checks it against buyer demand and returns a
-            matched price and a short-lived{" "}
-            <code style={styles.code}>ping_id</code>. If accepted, post the full
-            lead within the TTL window to create it and immediately assign it to
-            the matched buyer (this step{" "}
+            matched price and a short-lived <code style={styles.code}>ping_id</code>.
+            If accepted, post the full lead within the TTL window to create it
+            and immediately assign it to the matched buyer (this step{" "}
             <strong style={{ color: "rgba(255,255,255,0.8)" }}>does</strong>{" "}
             charge the buyer's wallet). All fields accept the same aliases
             listed in the Single Lead table above (e.g.{" "}
@@ -1029,8 +1030,8 @@ export default function ApiDocsPage() {
             The simplest path — just a market and lead type, plus optional
             pricing and metadata. The lead is created directly with status{" "}
             <code style={styles.code}>available</code>, then auto-distribution
-            and outbound pings run the same as the Single Lead endpoint. A batch
-            variant is available at{" "}
+            and outbound pings run the same as the Single Lead endpoint. A
+            batch variant is available at{" "}
             <code style={styles.code}>POST /inbound/leads</code>, which accepts{" "}
             <code style={styles.code}>{`{ "leads": [ ... ] }`}</code> — an array
             of the same object shape, processed independently.
@@ -1038,7 +1039,7 @@ export default function ApiDocsPage() {
           <Endpoint
             method="POST"
             path="/inbound/lead"
-            authHeader="X-Vendor-API-Key"
+            authHeader="X-Vendor-Key"
           />
           <h3 style={styles.h3}>Fields</h3>
           <FieldTable rows={INBOUND_FIELDS} />
@@ -1059,8 +1060,8 @@ export default function ApiDocsPage() {
             fontSize: 12.5,
           }}
         >
-          Need an API key or have questions about your integration? Contact your
-          Newleey account manager.{" "}
+          Need an API key or have questions about your integration? Contact
+          your Newleey account manager.{" "}
           <Link href="/" style={{ color: "rgba(165,180,252,0.9)" }}>
             ← Back to Newleey
           </Link>

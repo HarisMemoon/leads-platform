@@ -91,13 +91,10 @@ export default function InventoryTab() {
   return (
     <div className="inventory-container">
       <style>{`
-        /* CRITICAL: Added width: 100% and min-width: 0 to force flex children to shrink */
         .inventory-container { 
           display: flex; 
           flex-direction: column; 
           gap: 24px; 
-          width: 100%;
-          min-width: 0;
           animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1); 
         }
         
@@ -114,6 +111,7 @@ export default function InventoryTab() {
           width: 100%;
           overflow-x: auto;
           -webkit-overflow-scrolling: touch;
+          /* Hide scrollbar for cleaner look */
           scrollbar-width: none; 
         }
         .segmented-control-wrapper::-webkit-scrollbar { display: none; }
@@ -151,13 +149,13 @@ export default function InventoryTab() {
           background: rgba(255, 255, 255, 0.05); 
         }
 
+        /* Responsive Stat Grid */
         .stat-grid { 
           display: grid; 
           grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); 
           gap: 16px; 
         }
 
-        /* CRITICAL: Constrain the glass panel so the table inside it can scroll */
         .glass-panel { 
           background: linear-gradient(145deg, rgba(24, 24, 27, 0.6), rgba(9, 9, 11, 0.8)); 
           border: 1px solid rgba(255, 255, 255, 0.05); 
@@ -165,10 +163,6 @@ export default function InventoryTab() {
           backdrop-filter: blur(16px); 
           box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5); 
           overflow: hidden; 
-          width: 100%;
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
         }
         
         .filter-bar { 
@@ -183,11 +177,9 @@ export default function InventoryTab() {
         
         /* Table Styles */
         .table-wrapper { 
-          display: block;
           overflow-x: auto; 
           width: 100%; 
-          max-width: 100%; 
-          -webkit-overflow-scrolling: touch; 
+          /* Custom horizontal scrollbar for tables */
           scrollbar-width: thin;
           scrollbar-color: rgba(255,255,255,0.2) transparent;
         }
@@ -205,12 +197,11 @@ export default function InventoryTab() {
           padding: 16px 24px; 
           font-size: 11px; 
           font-weight: 700; 
-          text-transform: ; 
+          text-transform: uppercase; 
           letter-spacing: 0.08em; 
           color: rgba(255, 255, 255, 0.35); 
           background: rgba(0,0,0,0.2); 
           border-bottom: 1px solid rgba(255, 255, 255, 0.05); 
-          white-space: nowrap;
         }
         .admin-td { 
           padding: 16px 24px; 
@@ -272,7 +263,7 @@ export default function InventoryTab() {
 
         @media (max-width: 768px) {
           .header-row { flex-direction: column; align-items: stretch; }
-          .segmented-control-wrapper { width: 100vw; margin-left: -24px; padding: 0 24px; }
+          .segmented-control-wrapper { width: calc(100vw - 48px); /* accounts for padding */ }
           .filter-bar { flex-direction: column; align-items: stretch; gap: 16px; }
           .filter-bar > div { justify-content: space-between; }
         }
@@ -330,20 +321,13 @@ export default function InventoryTab() {
 
       <div className="glass-panel">
         <div className="filter-bar">
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              minWidth: 0,
-            }}
-          >
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <span
               style={{
                 fontSize: 12,
                 fontWeight: 600,
                 color: "rgba(255,255,255,0.4)",
-                textTransform: "",
+                textTransform: "uppercase",
                 letterSpacing: "0.05em",
                 display: "none",
               }}
@@ -372,7 +356,6 @@ export default function InventoryTab() {
               alignItems: "center",
               flexWrap: "wrap",
               justifyContent: "space-between",
-              minWidth: 0,
             }}
           >
             <div
@@ -384,7 +367,6 @@ export default function InventoryTab() {
                 padding: "6px 12px",
                 borderRadius: 8,
                 border: "1px solid rgba(255,255,255,0.05)",
-                whiteSpace: "nowrap",
               }}
             >
               <span
@@ -453,216 +435,194 @@ export default function InventoryTab() {
         )}
 
         {items.length > 0 && (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              width: "100%" /* Fix */,
-              minWidth: 0 /* Fix */,
-            }}
-          >
-            <div className="table-wrapper">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th className="admin-th">Title</th>
-                    <th className="admin-th">Market & Type</th>
-                    <th className="admin-th">Source</th>
-                    <th className="admin-th">Status</th>
-                    <th className="admin-th">Created</th>
-                    <th
-                      className="admin-th"
-                      style={{ textAlign: "right", paddingRight: 32 }}
+          <div className="table-wrapper">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th className="admin-th">Title</th>
+                  <th className="admin-th">Market & Type</th>
+                  <th className="admin-th">Source</th>
+                  <th className="admin-th">Status</th>
+                  <th className="admin-th">Created</th>
+                  <th
+                    className="admin-th"
+                    style={{ textAlign: "right", paddingRight: 32 }}
+                  >
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((l) => {
+                  const isDeleting = confirmDeleteId === l.id;
+                  return (
+                    <tr
+                      key={l.id}
+                      className="admin-tr"
+                      style={{
+                        background: isDeleting
+                          ? "rgba(239,68,68,0.05)"
+                          : undefined,
+                      }}
                     >
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((l) => {
-                    const isDeleting = confirmDeleteId === l.id;
-                    return (
-                      <tr
-                        key={l.id}
-                        className="admin-tr"
-                        style={{
-                          background: isDeleting
-                            ? "rgba(239,68,68,0.05)"
-                            : undefined,
-                        }}
-                      >
-                        <td
-                          className="admin-td"
-                          style={{ fontWeight: 600, whiteSpace: "nowrap" }}
-                        >
-                          {l.title || "Untitled Lead"}
-                        </td>
-                        <td className="admin-td">
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                            }}
-                          >
-                            <span
-                              style={{
-                                color: "rgba(255,255,255,0.9)",
-                                fontSize: 13,
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {l.market || "—"}
-                            </span>
-                            <span
-                              style={{
-                                color: "rgba(255,255,255,0.4)",
-                                fontSize: 11,
-                                textTransform: "",
-                                letterSpacing: "0.05em",
-                                fontWeight: 600,
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {l.lead_type}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="admin-td">
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 6,
-                              background:
-                                l.source === "inbound"
-                                  ? "rgba(99,102,241,0.1)"
-                                  : "rgba(16,185,129,0.1)",
-                              color:
-                                l.source === "inbound" ? "#a5b4fc" : "#6ee7b7",
-                              border: `1px solid ${l.source === "inbound" ? "rgba(99,102,241,0.2)" : "rgba(16,185,129,0.2)"}`,
-                              padding: "4px 10px",
-                              borderRadius: 6,
-                              fontSize: 11,
-                              fontWeight: 700,
-                              textTransform: "",
-                              letterSpacing: "0.05em",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: 4,
-                                height: 4,
-                                borderRadius: "50%",
-                                background: "currentColor",
-                              }}
-                            />
-                            {l.source || "System"}
-                          </span>
-                        </td>
-                        <td className="admin-td">
-                          <Pill
-                            tone={
-                              l.status === "available"
-                                ? "good"
-                                : l.status === "sold"
-                                  ? "info"
-                                  : "default"
-                            }
-                          >
-                            {l.status}
-                          </Pill>
-                        </td>
-                        <td
-                          className="admin-td"
+                      <td className="admin-td" style={{ fontWeight: 600 }}>
+                        {l.title || "Untitled Lead"}
+                      </td>
+                      <td className="admin-td">
+                        <div
                           style={{
-                            color: "rgba(255,255,255,0.4)",
-                            fontSize: 12,
-                            whiteSpace: "nowrap",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
                           }}
                         >
-                          {new Date(l.created_at).toLocaleDateString(
-                            undefined,
-                            {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            },
-                          )}
-                        </td>
-                        <td
-                          className="admin-td"
-                          style={{ textAlign: "right", paddingRight: 32 }}
+                          <span
+                            style={{
+                              color: "rgba(255,255,255,0.9)",
+                              fontSize: 13,
+                            }}
+                          >
+                            {l.market || "—"}
+                          </span>
+                          <span
+                            style={{
+                              color: "rgba(255,255,255,0.4)",
+                              fontSize: 11,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {l.lead_type}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="admin-td">
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 6,
+                            background:
+                              l.source === "inbound"
+                                ? "rgba(99,102,241,0.1)"
+                                : "rgba(16,185,129,0.1)",
+                            color:
+                              l.source === "inbound" ? "#a5b4fc" : "#6ee7b7",
+                            border: `1px solid ${l.source === "inbound" ? "rgba(99,102,241,0.2)" : "rgba(16,185,129,0.2)"}`,
+                            padding: "4px 10px",
+                            borderRadius: 6,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                          }}
                         >
                           <div
                             style={{
-                              display: "flex",
-                              gap: 8,
-                              justifyContent: "flex-end",
-                              alignItems: "center",
+                              width: 4,
+                              height: 4,
+                              borderRadius: "50%",
+                              background: "currentColor",
                             }}
-                          >
-                            {isDeleting ? (
-                              <>
-                                <span
-                                  style={{
-                                    fontSize: 11,
-                                    color: "#fca5a5",
-                                    marginRight: 8,
-                                    fontWeight: 600,
-                                    display: "none",
-                                  }}
-                                >
-                                  Are you sure?
-                                </span>
-                                <button
-                                  className="action-btn"
-                                  onClick={() => setConfirmDeleteId(null)}
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  className="action-btn danger"
-                                  disabled={deleteMut.isPending}
-                                  onClick={() => deleteMut.mutate(l.id)}
-                                  style={{
-                                    background: "#ef4444",
-                                    color: "#fff",
-                                    borderColor: "#ef4444",
-                                  }}
-                                >
-                                  {deleteMut.isPending ? "..." : "Confirm"}
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  className="action-btn"
-                                  onClick={() => setEditLead(l)}
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  className="action-btn"
-                                  style={{
-                                    borderColor: "transparent",
-                                    color: "rgba(255,255,255,0.4)",
-                                  }}
-                                  onClick={() => setConfirmDeleteId(l.id)}
-                                >
-                                  Delete
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                          />
+                          {l.source || "System"}
+                        </span>
+                      </td>
+                      <td className="admin-td">
+                        <Pill
+                          tone={
+                            l.status === "available"
+                              ? "good"
+                              : l.status === "sold"
+                                ? "info"
+                                : "default"
+                          }
+                        >
+                          {l.status}
+                        </Pill>
+                      </td>
+                      <td
+                        className="admin-td"
+                        style={{ color: "rgba(255,255,255,0.4)", fontSize: 12 }}
+                      >
+                        {new Date(l.created_at).toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </td>
+                      <td
+                        className="admin-td"
+                        style={{ textAlign: "right", paddingRight: 32 }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            justifyContent: "flex-end",
+                            alignItems: "center",
+                          }}
+                        >
+                          {isDeleting ? (
+                            <>
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  color: "#fca5a5",
+                                  marginRight: 8,
+                                  fontWeight: 600,
+                                  display: "none",
+                                }}
+                              >
+                                Are you sure?
+                              </span>
+                              <button
+                                className="action-btn"
+                                onClick={() => setConfirmDeleteId(null)}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                className="action-btn danger"
+                                disabled={deleteMut.isPending}
+                                onClick={() => deleteMut.mutate(l.id)}
+                                style={{
+                                  background: "#ef4444",
+                                  color: "#fff",
+                                  borderColor: "#ef4444",
+                                }}
+                              >
+                                {deleteMut.isPending ? "..." : "Confirm"}
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="action-btn"
+                                onClick={() => setEditLead(l)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="action-btn"
+                                style={{
+                                  borderColor: "transparent",
+                                  color: "rgba(255,255,255,0.4)",
+                                }}
+                                onClick={() => setConfirmDeleteId(l.id)}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

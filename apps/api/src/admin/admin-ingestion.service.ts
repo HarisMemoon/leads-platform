@@ -15,7 +15,6 @@ import {
 import { LeadPricingService } from '../lead-pricing/lead-pricing.service';
 import { DistributionService } from '../distribution/distribution.service';
 import { OutboundPingService } from '../outbound/outbound-ping.service';
-import { LeadDedupService } from '../leads/lead-dedup.service';
 
 const FAILURE_SAMPLE_LIMIT = 25;
 
@@ -31,12 +30,8 @@ export class AdminIngestionService {
     private readonly leadPricingService: LeadPricingService,
     private readonly distributionService: DistributionService,
     private readonly outboundPingService: OutboundPingService,
-    private readonly leadDedupService: LeadDedupService,
   ) {}
 
-  // Admin BULK IMPORT (CSV): rows are persisted one at a time through the
-  // same per-lead rules as every other entry path — no batch atomicity;
-  // failed rows are counted and sampled on the batch record.
   async createBatch(uploadedByUserId: string, dto: CreateIngestionBatchDto) {
     const batch = this.batchRepo.create({
       filename: dto.filename,
@@ -72,9 +67,7 @@ export class AdminIngestionService {
     saved.processed_rows = processed;
     saved.failed_rows = failed;
     saved.failure_samples = samples;
-    saved.status = (
-      failed === 0 ? 'processed' : processed > 0 ? 'processed' : 'failed'
-    ) as IngestionBatchStatus;
+    saved.status = (failed === 0 ? 'processed' : processed > 0 ? 'processed' : 'failed') as IngestionBatchStatus;
     saved.processed_at = new Date();
     if (failed > 0 && processed === 0) {
       saved.error_message = `All ${failed} rows failed validation`;
@@ -91,33 +84,16 @@ export class AdminIngestionService {
     if (!row.market.trim() || !row.lead_type.trim()) {
       throw new Error('market and lead_type are required');
     }
-    // Duplicate check — same shared rule as every other entry path.
-    // A duplicate row FAILS (counted in failed_rows with this reason in the
-    // failure samples) instead of silently double-listing the seller. Rows
-    // are saved one at a time, so duplicates WITHIN one CSV are caught too.
-    const duplicate = await this.leadDedupService.findDuplicate({
-      phone: row.contact_phone,
-      email: row.contact_email,
-      address: row.address,
-      zip: row.zip,
-    });
-    if (duplicate) {
-      throw new Error(`duplicate_lead: matches existing lead ${duplicate.id}`);
-    }
     const score =
       typeof row.quality_score === 'number'
         ? Math.max(0, Math.min(100, row.quality_score))
         : 50;
 
     const isExclusive = row.exclusivity_level === 'exclusive';
-    const exclusivityLevel = isExclusive
-      ? ExclusivityLevel.EXCLUSIVE
-      : ExclusivityLevel.SHARED;
+    const exclusivityLevel = isExclusive ? ExclusivityLevel.EXCLUSIVE : ExclusivityLevel.SHARED;
     // Pricing always from admin-controlled lead_pricing_config — ignore any price in the row
     const { exclusive: exclusivePriceCents, shared: sharedPriceCents } =
-      await this.leadPricingService.getPricesForLead(
-        row.lead_type?.trim() ?? 'inbound',
-      );
+      await this.leadPricingService.getPricesForLead(row.lead_type?.trim() ?? 'inbound');
 
     const lead = this.leadRepo.create({
       title: row.title?.trim() || `${row.lead_type} · ${row.market}`,
@@ -131,11 +107,7 @@ export class AdminIngestionService {
       list_price_anchor_cents: exclusivePriceCents,
       exclusive_price_cents: exclusivePriceCents,
       shared_price_cents: isExclusive ? null : sharedPriceCents,
-      max_non_exclusive_buyers: isExclusive
-        ? 1
-        : row.lead_type?.trim() === 'outbound'
-          ? 3
-          : 5,
+      max_non_exclusive_buyers: isExclusive ? 1 : (row.lead_type?.trim() === 'outbound' ? 3 : 5),
       metadata: {
         // contact
         seller_name: row.seller_name ?? null,
@@ -159,20 +131,10 @@ export class AdminIngestionService {
     const saved = await this.leadRepo.save(lead);
 
     // Enqueue auto-distribution + outbound pings — no admin approval needed
-    void this.distributionService
-      .enqueueLeadDistribution(saved.id)
-      .catch((e) =>
-        this.logger.warn(
-          `Distribution enqueue failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`,
-        ),
-      );
-    void this.outboundPingService
-      .pingAll(saved)
-      .catch((e) =>
-        this.logger.warn(
-          `Outbound ping failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`,
-        ),
-      );
+    void this.distributionService.enqueueLeadDistribution(saved.id)
+      .catch((e) => this.logger.warn(`Distribution enqueue failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`));
+    void this.outboundPingService.pingAll(saved)
+      .catch((e) => this.logger.warn(`Outbound ping failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`));
   }
 
   async listBatches(limit = 25) {

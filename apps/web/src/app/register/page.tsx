@@ -270,7 +270,7 @@ export default function RegisterPage() {
           font-weight: 500;
           color: rgba(255,255,255,0.45);
           letter-spacing: 0.6px;
-          text-transform: ;
+          text-transform: uppercase;
         }
 
         .input-wrap { position: relative; }
@@ -403,7 +403,7 @@ export default function RegisterPage() {
         .divider-or p {
           font-size: 12px;
           color: rgba(255,255,255,0.25);
-          text-transform: ;
+          text-transform: uppercase;
           letter-spacing: 1px;
           margin: 0;
         }

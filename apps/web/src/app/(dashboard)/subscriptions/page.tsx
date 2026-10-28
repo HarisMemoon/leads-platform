@@ -18,47 +18,21 @@ import { queryKeys } from "@/lib/query-keys";
 const ACTIVE_LIKE = ["active", "past_due", "paused"] as const;
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function badgeColor(status: SubscriptionDto["status"]) {
-  if (status === "active")
-    return {
-      bg: "rgba(34,197,94,0.12)",
-      border: "rgba(34,197,94,0.25)",
-      text: "#86efac",
-    };
-  if (status === "paused")
-    return {
-      bg: "rgba(250,204,21,0.1)",
-      border: "rgba(250,204,21,0.2)",
-      text: "#fde047",
-    };
-  if (status === "past_due")
-    return {
-      bg: "rgba(239,68,68,0.1)",
-      border: "rgba(239,68,68,0.25)",
-      text: "#fca5a5",
-    };
-  return {
-    bg: "rgba(148,163,184,0.1)",
-    border: "rgba(148,163,184,0.2)",
-    text: "#cbd5e1",
-  };
+  if (status === "active") return { bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.25)", text: "#86efac" };
+  if (status === "paused") return { bg: "rgba(250,204,21,0.1)", border: "rgba(250,204,21,0.2)", text: "#fde047" };
+  if (status === "past_due") return { bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.25)", text: "#fca5a5" };
+  return { bg: "rgba(148,163,184,0.1)", border: "rgba(148,163,184,0.2)", text: "#cbd5e1" };
 }
 
 function SubscriptionsContent() {
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const [synced, setSynced] = useState(false);
-  const [notice, setNotice] = useState<{
-    type: "success" | "error";
-    msg: string;
-  } | null>(null);
+  const [notice, setNotice] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
   const { data: sub, isLoading: subLoading } = useQuery({
     queryKey: queryKeys.subscriptions.me,
@@ -80,27 +54,14 @@ function SubscriptionsContent() {
     : "$20";
 
   const proBullets: Array<{ icon: typeof Check; text: string }> = [
-    {
-      icon: Users,
-      text: `Non-exclusive inbound leads — ${sharedInboundPrice} each (up to 5 buyers)`,
-    },
-    {
-      icon: Users,
-      text: `Non-exclusive outbound leads — ${sharedOutboundPrice} each (up to 3 buyers)`,
-    },
-    {
-      icon: Sparkles,
-      text: "Early marketplace access — see new leads before free members",
-    },
-    {
-      icon: Zap,
-      text: "Non-exclusive leads & auto-delivery — fresh matching leads routed to your CRM automatically",
-    },
+    { icon: Users, text: `Non-exclusive inbound leads — ${sharedInboundPrice} each (up to 5 buyers)` },
+    { icon: Users, text: `Non-exclusive outbound leads — ${sharedOutboundPrice} each (up to 3 buyers)` },
+    { icon: Sparkles, text: "Early marketplace access — see new leads before free members" },
+    { icon: Zap, text: "Non-exclusive leads & auto-delivery — fresh matching leads routed to your CRM automatically" },
     { icon: Check, text: "Cancel anytime" },
   ];
 
-  const hasActive =
-    sub != null && (ACTIVE_LIKE as readonly string[]).includes(sub.status);
+  const hasActive = sub != null && (ACTIVE_LIKE as readonly string[]).includes(sub.status);
 
   // ── Stripe checkout return handler ────────────────────────────────────────
   useEffect(() => {
@@ -108,21 +69,17 @@ function SubscriptionsContent() {
     const checkout = searchParams.get("checkout");
     const status = searchParams.get("status");
     const sessionId = searchParams.get("session_id");
-    if (sessionId && (checkout === "success" || status === "success")) {
+    if (
+      sessionId &&
+      (checkout === "success" || status === "success")
+    ) {
       setSynced(true);
       syncSubscriptionCheckout(sessionId)
         .then(() => {
-          setNotice({
-            type: "success",
-            msg: "Welcome to Pro! Your subscription is active.",
-          });
-          return queryClient.invalidateQueries({
-            queryKey: queryKeys.subscriptions.me,
-          });
+          setNotice({ type: "success", msg: "Welcome to Pro! Your subscription is active." });
+          return queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions.me });
         })
-        .catch(() =>
-          setNotice({ type: "error", msg: "Sync failed — please refresh." }),
-        );
+        .catch(() => setNotice({ type: "error", msg: "Sync failed — please refresh." }));
     } else if (checkout === "cancelled" || status === "cancel") {
       setNotice({ type: "error", msg: "Checkout cancelled." });
     }
@@ -131,9 +88,7 @@ function SubscriptionsContent() {
   // ── Mutations ─────────────────────────────────────────────────────────────
   const checkoutMut = useMutation({
     mutationFn: () => checkoutSubscription("pro"),
-    onSuccess: (res) => {
-      window.location.href = res.url;
-    },
+    onSuccess: (res) => { window.location.href = res.url; },
     onError: (e: Error) => setNotice({ type: "error", msg: e.message }),
   });
 
@@ -141,18 +96,14 @@ function SubscriptionsContent() {
     mutationFn: () => cancelSubscription(),
     onSuccess: async () => {
       setNotice({ type: "success", msg: "Subscription cancelled." });
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.subscriptions.me,
-      });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.subscriptions.me });
     },
     onError: (e: Error) => setNotice({ type: "error", msg: e.message }),
   });
 
   const portalMut = useMutation({
     mutationFn: () => createCustomerPortal(),
-    onSuccess: (res) => {
-      window.location.href = res.url;
-    },
+    onSuccess: (res) => { window.location.href = res.url; },
     onError: (e: Error) => setNotice({ type: "error", msg: e.message }),
   });
 
@@ -177,7 +128,7 @@ function SubscriptionsContent() {
         .plan-card.free { background: rgba(255,255,255,0.025); }
         .plan-card.pro { background: linear-gradient(145deg, rgba(99,102,241,0.12), rgba(139,92,246,0.08)); border-color: rgba(99,102,241,0.3); }
 
-        .plan-eyebrow { font-size: 10px; font-weight: 700; text-transform: ; letter-spacing: 1px; margin-bottom: 10px; color: rgba(255,255,255,0.35); }
+        .plan-eyebrow { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; color: rgba(255,255,255,0.35); }
         .plan-eyebrow.pro { color: #a5b4fc; }
         .plan-name { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; margin-bottom: 4px; }
         .plan-price { font-family: 'Syne', sans-serif; font-size: 36px; font-weight: 800; margin-bottom: 4px; }
@@ -202,7 +153,7 @@ function SubscriptionsContent() {
         .active-panel-title { font-family: 'Syne', sans-serif; font-size: 16px; font-weight: 700; margin-bottom: 16px; }
         .active-detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
         .active-detail-item { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 12px; }
-        .active-detail-label { font-size: 10px; color: rgba(255,255,255,0.3); text-transform: ; letter-spacing: 0.5px; margin-bottom: 5px; }
+        .active-detail-label { font-size: 10px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
         .active-detail-value { font-size: 14px; font-weight: 600; }
         .active-actions { display: flex; gap: 10px; flex-wrap: wrap; }
         .active-btn { padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; border: none; transition: opacity 0.15s; }
@@ -221,10 +172,7 @@ function SubscriptionsContent() {
       <div className="subs-root">
         <div className="subs-inner">
           <div className="subs-heading">Plans & Billing</div>
-          <div className="subs-sub">
-            Subscribe to unlock shared lead pricing and early marketplace
-            access.
-          </div>
+          <div className="subs-sub">Subscribe to unlock shared lead pricing and early marketplace access.</div>
 
           {notice && (
             <div className={`notice ${notice.type}`}>{notice.msg}</div>
@@ -234,9 +182,7 @@ function SubscriptionsContent() {
           <div className="plans-grid">
             {/* Free */}
             <div className="plan-card free" style={{ position: "relative" }}>
-              {!hasActive && !subLoading && (
-                <span className="current-badge">Current plan</span>
-              )}
+              {!hasActive && !subLoading && <span className="current-badge">Current plan</span>}
               <div className="plan-eyebrow">Free</div>
               <div className="plan-name">Marketplace</div>
               <div className="plan-price">$0</div>
@@ -263,24 +209,16 @@ function SubscriptionsContent() {
             <div className="plan-card pro" style={{ position: "relative" }}>
               {hasActive && <span className="current-badge">Active</span>}
               <div className="plan-eyebrow pro">Pro</div>
-              <div className="plan-name" style={{ color: "#a5b4fc" }}>
-                Membership
-              </div>
+              <div className="plan-name" style={{ color: "#a5b4fc" }}>Membership</div>
               <div className="plan-tagline">
-                Membership is {proDisplayPrice} per month. Access shared lead
-                pricing, auto-delivery, and early marketplace access.
+                Membership is {proDisplayPrice} per month. Access shared lead pricing, auto-delivery, and early marketplace access.
               </div>
               <div className="plan-price">{proDisplayPrice}</div>
-              <div className="plan-price-sub" style={{ marginBottom: 6 }}>
-                per month · cancel anytime
-              </div>
+              <div className="plan-price-sub" style={{ marginBottom: 6 }}>per month · cancel anytime</div>
               <ul className="plan-bullets">
                 {proBullets.map(({ icon: Icon, text }) => (
                   <li key={text} className="plan-bullet">
-                    <span
-                      className="plan-bullet-icon pro"
-                      style={{ display: "flex" }}
-                    >
+                    <span className="plan-bullet-icon pro" style={{ display: "flex" }}>
                       <Icon size={14} />
                     </span>
                     {text}
@@ -299,23 +237,11 @@ function SubscriptionsContent() {
                   onClick={() => checkoutMut.mutate()}
                 >
                   {checkoutMut.isPending ? (
-                    <span
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <Loader2
-                        size={14}
-                        style={{ animation: "spin 1s linear infinite" }}
-                      />
+                    <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                      <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
                       Redirecting…
                     </span>
-                  ) : (
-                    `Subscribe — ${proDisplayPrice}/month`
-                  )}
+                  ) : `Subscribe — ${proDisplayPrice}/month`}
                 </button>
               )}
             </div>
@@ -323,103 +249,31 @@ function SubscriptionsContent() {
 
           {/* ── Active subscription panel ── */}
           {subLoading && (
-            <div
-              style={{
-                textAlign: "center",
-                padding: "28px 0",
-                color: "rgba(255,255,255,0.35)",
-                fontSize: 13,
-              }}
-            >
-              <Loader2
-                size={18}
-                style={{
-                  animation: "spin 1s linear infinite",
-                  display: "inline-block",
-                }}
-              />{" "}
-              Loading subscription status…
+            <div style={{ textAlign: "center", padding: "28px 0", color: "rgba(255,255,255,0.35)", fontSize: 13 }}>
+              <Loader2 size={18} style={{ animation: "spin 1s linear infinite", display: "inline-block" }} />
+              {" "}Loading subscription status…
             </div>
           )}
 
           {/* Cancelled-but-in-grace-period notice */}
-          {!subLoading &&
-            sub?.status === "cancelled" &&
-            sub.current_period_end &&
-            new Date(sub.current_period_end) > new Date() && (
-              <div
-                style={{
-                  padding: "14px 18px",
-                  borderRadius: 12,
-                  background: "rgba(245,158,11,0.08)",
-                  border: "1px solid rgba(245,158,11,0.25)",
-                  marginBottom: 16,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "#fbbf24",
-                    marginBottom: 4,
-                  }}
-                >
-                  Subscription cancelled — access until{" "}
-                  {fmtDate(sub.current_period_end)}
-                </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "rgba(255,255,255,0.55)",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  You still have full access including discounted shared leads
-                  until your current billing period ends. After that, auto
-                  delivery will be turned off and shared lead pricing will no
-                  longer apply. Your wallet balance will remain and can still be
-                  used toward exclusive leads.
-                </div>
+          {!subLoading && sub?.status === "cancelled" && sub.current_period_end && new Date(sub.current_period_end) > new Date() && (
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#fbbf24", marginBottom: 4 }}>Subscription cancelled — access until {fmtDate(sub.current_period_end)}</div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.6 }}>
+                You still have full access including discounted shared leads until your current billing period ends. After that, auto delivery will be turned off and shared lead pricing will no longer apply. Your wallet balance will remain and can still be used toward exclusive leads.
               </div>
-            )}
+            </div>
+          )}
 
           {/* Fully expired cancellation notice */}
-          {!subLoading &&
-            sub?.status === "cancelled" &&
-            sub.current_period_end &&
-            new Date(sub.current_period_end) <= new Date() && (
-              <div
-                style={{
-                  padding: "14px 18px",
-                  borderRadius: 12,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  marginBottom: 16,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: "rgba(255,255,255,0.7)",
-                    marginBottom: 4,
-                  }}
-                >
-                  Subscription ended
-                </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "rgba(255,255,255,0.45)",
-                    lineHeight: 1.6,
-                  }}
-                >
-                  You still have wallet funds available. To access discounted
-                  shared leads, reactivate your subscription. You can still use
-                  your wallet balance toward exclusive lead purchases.
-                </div>
+          {!subLoading && sub?.status === "cancelled" && sub.current_period_end && new Date(sub.current_period_end) <= new Date() && (
+            <div style={{ padding: "14px 18px", borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.7)", marginBottom: 4 }}>Subscription ended</div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.6 }}>
+                You still have wallet funds available. To access discounted shared leads, reactivate your subscription. You can still use your wallet balance toward exclusive lead purchases.
               </div>
-            )}
+            </div>
+          )}
 
           {!subLoading && hasActive && sub && (
             <div className="active-panel">
@@ -427,37 +281,18 @@ function SubscriptionsContent() {
               <div className="active-detail-grid">
                 <div className="active-detail-item">
                   <div className="active-detail-label">Plan</div>
-                  <div
-                    className="active-detail-value"
-                    style={{ textTransform: "capitalize" }}
-                  >
-                    {sub.plan_type}
-                  </div>
+                  <div className="active-detail-value" style={{ textTransform: "capitalize" }}>{sub.plan_type}</div>
                 </div>
                 <div className="active-detail-item">
                   <div className="active-detail-label">Status</div>
-                  <div
-                    className="active-detail-value"
-                    style={{
-                      ...badgeColor(sub.status),
-                      borderRadius: 8,
-                      display: "inline-block",
-                      padding: "2px 8px",
-                      border: `1px solid ${badgeColor(sub.status).border}`,
-                    }}
-                  >
-                    {sub.status === "past_due"
-                      ? "Past Due"
-                      : sub.status.charAt(0).toUpperCase() +
-                        sub.status.slice(1)}
+                  <div className="active-detail-value" style={{ ...badgeColor(sub.status), borderRadius: 8, display: "inline-block", padding: "2px 8px", border: `1px solid ${badgeColor(sub.status).border}` }}>
+                    {sub.status === "past_due" ? "Past Due" : sub.status.charAt(0).toUpperCase() + sub.status.slice(1)}
                   </div>
                 </div>
                 {sub.current_period_end && (
                   <div className="active-detail-item">
                     <div className="active-detail-label">Renews</div>
-                    <div className="active-detail-value">
-                      {fmtDate(sub.current_period_end)}
-                    </div>
+                    <div className="active-detail-value">{fmtDate(sub.current_period_end)}</div>
                   </div>
                 )}
               </div>
@@ -475,11 +310,7 @@ function SubscriptionsContent() {
                   className="active-btn cancel"
                   disabled={cancelMut.isPending}
                   onClick={() => {
-                    if (
-                      window.confirm(
-                        "Cancel your subscription? You'll keep access until the current period ends.",
-                      )
-                    ) {
+                    if (window.confirm("Cancel your subscription? You'll keep access until the current period ends.")) {
                       cancelMut.mutate();
                     }
                   }}
@@ -499,27 +330,11 @@ function SubscriptionsContent() {
 
 export default function SubscriptionsPage() {
   return (
-    <Suspense
-      fallback={
-        <div
-          style={{
-            minHeight: "100vh",
-            background: "#080a0f",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Loader2
-            size={24}
-            style={{
-              color: "rgba(255,255,255,0.3)",
-              animation: "spin 1s linear infinite",
-            }}
-          />
-        </div>
-      }
-    >
+    <Suspense fallback={
+      <div style={{ minHeight: "100vh", background: "#080a0f", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Loader2 size={24} style={{ color: "rgba(255,255,255,0.3)", animation: "spin 1s linear infinite" }} />
+      </div>
+    }>
       <SubscriptionsContent />
     </Suspense>
   );

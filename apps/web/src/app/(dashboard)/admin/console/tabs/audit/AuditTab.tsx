@@ -129,7 +129,7 @@ export default function AuditTab() {
                     style={{
                       padding: "14px 24px",
                       fontSize: 11,
-                      textTransform: "",
+                      textTransform: "uppercase",
                       color: "rgba(255,255,255,0.4)",
                     }}
                   >
@@ -139,7 +139,7 @@ export default function AuditTab() {
                     style={{
                       padding: "14px 24px",
                       fontSize: 11,
-                      textTransform: "",
+                      textTransform: "uppercase",
                       color: "rgba(255,255,255,0.4)",
                     }}
                   >
@@ -149,7 +149,7 @@ export default function AuditTab() {
                     style={{
                       padding: "14px 24px",
                       fontSize: 11,
-                      textTransform: "",
+                      textTransform: "uppercase",
                       color: "rgba(255,255,255,0.4)",
                     }}
                   >
@@ -159,7 +159,7 @@ export default function AuditTab() {
                     style={{
                       padding: "14px 24px",
                       fontSize: 11,
-                      textTransform: "",
+                      textTransform: "uppercase",
                       color: "rgba(255,255,255,0.4)",
                     }}
                   >
@@ -214,7 +214,7 @@ export default function AuditTab() {
                           fontSize: 11,
                           fontWeight: 700,
                           letterSpacing: "0.05em",
-                          textTransform: "",
+                          textTransform: "uppercase",
                         }}
                       >
                         {row.action.replace(/_/g, " ")}

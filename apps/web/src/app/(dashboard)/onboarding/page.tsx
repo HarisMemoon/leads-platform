@@ -75,11 +75,7 @@ import {
   patchWebhookIntegration,
   testWebhookIntegration,
 } from "@/lib/integrations-api";
-import {
-  getAuthMe,
-  sendPhoneVerificationCode,
-  verifyPhoneVerificationCode,
-} from "@/lib/auth-api";
+import { getAuthMe, sendPhoneVerificationCode, verifyPhoneVerificationCode } from "@/lib/auth-api";
 
 type ObIcon = ComponentType<{
   size?: number;
@@ -1174,7 +1170,7 @@ function OnboardingPageContent() {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
-  text-transform: ;
+  text-transform: uppercase;
   color: rgba(255,255,255,0.38);
   margin-bottom: 8px;
 }
@@ -1556,7 +1552,7 @@ function OnboardingPageContent() {
 
 
 
-.wallet-label { font-size: 12px; color: rgba(255,255,255,0.4); text-transform: ; letter-spacing: 1px; margin-bottom: 8px; }
+.wallet-label { font-size: 12px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
 
 .wallet-balance { font-family: 'Syne', sans-serif; font-size: 48px; font-weight: 800; color: #fff; }
 
@@ -1992,29 +1988,13 @@ input[type=range]::-webkit-slider-thumb {
               boxShadow: "0 24px 70px rgba(0,0,0,0.5)",
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                marginBottom: 14,
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
               <AlertTriangle size={20} color="#facc15" />
-              <strong style={{ fontSize: 16, color: "#fff" }}>
-                You&apos;re not subscribed
-              </strong>
+              <strong style={{ fontSize: 16, color: "#fff" }}>You&apos;re not subscribed</strong>
             </div>
-            <p
-              style={{
-                fontSize: 13.5,
-                color: "rgba(255,255,255,0.72)",
-                lineHeight: 1.65,
-                marginBottom: 20,
-              }}
-            >
-              You are not currently subscribed. If you turn on autobuy, you
-              agree to be charged the full lead price for each lead purchased
+            <p style={{ fontSize: 13.5, color: "rgba(255,255,255,0.72)", lineHeight: 1.65, marginBottom: 20 }}>
+              You are not currently subscribed. If you turn on autobuy, you agree
+              to be charged the full lead price for each lead purchased
               automatically. Subscribers unlock $25 discounted autobuy pricing,
               early access, and non-exclusive leads.
             </p>
@@ -2303,13 +2283,7 @@ input[type=range]::-webkit-slider-thumb {
                         alerts, and account notifications.
                       </p>
                       {phoneVerifyError && (
-                        <p
-                          style={{
-                            fontSize: 12,
-                            color: "#fca5a5",
-                            marginBottom: 10,
-                          }}
-                        >
+                        <p style={{ fontSize: 12, color: "#fca5a5", marginBottom: 10 }}>
                           {phoneVerifyError}
                         </p>
                       )}
@@ -2319,18 +2293,12 @@ input[type=range]::-webkit-slider-thumb {
                           className="btn-next"
                           style={{ padding: "10px 18px", fontSize: 13 }}
                           disabled={sendPhoneCodeMutation.isPending}
-                          onClick={() =>
-                            void sendPhoneCodeMutation.mutateAsync()
-                          }
+                          onClick={() => void sendPhoneCodeMutation.mutateAsync()}
                         >
-                          {sendPhoneCodeMutation.isPending
-                            ? "Sending…"
-                            : "Send verification code"}
+                          {sendPhoneCodeMutation.isPending ? "Sending…" : "Send verification code"}
                         </button>
                       ) : (
-                        <div
-                          style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
-                        >
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                           <input
                             type="text"
                             inputMode="numeric"
@@ -2353,22 +2321,16 @@ input[type=range]::-webkit-slider-thumb {
                             className="btn-next"
                             style={{ padding: "10px 18px", fontSize: 13 }}
                             disabled={verifyPhoneCodeMutation.isPending}
-                            onClick={() =>
-                              void verifyPhoneCodeMutation.mutateAsync()
-                            }
+                            onClick={() => void verifyPhoneCodeMutation.mutateAsync()}
                           >
-                            {verifyPhoneCodeMutation.isPending
-                              ? "Verifying…"
-                              : "Verify"}
+                            {verifyPhoneCodeMutation.isPending ? "Verifying…" : "Verify"}
                           </button>
                           <button
                             type="button"
                             className="btn-back"
                             style={{ padding: "10px 18px", fontSize: 13 }}
                             disabled={sendPhoneCodeMutation.isPending}
-                            onClick={() =>
-                              void sendPhoneCodeMutation.mutateAsync()
-                            }
+                            onClick={() => void sendPhoneCodeMutation.mutateAsync()}
                           >
                             Resend
                           </button>
@@ -2392,39 +2354,39 @@ input[type=range]::-webkit-slider-thumb {
                     </div>
                   )}
                   <div className="how-grid">
-                    {[
-                      {
-                        Icon: Search,
-                        t: "Find Leads",
-                        d: "Browse thousands of motivated seller leads — inherited, foreclosure, divorce, and more — from markets across the country.",
-                      },
-                      {
-                        Icon: MapPin,
-                        t: "Choose Your Market",
-                        d: "Target the exact cities, counties, or states where you buy. Get leads from all markets or narrow it down to your backyard.",
-                      },
-                      {
-                        Icon: Link2,
-                        t: "Set Up Your CRM",
-                        d: "Send leads straight to GoHighLevel, Zapier, Lead Connector, or any webhook — automated on every purchase.",
-                      },
-                      {
-                        Icon: ShoppingBag,
-                        t: "Scale Your Business",
-                        d: "Buy your first lead, track deal progress, and manage your entire pipeline in one place.",
-                      },
-                    ].map((c) => {
-                      const I = c.Icon;
-                      return (
-                        <div key={c.t} className="how-card">
-                          <div className="how-icon">
-                            <I size={24} strokeWidth={2} />
-                          </div>
-                          <div className="how-title">{c.t}</div>
-                          <div className="how-desc">{c.d}</div>
+                  {[
+                    {
+                      Icon: Search,
+                      t: "Find Leads",
+                      d: "Browse thousands of motivated seller leads — inherited, foreclosure, divorce, and more — from markets across the country.",
+                    },
+                    {
+                      Icon: MapPin,
+                      t: "Choose Your Market",
+                      d: "Target the exact cities, counties, or states where you buy. Get leads from all markets or narrow it down to your backyard.",
+                    },
+                    {
+                      Icon: Link2,
+                      t: "Set Up Your CRM",
+                      d: "Send leads straight to GoHighLevel, Zapier, Lead Connector, or any webhook — automated on every purchase.",
+                    },
+                    {
+                      Icon: ShoppingBag,
+                      t: "Scale Your Business",
+                      d: "Buy your first lead, track deal progress, and manage your entire pipeline in one place.",
+                    },
+                  ].map((c) => {
+                    const I = c.Icon;
+                    return (
+                      <div key={c.t} className="how-card">
+                        <div className="how-icon">
+                          <I size={24} strokeWidth={2} />
                         </div>
-                      );
-                    })}
+                        <div className="how-title">{c.t}</div>
+                        <div className="how-desc">{c.d}</div>
+                      </div>
+                    );
+                  })}
                   </div>
                 </>
               )}
@@ -2904,10 +2866,10 @@ input[type=range]::-webkit-slider-thumb {
                           lineHeight: 1.6,
                         }}
                       >
-                        Auto Purchase is available to everyone. Free Plan buyers
-                        auto-buy at the full exclusive price; Pro subscribers
-                        unlock $25 discounted non-exclusive pricing and early
-                        access on top.
+                        Auto Purchase is available to everyone. Free Plan
+                        buyers auto-buy at the full exclusive price; Pro
+                        subscribers unlock $25 discounted non-exclusive
+                        pricing and early access on top.
                       </p>
                     </div>
                   ) : null}
@@ -2950,8 +2912,7 @@ input[type=range]::-webkit-slider-thumb {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(140px, 1fr))",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
                       gap: 12,
                       marginBottom: 20,
                     }}
@@ -2980,8 +2941,7 @@ input[type=range]::-webkit-slider-thumb {
                           onChange={(e) =>
                             setData((d) => ({
                               ...d,
-                              [key]:
-                                e.target.value === "" ? null : +e.target.value,
+                              [key]: e.target.value === "" ? null : +e.target.value,
                             }))
                           }
                           style={{
@@ -3352,9 +3312,7 @@ input[type=range]::-webkit-slider-thumb {
               {step === 3 && (
                 <div className="ptype-grid">
                   {PROPERTY_TYPE_OPTIONS.map((opt) => {
-                    const selected = (data.property_types || []).includes(
-                      opt.value,
-                    );
+                    const selected = (data.property_types || []).includes(opt.value);
                     const Icon = opt.Icon;
                     return (
                       <button
@@ -3382,10 +3340,7 @@ input[type=range]::-webkit-slider-thumb {
                           <Icon size={20} strokeWidth={1.75} />
                         </span>
                         <span>
-                          <span
-                            className="ptype-title"
-                            style={{ display: "block" }}
-                          >
+                          <span className="ptype-title" style={{ display: "block" }}>
                             {opt.label}
                           </span>
                           <span className="ptype-desc">{opt.desc}</span>
@@ -3804,9 +3759,7 @@ input[type=range]::-webkit-slider-thumb {
                     {
                       Icon: Bell,
                       label: "Phone Verified",
-                      value: authMe?.phone_verified
-                        ? "Verified"
-                        : "Not verified",
+                      value: authMe?.phone_verified ? "Verified" : "Not verified",
                       sub: authMe?.phone_verified
                         ? "You'll receive SMS alerts for new leads"
                         : "Verify from the Welcome step",
@@ -3816,29 +3769,17 @@ input[type=range]::-webkit-slider-thumb {
                       Icon: Package,
                       label: "Delivery Limits",
                       value:
-                        data.max_leads_per_day ||
-                        data.max_leads_per_week ||
-                        data.max_leads_per_month
+                        data.max_leads_per_day || data.max_leads_per_week || data.max_leads_per_month
                           ? [
-                              data.max_leads_per_day
-                                ? `${data.max_leads_per_day}/day`
-                                : null,
-                              data.max_leads_per_week
-                                ? `${data.max_leads_per_week}/week`
-                                : null,
-                              data.max_leads_per_month
-                                ? `${data.max_leads_per_month}/month`
-                                : null,
+                              data.max_leads_per_day ? `${data.max_leads_per_day}/day` : null,
+                              data.max_leads_per_week ? `${data.max_leads_per_week}/week` : null,
+                              data.max_leads_per_month ? `${data.max_leads_per_month}/month` : null,
                             ]
                               .filter(Boolean)
                               .join(", ")
                           : "Not set",
                       sub: "Prevents autobuy from overspending your wallet",
-                      ok: !!(
-                        data.max_leads_per_day ||
-                        data.max_leads_per_week ||
-                        data.max_leads_per_month
-                      ),
+                      ok: !!(data.max_leads_per_day || data.max_leads_per_week || data.max_leads_per_month),
                     },
                   ];
                   return (
@@ -3956,7 +3897,7 @@ input[type=range]::-webkit-slider-thumb {
                                   style={{
                                     fontSize: 11,
                                     color: "rgba(255,255,255,0.35)",
-                                    textTransform: "",
+                                    textTransform: "uppercase",
                                     letterSpacing: "0.06em",
                                   }}
                                 >

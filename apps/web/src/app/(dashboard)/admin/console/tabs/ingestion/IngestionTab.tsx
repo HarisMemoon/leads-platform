@@ -150,7 +150,7 @@ export default function IngestionTab() {
 
         .table-wrapper { overflow-x: auto; width: 100%; }
         .admin-table { width: 100%; border-collapse: collapse; min-width: 600px; }
-        .admin-th { text-align: left; padding: 14px 20px; font-size: 11px; font-weight: 700; text-transform: ; letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.35); background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        .admin-th { text-align: left; padding: 14px 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.35); background: rgba(0,0,0,0.2); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
         .admin-td { padding: 16px 20px; font-size: 13.5px; color: rgba(255, 255, 255, 0.85); border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
 
         @media (max-width: 768px) {
@@ -160,8 +160,8 @@ export default function IngestionTab() {
       `}</style>
 
       <SectionTitle
-        title="Add Leads & Bulk Import"
-        sub="Easily bulk-import datasets or review pending vendor submissions."
+        title="Add Leads & CSV Uploads"
+        sub="Easily import batch datasets or review pending vendor submissions."
       />
 
       <PendingLeadsSection />
@@ -180,7 +180,7 @@ export default function IngestionTab() {
           accent="linear-gradient(135deg, #10b981, #34d399)"
         />
         <Stat
-          label="Failed Imports"
+          label="Failed Batches"
           value={String(stats.data?.failedBatches ?? "—")}
           hint="Quarantined for retry"
           accent="linear-gradient(135deg, #ef4444, #f97316)"
@@ -197,7 +197,7 @@ export default function IngestionTab() {
             fontFamily: "Manrope, sans-serif",
           }}
         >
-          Bulk Import — Upload CSV
+          Upload a CSV Batch
         </h3>
         <p
           style={{
@@ -325,7 +325,7 @@ export default function IngestionTab() {
             onClick={() => upload.mutate()}
             style={{ minWidth: 160, height: 46 }}
           >
-            {upload.isPending ? "Uploading..." : "Process Import"}
+            {upload.isPending ? "Uploading..." : "Process Batch"}
           </button>
         </div>
 
@@ -342,7 +342,7 @@ export default function IngestionTab() {
         {upload.isSuccess && (
           <div style={{ marginTop: 16 }}>
             <Banner tone="good">
-              Bulk import uploaded successfully and queued for processing.
+              Batch uploaded successfully and queued for processing.
             </Banner>
           </div>
         )}
@@ -360,18 +360,18 @@ export default function IngestionTab() {
             fontFamily: "Manrope, sans-serif",
           }}
         >
-          Recent Import History
+          Recent Batch History
         </h3>
 
         {batches.isLoading && (
           <div style={{ padding: 32 }}>
-            <Empty title="Loading import history..." />
+            <Empty title="Loading batch history..." />
           </div>
         )}
         {batches.data && batches.data.length === 0 && (
           <Empty
-            title="No imports processed yet"
-            body="Upload your first bulk import above to see execution logs."
+            title="No batches processed yet"
+            body="Upload your first CSV above to see execution logs."
           />
         )}
 

@@ -403,7 +403,7 @@ export default function DistributionTab() {
                     fontSize: 12,
                     fontWeight: 700,
                     letterSpacing: "0.1em",
-                    textTransform: "",
+                    textTransform: "uppercase",
                     color: "#818cf8",
                     marginBottom: 8,
                   }}
@@ -441,7 +441,7 @@ export default function DistributionTab() {
                     fontSize: 12,
                     fontWeight: 700,
                     letterSpacing: "0.1em",
-                    textTransform: "",
+                    textTransform: "uppercase",
                     color: "#fcd34d",
                     marginBottom: 8,
                   }}

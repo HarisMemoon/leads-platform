@@ -21,7 +21,6 @@ import { User } from '../entities/user.entity';
 import { VendorIntegration } from '../entities/vendor-integration.entity';
 import { VendorWebhookHit } from '../entities/vendor-webhook-hit.entity';
 import { LeadsService } from '../leads/leads.service';
-import { LeadDedupService } from '../leads/lead-dedup.service';
 import { LeadPricingService } from '../leads/lead-pricing.service';
 import { LeadPricingService as LeadPricingConfigService } from '../lead-pricing/lead-pricing.service';
 import { OutboundPingService } from '../outbound/outbound-ping.service';
@@ -60,7 +59,6 @@ export class PingService {
     private readonly outboundPingService: OutboundPingService,
     private readonly leadPricingConfigService: LeadPricingConfigService,
     private readonly distributionService: DistributionService,
-    private readonly leadDedupService: LeadDedupService,
   ) {}
 
   async receivePing(apiKey: string | undefined, dto: VendorPingDto) {
@@ -96,9 +94,7 @@ export class PingService {
       state: this.clean(dto.state)?.toUpperCase() ?? null,
       zip: this.clean(dto.zip ?? dto.Zip),
       county: this.clean(dto.county),
-      property_type: this.clean(
-        dto.property_type ?? dto.Propertytype ?? dto.propertyType,
-      ),
+      property_type: this.clean(dto.property_type ?? dto.Propertytype ?? dto.propertyType),
       lead_type: dto.lead_type ?? dto.leadType ?? 'motivated_seller',
       source: this.clean(dto.source),
       exclusivity_choice: dto.exclusivity_choice ?? 'exclusive',
@@ -123,13 +119,9 @@ export class PingService {
     } else {
       savedPing.status = 'accepted';
       savedPing.matched_buyer = { id: result.buyerId } as User;
-      savedPing.matched_pricing_rule = {
-        id: result.pricingRuleId,
-      } as BuyerPricingRule;
+      savedPing.matched_pricing_rule = { id: result.pricingRuleId } as BuyerPricingRule;
       savedPing.matched_price_cents = result.priceCents ?? null;
-      savedPing.expires_at = new Date(
-        Date.now() + vendor.ping_ttl_seconds * 1000,
-      );
+      savedPing.expires_at = new Date(Date.now() + vendor.ping_ttl_seconds * 1000);
     }
 
     return this.toPingResponse(await this.pingRepo.save(savedPing));
@@ -156,8 +148,7 @@ export class PingService {
       relations: { matched_buyer: true },
     });
     if (!ping) throw new NotFoundException('Ping not found');
-    if (ping.status !== 'accepted')
-      throw new BadRequestException('Ping is not accepted');
+    if (ping.status !== 'accepted') throw new BadRequestException('Ping is not accepted');
     if (!ping.matched_buyer || !ping.matched_price_cents) {
       throw new BadRequestException('Ping does not have a matched buyer');
     }
@@ -189,9 +180,7 @@ export class PingService {
 
       // Still attempt outbound buyer pings for the existing duplicate lead
       // so it can be offered to the highest external bidder
-      void this.outboundPingService.pingAll(duplicate).catch(() => {
-        /* logged internally */
-      });
+      void this.outboundPingService.pingAll(duplicate).catch(() => {/* logged internally */});
 
       return {
         accepted: false,
@@ -232,9 +221,7 @@ export class PingService {
 
       // Fire outbound buyer pings — highest external bidder can also acquire
       // this lead (e.g. non-exclusive or as an additional sale channel)
-      void this.outboundPingService.pingAll(lead).catch(() => {
-        /* logged internally */
-      });
+      void this.outboundPingService.pingAll(lead).catch(() => {/* logged internally */});
 
       return {
         accepted: true,
@@ -247,8 +234,7 @@ export class PingService {
       };
     } catch (error) {
       post.status = 'failed';
-      post.error_message =
-        error instanceof Error ? error.message : 'assignment_failed';
+      post.error_message = error instanceof Error ? error.message : 'assignment_failed';
       await this.postRepo.save(post);
       lead.status = LeadStatus.ARCHIVED;
       await this.leadRepo.save(lead);
@@ -262,24 +248,16 @@ export class PingService {
    * the marketplace (status AVAILABLE) and runs auto-distribution +
    * outbound buyer pings. No wallet charge happens here.
    */
-  async receiveDirectLead(
-    apiKey: string | undefined,
-    dto: VendorDirectLeadDto,
-  ) {
+  async receiveDirectLead(apiKey: string | undefined, dto: VendorDirectLeadDto) {
     const vendor = await this.authenticateVendor(apiKey);
     this.assertAllowedSource(vendor, dto.source);
 
-    const vendorLeadId =
-      dto.vendor_lead_id?.trim() || dto.vendor_ping_id?.trim() || randomUUID();
+    const vendorLeadId = dto.vendor_lead_id?.trim() || dto.vendor_ping_id?.trim() || randomUUID();
 
     const duplicate = await this.findDuplicateLead({
       phone: dto.phone ?? dto.metadata?.phone,
       email: dto.email ?? dto.metadata?.email,
-      address:
-        dto.fulladdress ??
-        dto.address ??
-        dto.address_1 ??
-        dto.metadata?.address,
+      address: dto.fulladdress ?? dto.address ?? dto.address_1 ?? dto.metadata?.address,
       zip: dto.zip ?? dto.Zip,
     });
 
@@ -297,9 +275,7 @@ export class PingService {
 
       // Still attempt outbound buyer pings for the existing duplicate lead
       // so it can be offered to the highest external bidder
-      void this.outboundPingService.pingAll(duplicate).catch(() => {
-        /* logged internally */
-      });
+      void this.outboundPingService.pingAll(duplicate).catch(() => {/* logged internally */});
 
       return {
         accepted: false,
@@ -309,12 +285,9 @@ export class PingService {
       };
     }
 
-    const leadType =
-      this.clean(dto.lead_type ?? dto.leadType) ?? 'motivated_seller';
+    const leadType = this.clean(dto.lead_type ?? dto.leadType) ?? 'motivated_seller';
     const market = this.marketFromDto(dto);
-    const propertyType = this.clean(
-      dto.property_type ?? dto.Propertytype ?? dto.propertyType,
-    );
+    const propertyType = this.clean(dto.property_type ?? dto.Propertytype ?? dto.propertyType);
     const sellerName =
       dto.seller_name?.trim() ||
       [dto.first_name, dto.last_name].filter(Boolean).join(' ') ||
@@ -325,8 +298,7 @@ export class PingService {
       [dto.address_1, dto.address_2].filter(Boolean).join(', ') ||
       '';
 
-    const { exclusive, shared } =
-      await this.leadPricingConfigService.getPricesForLead(leadType);
+    const { exclusive, shared } = await this.leadPricingConfigService.getPricesForLead(leadType);
     const exclusivityChoice = dto.exclusivity_choice ?? 'non_exclusive';
 
     const metadata = {
@@ -377,9 +349,7 @@ export class PingService {
       lead_type: leadType,
       status: LeadStatus.AVAILABLE,
       exclusivity_level:
-        exclusivityChoice === 'exclusive'
-          ? ExclusivityLevel.EXCLUSIVE
-          : ExclusivityLevel.SHARED,
+        exclusivityChoice === 'exclusive' ? ExclusivityLevel.EXCLUSIVE : ExclusivityLevel.SHARED,
       quality_score: dto.quality_score ?? 70,
       price_cents: exclusive,
       list_price_anchor_cents: exclusive,
@@ -409,14 +379,10 @@ export class PingService {
     // Enqueue auto-distribution to buyers who match this lead's criteria
     void this.distributionService
       .enqueueLeadDistribution(priced.id)
-      .catch(() => {
-        /* logged internally */
-      });
+      .catch(() => {/* logged internally */});
 
     // Fire outbound buyer pings (e.g. Juiced) — highest bidder wins
-    void this.outboundPingService.pingAll(priced).catch(() => {
-      /* logged internally */
-    });
+    void this.outboundPingService.pingAll(priced).catch(() => {/* logged internally */});
 
     return {
       accepted: true,
@@ -465,21 +431,16 @@ export class PingService {
     if (dto.cities !== undefined) rule.cities = dto.cities;
     if (dto.zips !== undefined) rule.zips = dto.zips;
     if (dto.counties !== undefined) rule.counties = dto.counties;
-    if (dto.property_types !== undefined)
-      rule.property_types = dto.property_types;
+    if (dto.property_types !== undefined) rule.property_types = dto.property_types;
     if (dto.lead_types !== undefined) rule.lead_types = dto.lead_types;
     if (dto.fixed_price_cents !== undefined) {
-      rule.fixed_price_cents =
-        dto.fixed_price_cents === null ? null : String(dto.fixed_price_cents);
+      rule.fixed_price_cents = dto.fixed_price_cents === null ? null : String(dto.fixed_price_cents);
     }
     if (dto.max_bid_cents !== undefined) {
-      rule.max_bid_cents =
-        dto.max_bid_cents === null ? null : String(dto.max_bid_cents);
+      rule.max_bid_cents = dto.max_bid_cents === null ? null : String(dto.max_bid_cents);
     }
-    if (dto.exclusivity_preference !== undefined)
-      rule.exclusivity_preference = dto.exclusivity_preference;
-    if (dto.routing_strategy !== undefined)
-      rule.routing_strategy = dto.routing_strategy;
+    if (dto.exclusivity_preference !== undefined) rule.exclusivity_preference = dto.exclusivity_preference;
+    if (dto.routing_strategy !== undefined) rule.routing_strategy = dto.routing_strategy;
 
     return this.pricingRuleRepo.save(rule);
   }
@@ -490,8 +451,7 @@ export class PingService {
       relations: { user: true },
     });
     if (!rule) throw new NotFoundException('Pricing rule not found');
-    if (rule.user.id !== userId)
-      throw new ForbiddenException('Not your pricing rule');
+    if (rule.user.id !== userId) throw new ForbiddenException('Not your pricing rule');
     await this.pricingRuleRepo.delete(id);
     return { ok: true };
   }
@@ -518,26 +478,18 @@ export class PingService {
     const vendor = await this.vendorRepo.findOne({ where: { id } });
     if (!vendor) throw new NotFoundException('Vendor not found');
     if (dto.name !== undefined) vendor.name = dto.name;
-    if (dto.api_key !== undefined)
-      vendor.api_key_hash = this.hashApiKey(dto.api_key);
+    if (dto.api_key !== undefined) vendor.api_key_hash = this.hashApiKey(dto.api_key);
     if (dto.enabled !== undefined) vendor.enabled = dto.enabled;
-    if (dto.allowed_sources !== undefined)
-      vendor.allowed_sources = dto.allowed_sources;
-    if (dto.ping_timeout_ms !== undefined)
-      vendor.ping_timeout_ms = dto.ping_timeout_ms;
-    if (dto.ping_ttl_seconds !== undefined)
-      vendor.ping_ttl_seconds = dto.ping_ttl_seconds;
+    if (dto.allowed_sources !== undefined) vendor.allowed_sources = dto.allowed_sources;
+    if (dto.ping_timeout_ms !== undefined) vendor.ping_timeout_ms = dto.ping_timeout_ms;
+    if (dto.ping_ttl_seconds !== undefined) vendor.ping_ttl_seconds = dto.ping_ttl_seconds;
     if (dto.metadata !== undefined) vendor.metadata = dto.metadata;
     return this.vendorRepo.save(vendor);
   }
 
   async listPings(limit = 50) {
     return this.pingRepo.find({
-      relations: {
-        vendor: true,
-        matched_buyer: true,
-        matched_pricing_rule: true,
-      },
+      relations: { vendor: true, matched_buyer: true, matched_pricing_rule: true },
       order: { created_at: 'DESC' },
       take: Math.min(Math.max(limit, 1), 200),
     });
@@ -546,11 +498,7 @@ export class PingService {
   async getPing(id: string) {
     const ping = await this.pingRepo.findOne({
       where: { id },
-      relations: {
-        vendor: true,
-        matched_buyer: true,
-        matched_pricing_rule: true,
-      },
+      relations: { vendor: true, matched_buyer: true, matched_pricing_rule: true },
     });
     if (!ping) throw new NotFoundException('Ping not found');
     const audit = await this.auditRepo.find({
@@ -570,10 +518,7 @@ export class PingService {
     return vendor;
   }
 
-  private async createPostedLead(
-    ping: LeadPing,
-    dto: VendorPostDto,
-  ): Promise<Lead> {
+  private async createPostedLead(ping: LeadPing, dto: VendorPostDto): Promise<Lead> {
     // ── Derive canonical fields from vendor's various naming conventions ──────
     const sellerName =
       dto.seller_name?.trim() ||
@@ -587,13 +532,14 @@ export class PingService {
       '';
 
     // Post-level location overrides ping-level if provided
-    const city = this.clean(dto.city) ?? ping.city;
-    const state = this.clean(dto.state)?.toUpperCase() ?? ping.state;
-    const zip = this.clean(dto.zip ?? dto.Zip) ?? ping.zip;
-    const propertyType =
-      this.clean(dto.property_type ?? dto.Propertytype) ?? ping.property_type;
+    const city  = this.clean(dto.city)  ?? ping.city;
+    const state = (this.clean(dto.state)?.toUpperCase()) ?? ping.state;
+    const zip   = this.clean(dto.zip ?? dto.Zip) ?? ping.zip;
+    const propertyType = this.clean(dto.property_type ?? dto.Propertytype) ?? ping.property_type;
 
-    const market = ping.market ?? this.marketFromParts(city, state, zip);
+    const market =
+      ping.market ??
+      this.marketFromParts(city, state, zip);
 
     const metadata = {
       // base: whatever was in the ping payload
@@ -602,46 +548,44 @@ export class PingService {
       ...(dto.metadata ?? {}),
 
       // ── Seller identity ────────────────────────────────────────────────────
-      seller_name: sellerName,
-      first_name: dto.first_name ?? null,
-      last_name: dto.last_name ?? null,
-      phone: dto.phone ?? null,
-      email: dto.email ?? null,
+      seller_name:       sellerName,
+      first_name:        dto.first_name   ?? null,
+      last_name:         dto.last_name    ?? null,
+      phone:             dto.phone        ?? null,
+      email:             dto.email        ?? null,
 
       // ── Property address ───────────────────────────────────────────────────
       address,
-      address_1: dto.address_1 ?? null,
-      address_2: dto.address_2 ?? null,
-      fulladdress: dto.fulladdress ?? null,
+      address_1:         dto.address_1    ?? null,
+      address_2:         dto.address_2    ?? null,
+      fulladdress:       dto.fulladdress  ?? null,
       city,
       state,
       zip,
-      county: ping.county,
+      county:            ping.county,
 
       // ── Property details ───────────────────────────────────────────────────
-      property_type: propertyType,
-      listed: dto.listed ?? null,
-      howsoontosell: dto.howsoontosell ?? null,
-      reasonforselling: dto.reasonforselling ?? null,
+      property_type:     propertyType,
+      listed:            dto.listed          ?? null,
+      howsoontosell:     dto.howsoontosell   ?? null,
+      reasonforselling:  dto.reasonforselling ?? null,
       property_condition: dto.property_condition ?? null,
 
       // ── Attribution & compliance ───────────────────────────────────────────
-      vendor: dto.vendor ?? null,
-      referrer: dto.referrer ?? null,
-      IP_Address: dto.IP_Address ?? null,
-      TrustedForm: dto.TrustedForm ?? null,
+      vendor:            dto.vendor       ?? null,
+      referrer:          dto.referrer     ?? null,
+      IP_Address:        dto.IP_Address   ?? null,
+      TrustedForm:       dto.TrustedForm  ?? null,
 
       // ── Notes & IDs ────────────────────────────────────────────────────────
-      notes: dto.notes ?? null,
-      vendor_ping_id: ping.vendor_ping_id,
-      vendor_lead_id: dto.vendor_lead_id,
+      notes:             dto.notes        ?? null,
+      vendor_ping_id:    ping.vendor_ping_id,
+      vendor_lead_id:    dto.vendor_lead_id,
     };
 
     // Pricing always from admin-controlled config — ignore vendor bid for lead price display
     const { exclusive: sysExclusive, shared: sysShared } =
-      await this.leadPricingConfigService.getPricesForLead(
-        ping.lead_type ?? 'inbound',
-      );
+      await this.leadPricingConfigService.getPricesForLead(ping.lead_type ?? 'inbound');
 
     const lead = this.leadRepo.create({
       external_id: dto.vendor_lead_id,
@@ -650,14 +594,11 @@ export class PingService {
       lead_type: ping.lead_type,
       status: LeadStatus.AVAILABLE,
       exclusivity_level:
-        ping.exclusivity_choice === 'exclusive'
-          ? ExclusivityLevel.EXCLUSIVE
-          : ExclusivityLevel.SHARED,
+        ping.exclusivity_choice === 'exclusive' ? ExclusivityLevel.EXCLUSIVE : ExclusivityLevel.SHARED,
       quality_score: dto.quality_score ?? 70,
       price_cents: sysExclusive,
       exclusive_price_cents: sysExclusive,
-      shared_price_cents:
-        ping.exclusivity_choice === 'exclusive' ? null : sysShared,
+      shared_price_cents: ping.exclusivity_choice === 'exclusive' ? null : sysShared,
       max_non_exclusive_buyers: ping.exclusivity_choice === 'exclusive' ? 1 : 3,
       title: `${ping.lead_type} lead in ${market}`,
       metadata,
@@ -670,16 +611,43 @@ export class PingService {
     return this.leadPricingService.applyTierToLead(saved);
   }
 
-  // Duplicate detection now lives in the shared LeadDedupService so every
-  // entry path (ping / post / direct / inbound / CSV bulk import) applies the
-  // exact same match rule. This wrapper keeps the existing call sites intact.
   private async findDuplicateLead(input: {
     phone?: unknown;
     email?: unknown;
     address?: unknown;
     zip?: unknown;
   }) {
-    return this.leadDedupService.findDuplicate(input);
+    const clauses: string[] = [];
+    const params: Record<string, string> = {};
+    const phone = this.clean(input.phone);
+    const email = this.clean(input.email)?.toLowerCase() ?? null;
+    const address = this.clean(input.address)?.toLowerCase() ?? null;
+    const zip = this.clean(input.zip);
+
+    if (phone) {
+      clauses.push(`LOWER(TRIM(COALESCE(lead.metadata->>'phone',''))) = :phone`);
+      params.phone = phone.toLowerCase();
+    }
+    if (email) {
+      clauses.push(`LOWER(TRIM(COALESCE(lead.metadata->>'email',''))) = :email`);
+      params.email = email;
+    }
+    if (address) {
+      clauses.push(
+        `(LOWER(TRIM(COALESCE(lead.metadata->>'address',''))) = :address${
+          zip ? " AND TRIM(COALESCE(lead.metadata->>'zip','')) = :zip" : ''
+        })`,
+      );
+      params.address = address;
+      if (zip) params.zip = zip;
+    }
+    if (clauses.length === 0) return null;
+
+    return this.leadRepo
+      .createQueryBuilder('lead')
+      .where(`(${clauses.join(' OR ')})`, params)
+      .orderBy('lead.created_at', 'ASC')
+      .getOne();
   }
 
   private toPingResponse(ping: LeadPing) {
@@ -697,12 +665,7 @@ export class PingService {
   }
 
   private assertAllowedSource(vendor: VendorIntegration, source?: string) {
-    if (
-      !vendor.allowed_sources ||
-      vendor.allowed_sources.length === 0 ||
-      !source
-    )
-      return;
+    if (!vendor.allowed_sources || vendor.allowed_sources.length === 0 || !source) return;
     const allowed = vendor.allowed_sources.map((s) => s.trim().toLowerCase());
     if (!allowed.includes(source.trim().toLowerCase())) {
       throw new ForbiddenException('Vendor source is not allowed');
@@ -718,20 +681,12 @@ export class PingService {
     return this.marketFromParts(dto.city, dto.state, dto.zip ?? dto.Zip);
   }
 
-  private marketFromParts(
-    city?: string | null,
-    state?: string | null,
-    zip?: string | null,
-  ): string {
-    const cityState = [this.clean(city), this.clean(state)?.toUpperCase()]
-      .filter(Boolean)
-      .join(', ');
+  private marketFromParts(city?: string | null, state?: string | null, zip?: string | null): string {
+    const cityState = [this.clean(city), this.clean(state)?.toUpperCase()].filter(Boolean).join(', ');
     return cityState || this.clean(zip) || 'Unknown market';
   }
 
   private clean(value: unknown): string | null {
-    return typeof value === 'string' && value.trim().length > 0
-      ? value.trim()
-      : null;
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
   }
 }

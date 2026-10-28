@@ -298,114 +298,59 @@ export default function SettingsPage() {
           padding: 44px 24px 100px;
         }
 
-        /* ── Page Header (Marketplace Style) ── */
+        /* ── Page header ── */
         .page-header {
-          margin-bottom: 36px;
-          padding-bottom: 24px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        }
-
-        .page-header-content {
           display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-
-        .page-header-title {
-          font-family: "Manrope", sans-serif;
-          font-size: 32px;
-          font-weight: 800;
-          letter-spacing: -0.03em;
-          line-height: 1.15;
-          margin: 0;
-          background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-
-        .page-header-sub {
-          display: flex;
-          align-items: center;
+          align-items: flex-start;
           justify-content: space-between;
           gap: 16px;
-          flex-wrap: wrap;
+          margin-bottom: 36px;
         }
-
-        .page-header-desc {
-          color: rgba(255, 255, 255, 0.5);
+        .page-header h1 {
+          font-family: "Manrope", sans-serif;
+          font-size: 28px;
+          font-weight: 800;
+          letter-spacing: -0.6px;
+          margin: 0 0 5px;
+          line-height: 1.1;
+        }
+        .page-header-sub {
+          color: rgba(255, 255, 255, 0.42);
           font-size: 14px;
-          font-weight: 500;
-          line-height: 1.5;
+          margin: 0;
         }
-
-        /* ── Status Pills & Badges ── */
         .header-chips {
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
+          display: flex;
+          gap: 8px;
           flex-shrink: 0;
+          padding-top: 3px;
         }
-
-        /* Plan Badge */
-        .plan-pill {
+        .chip-badge {
           display: inline-flex;
           align-items: center;
-          gap: 7px;
-          padding: 5px 12px;
+          gap: 6px;
+          padding: 6px 12px;
           border-radius: 999px;
           font-size: 12px;
-          font-weight: 700;
-          letter-spacing: 0.02em;
+          font-weight: 600;
           white-space: nowrap;
         }
-
-        .plan-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-        }
-
-        .plan-pill.pro {
-          color: #6ee7b7;
+        .chip-pro {
           background: rgba(16, 185, 129, 0.1);
           border: 1px solid rgba(16, 185, 129, 0.22);
+          color: #6ee7b7;
         }
-
-        .plan-pill.pro .plan-dot {
-          background: #10b981;
-          box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
-        }
-
-        .plan-pill.free {
-          color: #fcd34d;
+        .chip-free {
           background: rgba(245, 158, 11, 0.1);
           border: 1px solid rgba(245, 158, 11, 0.22);
+          color: #fcd34d;
+        }
+        .chip-money {
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.09);
+          color: rgba(255, 255, 255, 0.6);
         }
 
-        .plan-pill.free .plan-dot {
-          background: #f59e0b;
-        }
-
-        /* Wallet Badge */
-        .wallet-pill {
-          display: inline-flex;
-          align-items: center;
-          gap: 7px;
-          padding: 5px 12px;
-          border-radius: 999px;
-          font-size: 12px;
-          font-weight: 700;
-          color: rgba(255, 255, 255, 0.85);
-          background: rgba(255, 255, 255, 0.04);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          white-space: nowrap;
-          font-family: var(--font-mono, monospace);
-          letter-spacing: -0.01em;
-        }
-
-        .wallet-pill svg {
-          color: rgba(255, 255, 255, 0.45);
-        }
         /* ── Upgrade banner ── */
         .upgrade-banner {
           display: flex;
@@ -414,19 +359,15 @@ export default function SettingsPage() {
           gap: 16px;
           padding: 14px 20px;
           border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          background: color-mix(
-            in srgb,
-            var(--c) 8%,
-            rgba(255, 255, 255, 0.02)
-          );
-          color: rgba(255, 255, 255, 0.72);
+          border: 1px solid rgba(139, 92, 246, 0.2);
+          background: rgba(139, 92, 246, 0.07);
+          color: rgba(255, 255, 255, 0.62);
           font-size: 13.5px;
           line-height: 1.55;
           margin-bottom: 30px;
         }
         .upgrade-banner strong {
-          color: #fff;
+          color: #e9d5ff;
         }
         .upgrade-link {
           display: inline-flex;
@@ -508,43 +449,7 @@ export default function SettingsPage() {
         .fs-body {
           padding: 24px 26px;
         }
-        /* Card wrapper anchor */
-        .fs-card-link {
-          display: block;
-          text-decoration: none;
-          color: inherit;
-        }
 
-        /* Arrow badge button */
-        .fs-arrow-btn {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
-          flex-shrink: 0;
-          background: color-mix(
-            in srgb,
-            var(--c) 12%,
-            rgba(255, 255, 255, 0.04)
-          );
-          border: 1px solid
-            color-mix(in srgb, var(--c) 26%, rgba(255, 255, 255, 0.08));
-          color: color-mix(in srgb, var(--c) 80%, white);
-          transition:
-            transform 0.15s ease,
-            background 0.15s ease;
-        }
-
-        .fs-card-link:hover .fs-arrow-btn {
-          background: color-mix(
-            in srgb,
-            var(--c) 18%,
-            rgba(255, 255, 255, 0.06)
-          );
-          transform: translateX(2px);
-        }
         /* ── Link / action button ── */
         .fs-link-btn {
           display: inline-flex;
@@ -1250,33 +1155,18 @@ export default function SettingsPage() {
             grid-template-columns: 1fr;
           }
           .fs-head {
-            display: flex;
-            flex-direction: row;
+            flex-direction: column;
             align-items: flex-start;
-            justify-content: space-between;
             gap: 12px;
-            padding: 18px 18px 16px;
           }
           .sec-foot {
             flex-direction: column;
             align-items: flex-start;
           }
-          .fs-head {
-            display: flex;
-            flex-direction: row;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 18px 18px 16px;
-          }
-          .page-header-title {
-            font-size: 26px;
-          }
-
-          .page-header-sub {
+          .upgrade-banner {
             flex-direction: column;
             align-items: flex-start;
-            gap: 12px;
+            gap: 10px;
           }
         }
       `}</style>
@@ -1285,55 +1175,53 @@ export default function SettingsPage() {
         <div className="shell">
           {/* ── Page header ── */}
           <header className="page-header">
-            <div className="page-header-content">
-              <h1 className="page-header-title">Account settings</h1>
-              <div className="page-header-sub">
-                <span className="page-header-desc">
-                  Your wallet, plan, automation rules, and integrations.
+            <div>
+              <h1>Account settings</h1>
+              <p className="page-header-sub">
+                Your wallet, plan, automation rules, and integrations.
+              </p>
+            </div>
+            <div className="header-chips">
+              {!subLoading && (
+                <span
+                  className={
+                    isPro ? "chip-badge chip-pro" : "chip-badge chip-free"
+                  }
+                >
+                  {isPro && <Check size={12} strokeWidth={2.5} />}
+                  {isPro ? "Pro Plan" : "Free Plan"}
                 </span>
-
-                <div className="header-chips">
-                  {!subLoading && (
-                    <span className={`plan-pill ${isPro ? "pro" : "free"}`}>
-                      <span className="plan-dot" />
-                      {isPro ? "Pro Plan" : "Free Plan"}
-                    </span>
-                  )}
-                  <span className="wallet-pill">
-                    <Wallet size={13} strokeWidth={2.2} />
-                    {walletBalance !== null ? `$${walletBalance}` : "—"}
-                  </span>
-                </div>
-              </div>
+              )}
+              <span className="chip-badge chip-money">
+                <Wallet size={12} strokeWidth={2} />
+                {walletBalance !== null ? `$${walletBalance}` : "—"}
+              </span>
             </div>
           </header>
+
           {/* ── Upgrade nudge (free only) ── */}
           {!subLoading && !isPro && (
-            <div
-              className="upgrade-banner"
-              style={{ "--c": "#d8c661" } as CSSProperties}
-            >
+            <div className="upgrade-banner">
               <span>
                 <strong>
                   Subscribe for {pricing?.proDisplayPrice ?? "…"}/month
-                </strong>
+                </strong>{" "}
                 — unlock shared lead pricing (
                 {pricing
                   ? `$${Math.round(pricing.sharedInboundPriceCents / 100)} inbound / $${Math.round(pricing.sharedOutboundPriceCents / 100)} outbound`
                   : "…"}
                 ), early access to new leads, and auto-buy distribution.
               </span>
-              <div
-                className="fs-link-div"
-                style={{ "--c": "#d8c661" } as CSSProperties}
-              >
-                {/* <Link href="/subscriptions" className="fs-link-btn">
-                  See full plans
-                </Link> */}
-                <Link href="/subscriptions" className="fs-card-link">
-                  <div className="fs-arrow-btn" aria-hidden="true">
-                    <ArrowRight size={18} strokeWidth={2} />
-                  </div>
+              <div className="fs-link-div">
+                <Link href="/subscriptions" className="fs-link-btn">
+                  See full plan{" "}
+                </Link>
+                <Link href="/subscriptions" className="fs-link-btn">
+                  <ArrowRight
+                    size={18}
+                    strokeWidth={2}
+                    className="fs-link-btn"
+                  />
                 </Link>
               </div>
             </div>
@@ -1355,14 +1243,18 @@ export default function SettingsPage() {
                   </p>
                 </div>
               </div>
-              {/* <Link href="/wallet" className="fs-link-btn">
+              <div className="fs-link-div">
+                <Link href="/wallet" className="fs-link-btn">
                   Add funds
-                </Link> */}
-              <Link href="/wallet" className="fs-card-link">
-                <div className="fs-arrow-btn" aria-hidden="true">
-                  <ArrowRight size={18} strokeWidth={2} />
-                </div>
-              </Link>
+                </Link>
+                <Link href="/wallet" className="fs-link-btn">
+                  <ArrowRight
+                    size={18}
+                    strokeWidth={2}
+                    className="fs-link-btn"
+                  />
+                </Link>
+              </div>
             </div>
             <div className="fs-body">
               <div className="stat-grid">
@@ -1424,11 +1316,18 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <Link href="/subscriptions" className="fs-card-link">
-                <div className="fs-arrow-btn" aria-hidden="true">
-                  <ArrowRight size={18} strokeWidth={2} />
-                </div>
-              </Link>
+              <div className="fs-link-div">
+                <Link href="/subscriptions" className="fs-link-btn">
+                  {isPro ? "Manage billing" : "View plans"}
+                </Link>
+                <Link href="/subscriptions" className="fs-link-btn">
+                  <ArrowRight
+                    size={18}
+                    strokeWidth={2}
+                    className="fs-link-btn"
+                  />
+                </Link>
+              </div>
             </div>
             <div className="fs-body">
               {subLoading ? (
@@ -1503,6 +1402,10 @@ export default function SettingsPage() {
                           </li>
                         ))}
                       </ul>
+                      <Link href="/subscriptions" className="upgrade-plan-btn">
+                        Subscribe — $99/month
+                        <ArrowRight size={14} strokeWidth={2} />
+                      </Link>
                     </>
                   )}
                 </div>
@@ -1527,11 +1430,18 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <Link href="/market-alerts" className="fs-card-link">
-                <div className="fs-arrow-btn" aria-hidden="true">
-                  <ArrowRight size={18} strokeWidth={2} />
-                </div>
-              </Link>
+              <div className="fs-link-div">
+                <Link href="/market-alerts" className="fs-link-btn">
+                  Manage alerts
+                </Link>
+                <Link href="/market-alerts" className="fs-link-btn">
+                  <ArrowRight
+                    size={18}
+                    strokeWidth={2}
+                    className="fs-link-btn"
+                  />
+                </Link>
+              </div>
             </div>
             <div className="fs-body">
               {alertsLoading ? (
@@ -1626,6 +1536,33 @@ export default function SettingsPage() {
           {/* ══════════════════════════════════════════════
               AUTOMATION / AUTO-BUY
           ══════════════════════════════════════════════ */}
+          <section className="fs" style={{ "--c": "#6366f1" } as CSSProperties}>
+            <div className="fs-head">
+              <div className="fs-head-left">
+                <div className="fs-icon">
+                  <BookOpen size={18} strokeWidth={1.8} />
+                </div>
+                <div>
+                  <div className="fs-title">Resources &amp; guides</div>
+                  <p className="fs-desc">
+                    Browse guides, videos, and FAQs from the Newleey team
+                  </p>
+                </div>
+              </div>
+              <div className="fs-link-div">
+                <Link href="/resources" className="fs-link-btn">
+                  Open resources
+                </Link>
+                <Link
+                  href="/resources"
+                  className="fs-link-btn"
+                  aria-label="Open resources"
+                >
+                  <ArrowRight size={18} strokeWidth={2} />
+                </Link>
+              </div>
+            </div>
+          </section>
 
           <section className="fs" style={{ "--c": "#06b6d4" } as CSSProperties}>
             <div className="fs-head">
@@ -1645,11 +1582,18 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <Link href="/distribution" className="fs-card-link">
-                <div className="fs-arrow-btn" aria-hidden="true">
-                  <ArrowRight size={18} strokeWidth={2} />
-                </div>
-              </Link>
+              <div className="fs-link-div">
+                <Link href="/distribution" className="fs-link-btn">
+                  Full settings
+                </Link>
+                <Link href="/distribution" className="fs-link-btn">
+                  <ArrowRight
+                    size={18}
+                    strokeWidth={2}
+                    className="fs-link-btn"
+                  />
+                </Link>
+              </div>
             </div>
 
             <div className="fs-body dist-body">
@@ -1754,7 +1698,7 @@ export default function SettingsPage() {
           {/* ══════════════════════════════════════════════
               CRM INTEGRATION
           ══════════════════════════════════════════════ */}
-          <section className="fs" style={{ "--c": "#d8c661" } as CSSProperties}>
+          <section className="fs" style={{ "--c": "#6366f1" } as CSSProperties}>
             <div className="fs-head">
               <div className="fs-head-left">
                 <div className="fs-icon">
@@ -1809,18 +1753,7 @@ export default function SettingsPage() {
               </div>
               <div className="btn-row">
                 <button
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "9px 18px",
-                    borderRadius: 10,
-                    background: "#d1ba47",
-                    color: "#fff",
-                    textDecoration: "none",
-                    fontSize: 13,
-                    fontWeight: 700,
-                  }}
+                  className="primary-btn"
                   type="button"
                   onClick={() => void saveWebhook()}
                   disabled={isSavingWebhook}
@@ -1860,7 +1793,7 @@ export default function SettingsPage() {
           {/* ══════════════════════════════════════════════
               PING / POST — REAL-TIME LEAD ACCESS
           ══════════════════════════════════════════════ */}
-          <section className="fs" style={{ "--c": "#34d399" } as CSSProperties}>
+          <section className="fs" style={{ "--c": "#8b5cf6" } as CSSProperties}>
             <div className="fs-head">
               <div className="fs-head-left">
                 <div className="fs-icon">
@@ -1911,11 +1844,18 @@ export default function SettingsPage() {
                 </div>
               </div>
               {(pingPostEnabled || pingPostReadyToSave) && (
-                <Link href="/distribution" className="fs-card-link">
-                  <div className="fs-arrow-btn" aria-hidden="true">
-                    <ArrowRight size={18} strokeWidth={2} />
-                  </div>
-                </Link>
+                <div className="fs-link-div">
+                  <Link href="/distribution" className="fs-link-btn">
+                    Manage rules
+                  </Link>
+                  <Link href="/distribution" className="fs-link-btn">
+                    <ArrowRight
+                      size={18}
+                      strokeWidth={2}
+                      className="fs-link-btn"
+                    />
+                  </Link>
+                </div>
               )}
             </div>
 
@@ -2049,7 +1989,7 @@ export default function SettingsPage() {
                         fontWeight: 600,
                         color: "rgba(255,255,255,0.4)",
                         marginBottom: 10,
-                        textTransform: "",
+                        textTransform: "uppercase",
                         letterSpacing: "0.05em",
                       }}
                     >
@@ -2223,7 +2163,7 @@ export default function SettingsPage() {
                         gap: 6,
                         padding: "9px 18px",
                         borderRadius: 10,
-                        background: "#21b780",
+                        background: "linear-gradient(135deg,#6366f1,#8b5cf6)",
                         color: "#fff",
                         textDecoration: "none",
                         fontSize: 13,
@@ -2232,7 +2172,7 @@ export default function SettingsPage() {
                     >
                       Manage Ping/Post Bid Rules <ArrowRight size={14} />
                     </Link>
-                    {/* <div
+                    <div
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -2247,30 +2187,10 @@ export default function SettingsPage() {
                     >
                       <AlertTriangle size={13} strokeWidth={2} />
                       Turning off Auto Purchase pauses real-time delivery
-                    </div> */}
+                    </div>
                   </div>
                 </div>
               )}
-            </div>
-          </section>
-          <section className="fs" style={{ "--c": "#6366f1" } as CSSProperties}>
-            <div className="fs-head">
-              <div className="fs-head-left">
-                <div className="fs-icon">
-                  <BookOpen size={18} strokeWidth={1.8} />
-                </div>
-                <div>
-                  <div className="fs-title">Resources &amp; guides</div>
-                  <p className="fs-desc">
-                    Browse guides, videos, and FAQs from the Newleey team
-                  </p>
-                </div>
-              </div>
-              <Link href="/resources" className="fs-card-link">
-                <div className="fs-arrow-btn" aria-hidden="true">
-                  <ArrowRight size={18} strokeWidth={2} />
-                </div>
-              </Link>
             </div>
           </section>
         </div>

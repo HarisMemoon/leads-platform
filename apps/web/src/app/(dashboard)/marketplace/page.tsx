@@ -13,14 +13,10 @@ import {
   type MarketplaceLeadRow,
 } from "@/lib/leads-api";
 import { getWalletMe, centsToNumber } from "@/lib/wallet-api";
-import {
-  getMySubscription,
-  getSubscriptionPricing,
-} from "@/lib/subscriptions-api";
+import { getMySubscription, getSubscriptionPricing } from "@/lib/subscriptions-api";
 import { queryKeys } from "@/lib/query-keys";
 import { ApiError } from "@/lib/api";
 import { LeadDetailModal } from "@/components/LeadDetailModal";
-import { CustomSelect } from "@/components/CustomSelect";
 
 const PAGE_SIZE = 24;
 
@@ -170,7 +166,6 @@ export default function MarketplacePage() {
   const [minPriceDollars, setMinPriceDollars] = useState("");
   const [maxPriceDollars, setMaxPriceDollars] = useState("");
   const [page, setPage] = useState(1);
-  const [openFilters, setOpenFilters] = useState(false);
 
   // modal state
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -440,427 +435,64 @@ export default function MarketplacePage() {
         .page-body { flex: 1; }
         .leads-main { padding: 28px; max-width: 1280px; width: 100%; margin: 0 auto; }
 
-       .leads-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  margin-bottom: 32px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
+        .leads-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; flex-wrap: wrap; gap: 16px; }
+        .leads-title { font-family: 'Manrope', sans-serif; font-size: 22px; font-weight: 700; }
+        .leads-sub { font-size: 13px; color: rgba(255,255,255,0.4); margin-top: 3px; }
 
-.leads-header-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+        .filters-shell {
+          margin-bottom: 22px; padding: 18px; border-radius: 18px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)), rgba(8,10,15,0.9);
+          box-shadow: 0 14px 40px rgba(0,0,0,0.22);
+        }
+        .filter-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+        .filter-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .filter-group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+        .filter-label { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.45); }
+        .filter-input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #fff; font-size: 13px; outline: none; }
+        .filter-input:focus { border-color: rgba(99,102,241,0.4); }
+        .filter-select { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #fff; font-size: 13px; outline: none; appearance: none; }
+        .filter-select:focus { border-color: rgba(99,102,241,0.4); }
+        .filter-select option { background: #0d0f17; color: #fff; }
 
-.leads-title {
-  font-family: 'Manrope', sans-serif;
-  font-size: 32px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin: 0;
-}
+        .filter-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+        .clear-inline-btn { padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); background: transparent; color: rgba(255,255,255,0.6); font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; }
+        .clear-inline-btn:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.04); }
 
-.leads-sub {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.dot-separator {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.wallet-badge {
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.1);
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  border: 1px solid rgba(16, 185, 129, 0.2);
-}
-
-      /* ── Filters Shell ── */
-.filters-shell {
-  margin-bottom: 24px;
-  padding: 20px;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: 
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.015) 100%),
-    rgba(10, 11, 16, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: 
-    0 20px 48px -12px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-/* ── Grid Layouts ── */
-.filter-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin-bottom: 14px;
-}
-
-.filter-row.three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.filter-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.filter-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: ;
-  letter-spacing: 0.05em;
-  color: rgba(255, 255, 255, 0.42);
-}
-
-/* ── Inputs & Selects Shared ── */
-.filter-input,
-.filter-select {
-  width: 100%;
-  height: 40px;
-  padding: 0 13px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(255, 255, 255, 0.03);
-  color: #fff;
-  font-family: 'Inter', sans-serif;
-  font-size: 13px;
-  font-weight: 500;
-  outline: none;
-  box-sizing: border-box;
-  transition: 
-    border-color 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease;
-}
-
-.filter-input::placeholder {
-  color: rgba(255, 255, 255, 0.25);
-}
-
-.filter-input:hover,
-.filter-select:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.16);
-}
-
-.filter-input:focus,
-.filter-select:focus {
-  background: rgba(99, 102, 241, 0.06);
-  border-color: rgba(99, 102, 241, 0.45);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
-}
-
-/* ── Custom Select Arrow ── */
-.filter-select {
-  appearance: none;
-  -webkit-appearance: none;
-  cursor: pointer;
-  padding-right: 34px;
- 
-}
-
-.filter-select option {
-  background: #11131c;
-  color: #fff;
-  padding: 8px;
-}
-
-/* ── Actions Row ── */
-.filter-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.clear-inline-btn {
-  height: 36px;
-  padding: 0 14px;
-  border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: 'Inter', sans-serif;
-  transition: all 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.clear-inline-btn:hover {
-  color: #fca5a5;
-  background: rgba(239, 68, 68, 0.1);
-  border-color: rgba(239, 68, 68, 0.25);
-}
         /* grid */
-       .leads-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 24px;
-}
+        .lead-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
+        .lead-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; padding: 20px; cursor: pointer; transition: border-color 0.2s, transform 0.15s; position: relative; }
+        .lead-card:hover { border-color: rgba(99,102,241,0.3); transform: translateY(-2px); }
 
-.lead-card {
-  background: #111218;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 20px;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  cursor: pointer;
-  position: relative;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
+        .lead-title { font-family: 'Manrope', sans-serif; font-size: 14px; font-weight: 700; margin: 12px 0 3px; line-height: 1.3; color: rgba(255,255,255,0.92); }
+        .lead-address { font-size: 12px; color: rgba(255,255,255,0.35); margin-bottom: 10px; }
+        .blur-field { filter: blur(3.5px); user-select: none; opacity: 0.75; }
+        .private-fields { display: grid; gap: 6px; margin: 12px 0; }
+        .private-row { display: grid; grid-template-columns: 86px 1fr; gap: 8px; font-size: 12px; color: rgba(255,255,255,0.45); }
+        .private-label { color: rgba(255,255,255,0.28); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
+        .meta-tag { font-size: 11px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 3px 8px; color: rgba(255,255,255,0.45); margin-right: 5px; margin-bottom: 5px; display: inline-block; }
 
-.lead-card:hover {
-  transform: translateY(-4px);
-  border-color: rgba(99, 102, 241, 0.4);
-  background: #15161d;
-  box-shadow: 0 12px 40px -12px rgba(99, 102, 241, 0.2), inset 0 0 0 1px rgba(255,255,255,0.02);
-}
-
-/* Header inside Card */
-.lead-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.lead-badges-right {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.lead-type-badge {
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: ;
-  letter-spacing: 0.5px;
-  padding: 4px 10px;
-  border-radius: 20px;
-}
-.lead-type-badge.inbound { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
-.lead-type-badge.outbound { background: rgba(16, 185, 129, 0.15); color: #34d399; }
-
-.price-boost-badge, .early-access-badge {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 20px;
-  border: 1px solid;
-}
-
-.early-access-badge {
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.12);
-  border-color: rgba(245, 158, 11, 0.25);
-}
-
-.lead-location-title {
-  font-family: 'Manrope', sans-serif;
-  font-size: 22px;
-  font-weight: 700;
-  color: #ffffff;
-  margin: 0 0 20px 0;
-  line-height: 1.2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Details Grid */
-.lead-details-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 24px;
-}
-
-.detail-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.detail-label {
-  font-size: 10px;
-  text-transform: ;
-  letter-spacing: 0.5px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.35);
-}
-
-.detail-value {
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.9);
-}
-.detail-value.empty {
-  color: rgba(255, 255, 255, 0.2);
-}
-
-/* =========================================
-   PRICE OPTIONS (Fixed alignment layout)
-   ========================================= */
-.price-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: auto;
-  align-items: stretch;
-}
-
-.price-option {
-  padding: 16px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.2s ease;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  box-sizing: border-box;
-}
-
-.price-option.locked { opacity: 0.5; cursor: not-allowed; }
-.price-option:hover:not(.locked) { border-color: rgba(255, 255, 255, 0.2); }
-
-.price-option.exclusive:hover:not(.locked) { border-color: rgba(245, 158, 11, 0.4); }
-.price-option.non-exclusive:hover:not(.locked) { border-color: rgba(99, 102, 241, 0.4); }
-
-.price-option-label {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: ;
-  letter-spacing: 0.5px;
-  color: rgba(255, 255, 255, 0.5);
-  margin-bottom: 12px;
-  line-height: 1.4;
-  flex-grow: 1; /* Pushes everything below it to the bottom */
-}
-
-.partial-badge {
-  margin-left: 6px;
-  font-size: 9px;
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.15);
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.price-option-amount {
-  font-family: 'Manrope', sans-serif;
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1;
-  color: #ffffff;
-  margin-bottom: 8px;
-}
-
-.price-option-sub, .early-access-note, .upsell-text {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-  line-height: 1.4;
-  margin-bottom: 12px;
-}
-
-.warn-text { color: #f59e0b; }
-
-/* Buttons perfectly locked to bottom */
-.price-option-btn {
-  margin-top: auto;
-  width: 100%;
-  padding: 8px 0;
-  border-radius: 8px;
-  border: none;
-  font-size: 12px;
-  font-weight: 600;
-  font-family: 'Inter', sans-serif;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  box-sizing: border-box;
-}
-
-.price-option-btn.exclusive {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.3);
-}
-.price-option-btn.exclusive:hover:not(:disabled) { background: rgba(245, 158, 11, 0.25); }
-
-.price-option-btn.non-exclusive {
-  background: rgba(99, 102, 241, 0.15);
-  color: #c7d2fe;
-  border: 1px solid rgba(99, 102, 241, 0.3);
-}
-.price-option-btn.non-exclusive:hover:not(:disabled) { background: rgba(99, 102, 241, 0.25); }
-
-.price-option-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  filter: grayscale(100%);
-}
-
-.block-btn { text-decoration: none; }
-
-/* Pips for slots */
-.slot-bar { margin-bottom: 12px; }
-.slot-pips { display: flex; justify-content: center; gap: 4px; margin-bottom: 6px; }
-.slot-pip {
-  width: 100%;
-  max-width: 12px;
-  height: 4px;
-  border-radius: 2px;
-}
-.slot-pip.taken { background: #10b981; }
-.slot-pip.warn { background: #f59e0b; }
-.slot-pip.open { background: rgba(255, 255, 255, 0.15); }
-.slot-text { font-size: 10px; color: rgba(255, 255, 255, 0.4); font-weight: 600; }
+        /* dual price row */
+        .price-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+        .price-option { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); text-align: center; cursor: pointer; transition: border-color 0.15s; }
+        .price-option:hover { border-color: rgba(99,102,241,0.3); }
+        .price-option-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: rgba(255,255,255,0.35); margin-bottom: 4px; }
+        .price-option-amount { font-family: 'Manrope', sans-serif; font-size: 16px; font-weight: 800; }
+        .price-option-sub { font-size: 10px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+        .price-option.exclusive { border-color: rgba(245,158,11,0.25); }
+        .price-option.exclusive .price-option-amount { color: #fbbf24; }
+        .price-option.non-exclusive { border-color: rgba(99,102,241,0.2); }
+        .price-option.non-exclusive .price-option-amount { color: #a5b4fc; }
+        .price-option-btn { margin-top: 6px; padding: 5px 10px; border-radius: 7px; border: none; font-size: 11px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif; transition: opacity 0.15s; }
+        .price-option-btn.exclusive { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+        .price-option-btn.exclusive:hover { background: rgba(245,158,11,0.25); }
+        .price-option-btn.non-exclusive { background: rgba(99,102,241,0.15); color: #c7d2fe; border: 1px solid rgba(99,102,241,0.3); }
+        .price-option-btn.non-exclusive:hover { background: rgba(99,102,241,0.25); }
+        .price-option-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .slot-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .slot-dot.taken { background: #10b981; }
+        .slot-dot.warn { background: #f59e0b; }
+        .slot-dot.open { background: rgba(255,255,255,0.18); border: 1px solid rgba(255,255,255,0.22); }
 
         /* state multi-select */
         .state-drop-wrap { position: relative; }
@@ -897,7 +529,7 @@ export default function MarketplacePage() {
         .was-price { font-size: 11px; color: rgba(255,255,255,0.3); text-decoration: line-through; }
 
         /* lead-type badge */
-        .lead-type-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: ; }
+        .lead-type-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
         .lead-type-badge.inbound  { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc; }
         .lead-type-badge.outbound { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.22); color: #6ee7b7; }
 
@@ -916,37 +548,6 @@ export default function MarketplacePage() {
         .sub-lock-cta { font-size: 10px; color: #a5b4fc; text-decoration: none; font-weight: 700; }
         .sub-lock-cta:hover { color: #c4b5fd; }
 
-.filter-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.6);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.filter-toggle:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: #ffffff;
-}
-
-.filter-toggle.active {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.4);
-  color: #818cf8;
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.1);
-}
-
-.filter-toggle svg {
-  width: 20px;
-  height: 20px;
-}
-
         @media (max-width: 960px) {
           .filter-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
           .filter-row.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -955,34 +556,6 @@ export default function MarketplacePage() {
           .leads-main { padding: 20px; }
           .filter-row, .filter-row.three { grid-template-columns: 1fr; }
           .filters-shell { padding: 16px; }
-          /* ── Responsive Adaptations ── */
-@media (max-width: 900px) {
-  .filter-row,
-  .filter-row.three {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 540px) {
-  .filters-shell {
-    padding: 16px;
-    border-radius: 14px;
-  }
-
-  .filter-row,
-  .filter-row.three {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-
-  .filter-actions {
-    justify-content: stretch;
-  }
-
-  .clear-inline-btn {
-    width: 100%;
-  }
-}
         }
       `}</style>
 
@@ -990,344 +563,288 @@ export default function MarketplacePage() {
         <div className="page-body">
           <main className="leads-main">
             <div className="leads-header">
-              <div className="leads-header-content">
-                <h1 className="leads-title">Lead Marketplace</h1>
+              <div>
+                <div className="leads-title">Lead Marketplace</div>
                 <div className="leads-sub">
-                  <span className="leads-count">
-                    {isLoading ? "Loading…" : `${total} leads available`}
-                  </span>
-                  {wallet && (
-                    <>
-                      <span className="dot-separator"></span>
-                      <span className="wallet-badge">
-                        Wallet {fmtDollars(walletBalance)}
-                      </span>
-                    </>
-                  )}
+                  {isLoading ? "Loading…" : `${total} leads available`}
+                  {wallet ? ` · Wallet ${fmtDollars(walletBalance)}` : ""}
                 </div>
               </div>
-              <button
-                type="button"
-                className={`filter-toggle ${openFilters ? "active" : ""}`}
-                onClick={() => setOpenFilters((open) => !open)}
-                aria-expanded={openFilters}
-                aria-label={openFilters ? "Close filters" : "Open filters"}
-              >
-                {openFilters ? (
-                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                    <path
-                      d="M5 5l10 10M15 5L5 15"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                    <path
-                      d="M3 5h14M3 10h14M3 15h14"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                    />
-                    <circle cx="7" cy="5" r="1.5" fill="currentColor" />
-                    <circle cx="13" cy="10" r="1.5" fill="currentColor" />
-                    <circle cx="9" cy="15" r="1.5" fill="currentColor" />
-                  </svg>
-                )}
-              </button>
             </div>
+
             {/* ── Filters ── */}
-            {openFilters && (
-              <section
-                id="marketplace-filters"
-                className="filters-shell"
-                aria-label="Marketplace filters"
-              >
-                <div className="filter-row">
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="source-filter">
-                      Lead Source
-                    </label>
-                    <CustomSelect
-                      id="source-filter"
-                      value={sourceFilter}
-                      placeholder="Any"
-                      options={[
-                        { value: "", label: "Any" },
-                        { value: "inbound", label: "Inbound" },
-                        { value: "outbound", label: "Outbound" },
-                      ]}
-                      onChange={(val) => {
-                        setSourceFilter(val as typeof sourceFilter);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
-
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="type-filter">
-                      Lead Type
-                    </label>
-                    <CustomSelect
-                      id="type-filter"
-                      value={type}
-                      placeholder="Any"
-                      options={[
-                        { value: "", label: "Any" },
-                        ...[
-                          "Divorce",
-                          "Foreclosure",
-                          "Inherited",
-                          "Tired Landlord",
-                          "Need Cash",
-                          "Relocating",
-                          "Old Age",
-                          "Probate",
-                          "Tax Delinquent",
-                          "Other",
-                        ].map((t) => ({ value: t, label: t })),
-                      ]}
-                      onChange={(val) => {
-                        setType(val);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
-
-                  <div className="filter-group">
-                    <label className="filter-label">State</label>
-                    <div className="state-drop-wrap" ref={stateDropRef}>
-                      <button
-                        type="button"
-                        className="state-drop-btn"
-                        onClick={() => setStateDropOpen((o) => !o)}
-                      >
-                        <span
-                          style={{
-                            color: selectedStates.length
-                              ? "#fff"
-                              : "rgba(255,255,255,0.3)",
-                          }}
-                        >
-                          {selectedStates.length === 0
-                            ? "Any state"
-                            : selectedStates.length === 1
-                              ? (US_STATES.find(
-                                  (s) => s.abbr === selectedStates[0],
-                                )?.name ?? selectedStates[0])
-                              : `${selectedStates.length} states selected`}
-                        </span>
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 12 12"
-                          fill="currentColor"
-                          style={{
-                            color: "rgba(255,255,255,0.35)",
-                            flexShrink: 0,
-                          }}
-                        >
-                          <path
-                            d="M2 4l4 4 4-4"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            fill="none"
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                      </button>
-                      {stateDropOpen && (
-                        <div className="state-drop-panel">
-                          {US_STATES.map((s) => (
-                            <label key={s.abbr} className="state-opt">
-                              <input
-                                type="checkbox"
-                                checked={selectedStates.includes(s.abbr)}
-                                onChange={() => {
-                                  setSelectedStates((prev) =>
-                                    prev.includes(s.abbr)
-                                      ? prev.filter((x) => x !== s.abbr)
-                                      : [...prev, s.abbr],
-                                  );
-                                  setPage(1);
-                                }}
-                              />
-                              {s.name}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="city-filter">
-                      City
-                    </label>
-                    <input
-                      id="city-filter"
-                      className="filter-input"
-                      placeholder="Phoenix"
-                      value={city}
-                      onChange={(e) => {
-                        setCity(e.target.value);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
+            <section className="filters-shell" aria-label="Marketplace filters">
+              <div className="filter-row">
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="source-filter">
+                    Lead Source
+                  </label>
+                  <select
+                    id="source-filter"
+                    className="filter-select"
+                    value={sourceFilter}
+                    onChange={(e) => {
+                      setSourceFilter(e.target.value as typeof sourceFilter);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="">Any</option>
+                    <option value="inbound">Inbound</option>
+                    <option value="outbound">Outbound</option>
+                  </select>
                 </div>
 
-                <div className="filter-row">
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="minprice-filter">
-                      Min Price
-                    </label>
-                    <CustomSelect
-                      id="minprice-filter"
-                      value={minPriceDollars}
-                      placeholder="Any"
-                      options={[
-                        { value: "", label: "Any" },
-                        ...PRICE_OPTIONS.map((v) => ({
-                          value: String(v),
-                          label: `$${v}`,
-                        })),
-                      ]}
-                      onChange={(val) => {
-                        setMinPriceDollars(val);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
-
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="maxprice-filter">
-                      Max Price
-                    </label>
-
-                    <CustomSelect
-                      id="maxprice-filter"
-                      value={maxPriceDollars}
-                      placeholder="Any"
-                      options={[
-                        { value: "", label: "Any" },
-                        ...PRICE_OPTIONS.map((v) => ({
-                          value: String(v),
-                          label: `$${v}`,
-                        })),
-                      ]}
-                      onChange={(val) => {
-                        setMaxPriceDollars(val);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
-
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="property-filter">
-                      Property Type
-                    </label>
-                    <CustomSelect
-                      id="property-filter"
-                      value={propertyType}
-                      placeholder="Any"
-                      options={[
-                        { value: "", label: "Any" },
-                        ...[
-                          "Single Family",
-                          "Multifamily",
-                          "Mobile Home",
-                          "Land",
-                        ].map((t) => ({ value: t, label: t })),
-                      ]}
-                      onChange={(val) => {
-                        setPropertyType(val);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
-
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="zip-filter">
-                      ZIP Code
-                    </label>
-                    <input
-                      id="zip-filter"
-                      className="filter-input"
-                      placeholder="85001"
-                      value={zip}
-                      onChange={(e) => {
-                        setZip(e.target.value);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="type-filter">
+                    Lead Type
+                  </label>
+                  <select
+                    id="type-filter"
+                    className="filter-select"
+                    value={type}
+                    onChange={(e) => {
+                      setType(e.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="">Any</option>
+                    <option value="Divorce">Divorce</option>
+                    <option value="Foreclosure">Foreclosure</option>
+                    <option value="Inherited">Inherited</option>
+                    <option value="Tired Landlord">Tired Landlord</option>
+                    <option value="Need Cash">Need Cash</option>
+                    <option value="Relocating">Relocating</option>
+                    <option value="Old Age">Old Age</option>
+                    <option value="Probate">Probate</option>
+                    <option value="Tax Delinquent">Tax Delinquent</option>
+                    <option value="Other">Other</option>
+                  </select>
                 </div>
 
-                <div
-                  className="filter-row"
-                  style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}
-                >
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="condition-filter">
-                      Condition
-                    </label>
-                    <CustomSelect
-                      id="condition-filter"
-                      value={condition}
-                      placeholder="Any"
-                      options={[
-                        { value: "", label: "Any" },
-                        ...["Needs Repairs", "Move In Ready", "Full Gut"].map(
-                          (t) => ({ value: t, label: t }),
-                        ),
-                      ]}
-                      onChange={(val) => {
-                        setCondition(val);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
-
-                  <div className="filter-group">
-                    <label className="filter-label" htmlFor="timeline-filter">
-                      Timeline
-                    </label>
-                    <CustomSelect
-                      id="timeline-filter"
-                      value={timeline}
-                      placeholder="Any"
-                      options={[
-                        { value: "", label: "Any" },
-                        ...[
-                          "ASAP",
-                          "0 to 30 Days",
-                          "60 to 90 Days",
-                          "No Rush",
-                        ].map((t) => ({ value: t, label: t })),
-                      ]}
-                      onChange={(val) => {
-                        setTimeline(val);
-                        setPage(1);
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {hasActiveFilters && (
-                  <div className="filter-actions">
+                <div className="filter-group">
+                  <label className="filter-label">State</label>
+                  <div className="state-drop-wrap" ref={stateDropRef}>
                     <button
                       type="button"
-                      className="clear-inline-btn"
-                      onClick={clearFilters}
+                      className="state-drop-btn"
+                      onClick={() => setStateDropOpen((o) => !o)}
                     >
-                      Clear all filters
+                      <span
+                        style={{
+                          color: selectedStates.length
+                            ? "#fff"
+                            : "rgba(255,255,255,0.3)",
+                        }}
+                      >
+                        {selectedStates.length === 0
+                          ? "Any state"
+                          : selectedStates.length === 1
+                            ? (US_STATES.find(
+                                (s) => s.abbr === selectedStates[0],
+                              )?.name ?? selectedStates[0])
+                            : `${selectedStates.length} states selected`}
+                      </span>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 12 12"
+                        fill="currentColor"
+                        style={{
+                          color: "rgba(255,255,255,0.35)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <path
+                          d="M2 4l4 4 4-4"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          fill="none"
+                          strokeLinecap="round"
+                        />
+                      </svg>
                     </button>
+                    {stateDropOpen && (
+                      <div className="state-drop-panel">
+                        {US_STATES.map((s) => (
+                          <label key={s.abbr} className="state-opt">
+                            <input
+                              type="checkbox"
+                              checked={selectedStates.includes(s.abbr)}
+                              onChange={() => {
+                                setSelectedStates((prev) =>
+                                  prev.includes(s.abbr)
+                                    ? prev.filter((x) => x !== s.abbr)
+                                    : [...prev, s.abbr],
+                                );
+                                setPage(1);
+                              }}
+                            />
+                            {s.name}
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </section>
-            )}
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="city-filter">
+                    City
+                  </label>
+                  <input
+                    id="city-filter"
+                    className="filter-input"
+                    placeholder="Phoenix"
+                    value={city}
+                    onChange={(e) => {
+                      setCity(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className="filter-row">
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="minprice-filter">
+                    Min Price
+                  </label>
+                  <select
+                    id="minprice-filter"
+                    className="filter-select"
+                    value={minPriceDollars}
+                    onChange={(e) => {
+                      setMinPriceDollars(e.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="">Any</option>
+                    {PRICE_OPTIONS.map((v) => (
+                      <option key={v} value={v}>
+                        ${v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="maxprice-filter">
+                    Max Price
+                  </label>
+                  <select
+                    id="maxprice-filter"
+                    className="filter-select"
+                    value={maxPriceDollars}
+                    onChange={(e) => {
+                      setMaxPriceDollars(e.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="">Any</option>
+                    {PRICE_OPTIONS.map((v) => (
+                      <option key={v} value={v}>
+                        ${v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="property-filter">
+                    Property Type
+                  </label>
+                  <select
+                    id="property-filter"
+                    className="filter-select"
+                    value={propertyType}
+                    onChange={(e) => {
+                      setPropertyType(e.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="">Any</option>
+                    <option value="Single Family">Single Family</option>
+                    <option value="Multifamily">Multifamily</option>
+                    <option value="Mobile Home">Mobile Home</option>
+                    <option value="Land">Land</option>
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="zip-filter">
+                    ZIP Code
+                  </label>
+                  <input
+                    id="zip-filter"
+                    className="filter-input"
+                    placeholder="85001"
+                    value={zip}
+                    onChange={(e) => {
+                      setZip(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div
+                className="filter-row"
+                style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}
+              >
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="condition-filter">
+                    Condition
+                  </label>
+                  <select
+                    id="condition-filter"
+                    className="filter-select"
+                    value={condition}
+                    onChange={(e) => {
+                      setCondition(e.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="">Any</option>
+                    <option value="Needs Repairs">Needs Repairs</option>
+                    <option value="Move In Ready">Move In Ready</option>
+                    <option value="Full Gut">Full Gut</option>
+                  </select>
+                </div>
+
+                <div className="filter-group">
+                  <label className="filter-label" htmlFor="timeline-filter">
+                    Timeline
+                  </label>
+                  <select
+                    id="timeline-filter"
+                    className="filter-select"
+                    value={timeline}
+                    onChange={(e) => {
+                      setTimeline(e.target.value);
+                      setPage(1);
+                    }}
+                  >
+                    <option value="">Any</option>
+                    <option value="ASAP">ASAP</option>
+                    <option value="0 to 30 Days">0 to 30 Days</option>
+                    <option value="60 to 90 Days">60 to 90 Days</option>
+                    <option value="No Rush">No Rush</option>
+                  </select>
+                </div>
+              </div>
+
+              {hasActiveFilters && (
+                <div className="filter-actions">
+                  <button
+                    type="button"
+                    className="clear-inline-btn"
+                    onClick={clearFilters}
+                  >
+                    Clear all filters
+                  </button>
+                </div>
+              )}
+            </section>
 
             {isError && (
               <div className="err">
@@ -1350,7 +867,7 @@ export default function MarketplacePage() {
               </div>
             )}
 
-            <div className="leads-grid">
+            <div className="lead-grid">
               {!isLoading && items.length === 0 && (
                 <div className="empty-state">
                   <p style={{ fontSize: 16, marginBottom: 8 }}>
@@ -1407,44 +924,23 @@ export default function MarketplacePage() {
                 const currentExclCents = lead.exclusive_price_cents
                   ? Number(lead.exclusive_price_cents)
                   : null;
-                let priceBadge: {
-                  label: string;
-                  color: string;
-                  bg: string;
-                } | null = null;
-                if (
-                  anchorCents &&
-                  currentExclCents &&
-                  anchorCents !== currentExclCents
-                ) {
+                let priceBadge: { label: string; color: string; bg: string } | null = null;
+                if (anchorCents && currentExclCents && anchorCents !== currentExclCents) {
                   const pct = Math.round(
                     ((currentExclCents - anchorCents) / anchorCents) * 100,
                   );
                   if (pct > 0) {
-                    priceBadge = {
-                      label: `+${pct}% boost`,
-                      color: "#fbbf24",
-                      bg: "rgba(245,158,11,0.15)",
-                    };
+                    priceBadge = { label: `+${pct}% boost`, color: "#fbbf24", bg: "rgba(245,158,11,0.15)" };
                   } else if (pct < 0) {
-                    priceBadge = {
-                      label: `${pct}% off`,
-                      color: "#34d399",
-                      bg: "rgba(16,185,129,0.12)",
-                    };
+                    priceBadge = { label: `${pct}% off`, color: "#34d399", bg: "rgba(16,185,129,0.12)" };
                   }
                 }
 
                 // Visible property details
-                const marketParts = lead.market
-                  .split(",")
-                  .map((part) => part.trim())
-                  .filter(Boolean);
+                const marketParts = lead.market.split(",").map((part) => part.trim()).filter(Boolean);
                 const city = metaValue(lead, ["city"], marketParts[0] ?? "—");
                 const state = metaValue(lead, ["state"], marketParts[1] ?? "—");
-                const locationLabel =
-                  [city, state].filter((part) => part !== "—").join(", ") ||
-                  lead.market;
+                const locationLabel = [city, state].filter((part) => part !== "—").join(", ") || lead.market;
                 const propType = metaValue(lead, [
                   "property_type",
                   "propertyType",
@@ -1462,46 +958,92 @@ export default function MarketplacePage() {
                     className="lead-card"
                     onClick={() => openModal(lead)}
                   >
-                    {/* Top Badges */}
-                    <div className="lead-card-header">
+                    {/* Header: type badge + early access */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 8,
+                      }}
+                    >
                       <span className={`lead-type-badge ${leadType}`}>
                         {leadType}
                       </span>
-                      <div className="lead-badges-right">
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
                         {priceBadge && (
-                          <span
-                            className="price-boost-badge"
-                            style={{
-                              color: priceBadge.color,
-                              background: priceBadge.bg,
-                              borderColor: `${priceBadge.color}44`,
-                            }}
-                          >
+                          <span style={{
+                            fontSize: 10, fontWeight: 700,
+                            color: priceBadge.color,
+                            background: priceBadge.bg,
+                            border: `1px solid ${priceBadge.color}44`,
+                            borderRadius: 20, padding: "2px 8px",
+                          }}>
                             {priceBadge.label}
                           </span>
                         )}
                         {isInEarlyAccess && (
-                          <span className="early-access-badge">
-                            Pro early access{timeLeft ? ` · ${timeLeft}` : ""}
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, color: "#f59e0b",
+                            background: "rgba(245,158,11,0.12)",
+                            border: "1px solid rgba(245,158,11,0.25)",
+                            borderRadius: 20, padding: "2px 8px",
+                          }}>
+                            ⚡ Pro early access{timeLeft ? ` · ${timeLeft}` : ""}
                           </span>
                         )}
                       </div>
                     </div>
 
-                    {/* Location Title (Primary Focus) */}
-                    <h3 className="lead-location-title">{locationLabel}</h3>
-
-                    {/* Property Info Grid */}
-                    <div className="lead-details-grid">
+                    {/* Visible property info — label:value rows */}
+                    <div
+                      style={{
+                        margin: "10px 0 14px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 0,
+                      }}
+                    >
                       {[
-                        { label: "type", value: propType },
+                        { label: "city", value: city },
+                        { label: "state", value: state },
+                        { label: "property type", value: propType },
                         { label: "timeline", value: timeline },
                         { label: "condition", value: condition },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="detail-row">
-                          <span className="detail-label">{label}</span>
+                      ].map(({ label, value }, i, arr) => (
+                        <div
+                          key={label}
+                          style={{
+                            display: "flex",
+                            alignItems: "baseline",
+                            justifyContent: "space-between",
+                            padding: "5px 0",
+                            borderBottom:
+                              i < arr.length - 1
+                                ? "1px solid rgba(255,255,255,0.04)"
+                                : "none",
+                          }}
+                        >
                           <span
-                            className={`detail-value ${value === "—" ? "empty" : ""}`}
+                            style={{
+                              fontSize: 11,
+                              color: "rgba(255,255,255,0.38)",
+                              flexShrink: 0,
+                              marginRight: 8,
+                            }}
+                          >
+                            {label}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 500,
+                              color:
+                                value !== "—"
+                                  ? "rgba(255,255,255,0.9)"
+                                  : "rgba(255,255,255,0.2)",
+                              textAlign: "right",
+                            }}
                           >
                             {value !== "—" ? value : "—"}
                           </span>
@@ -1509,24 +1051,26 @@ export default function MarketplacePage() {
                       ))}
                     </div>
 
-                    {/* Price Options (Using the fixed flex logic) */}
+                    {/* Price options */}
                     <div
                       className="price-row"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* Exclusive Card */}
+                      {/* Exclusive */}
                       <div
-                        className={`price-option exclusive ${!exclusiveAvailable && !isPartiallyClaimed ? "locked" : ""}`}
+                        className={`price-option exclusive${!exclusiveAvailable && !isPartiallyClaimed ? " opacity-40" : ""}`}
                       >
                         <div className="price-option-label">Exclusive</div>
                         <div className="price-option-amount">
                           {fmtDollars(exclusivePrice)}
                         </div>
-
                         {isPartiallyClaimed ? (
                           <>
-                            <div className="price-option-sub warn-text">
-                              Lock it
+                            <div
+                              className="price-option-sub"
+                              style={{ color: "#f59e0b" }}
+                            >
+                              Lock it — remove from marketplace
                             </div>
                             {!isInEarlyAccess && (
                               <button
@@ -1536,10 +1080,13 @@ export default function MarketplacePage() {
                                 onClick={() =>
                                   exclusiveBuyoutMutation.mutate(lead.id)
                                 }
+                                style={{
+                                  fontSize: 11,
+                                }}
                               >
                                 {exclusiveBuyoutMutation.isPending
                                   ? "…"
-                                  : "Buy exclusive"}
+                                  : "Buy exclusive access"}
                               </button>
                             )}
                           </>
@@ -1567,7 +1114,13 @@ export default function MarketplacePage() {
                                     : "Locked"}
                               </button>
                             ) : (
-                              <div className="early-access-note">
+                              <div
+                                style={{
+                                  fontSize: 10,
+                                  color: "rgba(255,255,255,0.35)",
+                                  marginTop: 6,
+                                }}
+                              >
                                 Pro subscribers first
                               </div>
                             )}
@@ -1575,15 +1128,24 @@ export default function MarketplacePage() {
                         )}
                       </div>
 
-                      {/* Non-Exclusive Card */}
+                      {/* Non-exclusive */}
                       <div
-                        className={`price-option non-exclusive ${!sharedAvailable ? "locked" : ""}`}
+                        className={`price-option non-exclusive${!sharedAvailable ? " opacity-40" : ""}`}
                       >
                         <div className="price-option-label">
                           Non Exclusive
-                          {/* {isPartiallyClaimed && (
-                            <span className="partial-badge">PARTIAL</span>
-                          )} */}
+                          {isPartiallyClaimed && (
+                            <span
+                              style={{
+                                marginLeft: 5,
+                                fontSize: 9,
+                                color: "#f59e0b",
+                                fontWeight: 700,
+                              }}
+                            >
+                              PARTIAL
+                            </span>
+                          )}
                         </div>
 
                         {isSubscribed ? (
@@ -1598,7 +1160,13 @@ export default function MarketplacePage() {
                                     (_, i) => (
                                       <span
                                         key={i}
-                                        className={`slot-pip ${i < sharedTaken ? (sharedTaken >= sharedCap - 1 ? "warn" : "taken") : "open"}`}
+                                        className={`slot-pip ${
+                                          i < sharedTaken
+                                            ? sharedTaken >= sharedCap - 1
+                                              ? "warn"
+                                              : "taken"
+                                            : "open"
+                                        }`}
                                       />
                                     ),
                                   )}
@@ -1613,7 +1181,6 @@ export default function MarketplacePage() {
                                 All slots filled
                               </div>
                             )}
-
                             {!isInEarlyAccess && sharedAvailable && (
                               <button
                                 type="button"
@@ -1630,7 +1197,13 @@ export default function MarketplacePage() {
                               </button>
                             )}
                             {isInEarlyAccess && (
-                              <div className="early-access-note">
+                              <div
+                                style={{
+                                  fontSize: 10,
+                                  color: "rgba(255,255,255,0.35)",
+                                  marginTop: 6,
+                                }}
+                              >
                                 Pro subscribers first
                               </div>
                             )}
@@ -1640,13 +1213,29 @@ export default function MarketplacePage() {
                             <div className="price-option-amount">
                               {fmtDollars(sharedPrice)}
                             </div>
-                            <div className="upsell-text">only for members</div>
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: "rgba(255,255,255,0.4)",
+                                marginBottom: 8,
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              Pro members get shared leads at{" "}
+                              {fmtDollars(sharedPrice)} each
+                            </div>
                             <Link
                               href="/subscriptions"
-                              className="price-option-btn non-exclusive block-btn"
+                              className="price-option-btn non-exclusive"
+                              style={{
+                                display: "block",
+                                textAlign: "center",
+                                textDecoration: "none",
+                                padding: "6px 0",
+                              }}
                               onClick={(e) => e.stopPropagation()}
                             >
-                              Subscribe →
+                              Subscribe {proDisplayPrice}/mo →
                             </Link>
                           </>
                         )}

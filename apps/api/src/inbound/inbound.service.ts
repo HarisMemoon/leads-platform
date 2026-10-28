@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -16,7 +15,6 @@ import { InboundLeadDto } from './dto/inbound-lead.dto';
 import { LeadPricingService } from '../lead-pricing/lead-pricing.service';
 import { DistributionService } from '../distribution/distribution.service';
 import { OutboundPingService } from '../outbound/outbound-ping.service';
-import { LeadDedupService } from '../leads/lead-dedup.service';
 
 @Injectable()
 export class InboundService {
@@ -32,7 +30,6 @@ export class InboundService {
     private readonly leadPricingService: LeadPricingService,
     private readonly distributionService: DistributionService,
     private readonly outboundPingService: OutboundPingService,
-    private readonly leadDedupService: LeadDedupService,
   ) {}
 
   async authenticateVendor(apiKey: string): Promise<VendorIntegration> {
@@ -52,27 +49,8 @@ export class InboundService {
     ipAddress: string,
     rawPayload: Record<string, unknown>,
   ): Promise<Lead> {
-    // Duplicate check — same shared rule as the ping/post/direct paths.
-    // Vendors get a hard reject (409) so a duplicate seller is never
-    // double-listed, double-distributed, or double-pinged to outbound buyers.
-    const duplicate = await this.leadDedupService.findDuplicate({
-      phone: dto.metadata?.phone,
-      email: dto.metadata?.email,
-      address: dto.metadata?.address,
-      zip: dto.metadata?.zip,
-    });
-    if (duplicate) {
-      throw new ConflictException({
-        error: 'duplicate_lead',
-        duplicate_lead_id: duplicate.id,
-        message:
-          'duplicate_lead: a lead with the same phone, email, or address already exists.',
-      });
-    }
-
     // Pricing always from admin-controlled lead_pricing_config
-    const { exclusive, shared } =
-      await this.leadPricingService.getPricesForLead(dto.lead_type);
+    const { exclusive, shared } = await this.leadPricingService.getPricesForLead(dto.lead_type);
 
     const lead = this.leadRepo.create({
       source: 'inbound',
@@ -107,20 +85,12 @@ export class InboundService {
     // Enqueue auto-distribution to buyers who match this lead's criteria
     void this.distributionService
       .enqueueLeadDistribution(saved.id)
-      .catch((e) =>
-        this.logger.warn(
-          `Distribution enqueue failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`,
-        ),
-      );
+      .catch((e) => this.logger.warn(`Distribution enqueue failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`));
 
     // Fire outbound buyer pings (e.g. Juiced) — highest bidder wins
     void this.outboundPingService
       .pingAll(saved)
-      .catch((e) =>
-        this.logger.warn(
-          `Outbound ping failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`,
-        ),
-      );
+      .catch((e) => this.logger.warn(`Outbound ping failed for lead ${saved.id}: ${e instanceof Error ? e.message : e}`));
 
     return saved;
   }
