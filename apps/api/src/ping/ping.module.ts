@@ -13,6 +13,7 @@ import { VendorWebhookHit } from '../entities/vendor-webhook-hit.entity';
 import { WalletAccount } from '../entities/wallet-account.entity';
 import { TermsAcceptance } from '../entities/terms-acceptance.entity';
 import { LeadsModule } from '../leads/leads.module';
+import { LeadDedupService } from '../leads/lead-dedup.service';
 import { OutboundModule } from '../outbound/outbound.module';
 import { LeadPricingModule } from '../lead-pricing/lead-pricing.module';
 import { DistributionModule } from '../distribution/distribution.module';
@@ -43,8 +44,17 @@ import { VendorPingController } from './vendor-ping.controller';
     LeadPricingModule,
     forwardRef(() => DistributionModule),
   ],
-  controllers: [VendorPingController, PricingRulesController, PingAdminController],
-  providers: [PingService, PingMatchingService, PingEligibilityService],
+  controllers: [
+    VendorPingController,
+    PricingRulesController,
+    PingAdminController,
+  ],
+  providers: [
+    PingService,
+    PingMatchingService,
+    PingEligibilityService,
+    LeadDedupService,
+  ],
   exports: [PingService, PingMatchingService, PingEligibilityService],
 })
 export class PingModule {}

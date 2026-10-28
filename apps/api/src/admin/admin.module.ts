@@ -26,6 +26,7 @@ import { AdminIntegrationsHealthService } from './admin-integrations-health.serv
 import { AdminPlansService } from './admin-plans.service';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { LeadsModule } from '../leads/leads.module';
+import { LeadDedupService } from '../leads/lead-dedup.service';
 import { OutboundModule } from '../outbound/outbound.module';
 import { DistributionModule } from '../distribution/distribution.module';
 
@@ -61,6 +62,7 @@ import { DistributionModule } from '../distribution/distribution.module';
     AuditLogService,
     AdminMetricsService,
     AdminIngestionService,
+    LeadDedupService,
     AdminGradingService,
     AdminIntegrationsHealthService,
     AdminPlansService,

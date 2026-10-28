@@ -29,20 +29,36 @@ export class InboundController {
   @Post('lead')
   @HttpCode(HttpStatus.CREATED)
   async receiveLead(
-    @Headers('x-vendor-key') apiKey: string | undefined,
-    @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false, transform: true }))
+    @Headers('x-vendor-api-key') apiKey: string | undefined,
+    @Headers('x-vendor-key') legacyApiKey: string | undefined,
+    @Body(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: false,
+        transform: true,
+      }),
+    )
     dto: InboundLeadDto,
     @Ip() ip: string,
   ) {
-    if (!apiKey) {
-      throw new UnauthorizedException('Missing X-Vendor-Key header');
+    // x-vendor-api-key is the standard vendor auth header on ALL vendor
+    // endpoints (inbound + ping/post/direct). The legacy x-vendor-key header
+    // is still accepted here so already-integrated vendors don't break.
+    const vendorApiKey = apiKey ?? legacyApiKey;
+    if (!vendorApiKey) {
+      throw new UnauthorizedException('Missing X-Vendor-Api-Key header');
     }
 
     const rawPayload = { ...dto } as Record<string, unknown>;
-    const vendor = await this.inboundService.authenticateVendor(apiKey);
+    const vendor = await this.inboundService.authenticateVendor(vendorApiKey);
 
     try {
-      const lead = await this.inboundService.createLead(vendor, dto, ip, rawPayload);
+      const lead = await this.inboundService.createLead(
+        vendor,
+        dto,
+        ip,
+        rawPayload,
+      );
       return {
         success: true,
         lead_id: lead.id,
@@ -57,21 +73,42 @@ export class InboundController {
     }
   }
 
+  /**
+   * Batch ingestion is a THIN WRAPPER over the single-lead endpoint:
+   * each item runs through the exact same createLead pipeline (validation,
+   * duplicate check, pricing, distribution, outbound ping) one at a time,
+   * in order. There is NO batch-level atomicity — a batch can partially
+   * succeed, and the per-item results array reports each lead's outcome
+   * (including per-item `duplicate_lead` rejections).
+   */
   @Post('leads')
   @HttpCode(HttpStatus.CREATED)
   async receiveLeadBatch(
-    @Headers('x-vendor-key') apiKey: string | undefined,
-    @Body(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false, transform: true }))
+    @Headers('x-vendor-api-key') apiKey: string | undefined,
+    @Headers('x-vendor-key') legacyApiKey: string | undefined,
+    @Body(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: false,
+        transform: true,
+      }),
+    )
     dto: BatchInboundLeadsDto,
     @Ip() ip: string,
   ) {
-    if (!apiKey) {
-      throw new UnauthorizedException('Missing X-Vendor-Key header');
+    const vendorApiKey = apiKey ?? legacyApiKey;
+    if (!vendorApiKey) {
+      throw new UnauthorizedException('Missing X-Vendor-Api-Key header');
     }
 
-    const vendor = await this.inboundService.authenticateVendor(apiKey);
+    const vendor = await this.inboundService.authenticateVendor(vendorApiKey);
 
-    const results: Array<{ index: number; success: boolean; lead_id?: string; error?: string }> = [];
+    const results: Array<{
+      index: number;
+      success: boolean;
+      lead_id?: string;
+      error?: string;
+    }> = [];
     let accepted = 0;
     let rejected = 0;
 
@@ -79,7 +116,12 @@ export class InboundController {
       const item = dto.leads[i];
       const rawPayload = { ...item } as Record<string, unknown>;
       try {
-        const lead = await this.inboundService.createLead(vendor, item, ip, rawPayload);
+        const lead = await this.inboundService.createLead(
+          vendor,
+          item,
+          ip,
+          rawPayload,
+        );
         results.push({ index: i, success: true, lead_id: lead.id });
         accepted++;
       } catch (err: unknown) {

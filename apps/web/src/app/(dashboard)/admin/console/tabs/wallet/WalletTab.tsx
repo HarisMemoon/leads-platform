@@ -160,7 +160,7 @@ export default function WalletTab() {
                 fontSize: 12,
                 fontWeight: 600,
                 color: "rgba(255,255,255,0.6)",
-                textTransform: "uppercase",
+                textTransform: "",
               }}
             >
               Customer Email
@@ -292,7 +292,7 @@ export default function WalletTab() {
                     fontSize: 12,
                     fontWeight: 600,
                     color: "rgba(255,255,255,0.6)",
-                    textTransform: "uppercase",
+                    textTransform: "",
                   }}
                 >
                   Amount ($)
@@ -329,7 +329,7 @@ export default function WalletTab() {
                     fontSize: 12,
                     fontWeight: 600,
                     color: "rgba(255,255,255,0.6)",
-                    textTransform: "uppercase",
+                    textTransform: "",
                   }}
                 >
                   Internal Note

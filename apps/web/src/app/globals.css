@@ -21,3 +21,144 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ── Custom Select Wrapper ── */
+.c-select-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+/* ── Trigger Button ── */
+.c-select-trigger {
+  width: 100%;
+  height: 40px;
+  padding: 0 13px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.03);
+  color: #fff;
+  font-family: "Inter", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  box-sizing: border-box;
+  outline: none;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.c-select-trigger.placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.c-select-trigger:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.c-select-trigger.focused {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: rgba(99, 102, 241, 0.45);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.c-select-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.c-select-arrow {
+  width: 14px;
+  height: 14px;
+  color: rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+  margin-left: 8px;
+  transition:
+    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.18s ease;
+}
+
+.c-select-arrow.rotate {
+  transform: rotate(180deg);
+  color: #818cf8;
+}
+
+/* ── Floating Popover Menu ── */
+.c-select-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #11131c;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 5px;
+  margin: 0;
+  list-style: none;
+  z-index: 100;
+  box-shadow:
+    0 16px 36px -4px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: dropdownIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Scrollbar styling */
+.c-select-menu::-webkit-scrollbar {
+  width: 5px;
+}
+.c-select-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+/* ── Menu Option Item ── */
+.c-select-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 11px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.c-select-option:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.c-select-option.selected {
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  font-weight: 600;
+}
+
+.c-select-check {
+  width: 13px;
+  height: 13px;
+  color: #818cf8;
+  flex-shrink: 0;
+}
+
+@keyframes dropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

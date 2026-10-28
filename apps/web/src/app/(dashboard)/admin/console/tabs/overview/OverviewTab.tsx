@@ -56,7 +56,7 @@ function BentoStat({ label, value, trend, trendLabel, gradient }: any) {
           fontSize: 13,
           fontWeight: 600,
           color: "rgba(255,255,255,0.5)",
-          textTransform: "uppercase",
+          textTransform: "",
           letterSpacing: "0.05em",
           marginBottom: 16,
         }}
@@ -311,15 +311,11 @@ export default function OverviewTab() {
                   {fmtCents(m.totalRevenueCents)}
                 </span>
               }
-              trend="+14.2%"
-              trendLabel="vs last period"
               gradient="#6366f1"
             />
             <BentoStat
               label="Buyer Deposits"
               value={fmtCents(m.totalWalletDepositsCents)}
-              trend="+8.1%"
-              trendLabel="vs last period"
               gradient="#38bdf8"
             />
             <BentoStat
@@ -328,7 +324,7 @@ export default function OverviewTab() {
               gradient="#10b981"
             />
 
-            <div
+            {/* <div
               style={{
                 background:
                   "linear-gradient(145deg, rgba(20,22,30,0.8), rgba(12,14,20,0.9))",
@@ -345,7 +341,7 @@ export default function OverviewTab() {
                   fontSize: 13,
                   fontWeight: 600,
                   color: "rgba(255,255,255,0.5)",
-                  textTransform: "uppercase",
+                  textTransform: "",
                   letterSpacing: "0.05em",
                 }}
               >
@@ -387,7 +383,7 @@ export default function OverviewTab() {
                   </span>
                 )}
               </div>
-            </div>
+            </div> */}
           </div>
 
           <div className="stats-4">
@@ -539,7 +535,7 @@ export default function OverviewTab() {
                             textAlign: "left",
                             fontSize: 11,
                             color: "rgba(255,255,255,0.4)",
-                            textTransform: "uppercase",
+                            textTransform: "",
                             fontWeight: 600,
                           }}
                         >
@@ -551,7 +547,7 @@ export default function OverviewTab() {
                             textAlign: "right",
                             fontSize: 11,
                             color: "rgba(255,255,255,0.4)",
-                            textTransform: "uppercase",
+                            textTransform: "",
                             fontWeight: 600,
                           }}
                         >
@@ -563,7 +559,7 @@ export default function OverviewTab() {
                             textAlign: "right",
                             fontSize: 11,
                             color: "rgba(255,255,255,0.4)",
-                            textTransform: "uppercase",
+                            textTransform: "",
                             fontWeight: 600,
                           }}
                         >

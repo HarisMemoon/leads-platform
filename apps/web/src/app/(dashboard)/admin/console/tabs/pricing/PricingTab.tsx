@@ -38,7 +38,7 @@ function PriceInput({
           fontSize: 12,
           fontWeight: 600,
           color: "rgba(255,255,255,0.6)",
-          textTransform: "uppercase",
+          textTransform: "",
           letterSpacing: "0.05em",
         }}
       >
@@ -257,7 +257,7 @@ export default function PricingTab() {
                   fontWeight: 700,
                   letterSpacing: "0.1em",
                   color: "#818cf8",
-                  textTransform: "uppercase",
+                  textTransform: "",
                   marginBottom: 8,
                 }}
               >
@@ -385,7 +385,7 @@ export default function PricingTab() {
                       fontSize: 12,
                       fontWeight: 700,
                       letterSpacing: "0.1em",
-                      textTransform: "uppercase",
+                      textTransform: "",
                       color: accent,
                       marginBottom: 6,
                     }}
@@ -416,7 +416,7 @@ export default function PricingTab() {
                     style={{
                       fontSize: 10,
                       color: "rgba(255,255,255,0.4)",
-                      textTransform: "uppercase",
+                      textTransform: "",
                       letterSpacing: "0.05em",
                       marginBottom: 4,
                     }}

@@ -227,7 +227,7 @@ export default function VendorPingsTab() {
                     fontSize: 12,
                     fontWeight: 600,
                     color: "rgba(255,255,255,0.6)",
-                    textTransform: "uppercase",
+                    textTransform: "",
                   }}
                 >
                   Vendor Name
@@ -253,7 +253,7 @@ export default function VendorPingsTab() {
                     fontSize: 12,
                     fontWeight: 600,
                     color: "rgba(255,255,255,0.6)",
-                    textTransform: "uppercase",
+                    textTransform: "",
                   }}
                 >
                   API Key
@@ -286,7 +286,7 @@ export default function VendorPingsTab() {
                     fontSize: 12,
                     fontWeight: 600,
                     color: "rgba(255,255,255,0.6)",
-                    textTransform: "uppercase",
+                    textTransform: "",
                   }}
                 >
                   Allowed Sources (Optional)
@@ -352,7 +352,7 @@ export default function VendorPingsTab() {
               style={{
                 background: "rgba(0,0,0,0.2)",
                 fontSize: 11,
-                textTransform: "uppercase",
+                textTransform: "",
                 color: "rgba(255,255,255,0.4)",
               }}
             >
@@ -491,7 +491,7 @@ export default function VendorPingsTab() {
                 style={{
                   background: "rgba(0,0,0,0.2)",
                   fontSize: 11,
-                  textTransform: "uppercase",
+                  textTransform: "",
                   color: "rgba(255,255,255,0.4)",
                 }}
               >
